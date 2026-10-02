@@ -7,10 +7,10 @@ import type { Dashboard, PullRequest, SourceHealth, Ticket } from "../shared/typ
 import { config } from "./config.ts";
 import { buildHandoff } from "./handoff.ts";
 import { focusItermSession, piCommand, runInNewItermTab } from "./iterm.ts";
-import { buildDashboard, otherTicketKeys } from "./model.ts";
+import { buildDashboard, buildHistory, otherTicketKeys } from "./model.ts";
 import { fetchMyPrs } from "./sources/github.ts";
 import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
-import { SessionIndex } from "./sources/sessions.ts";
+import { SessionIndex, transcriptTurns } from "./sources/sessions.ts";
 import { isAlive, readReportedStatuses } from "./sources/status.ts";
 import * as summaryDb from "./summaries/db.ts";
 import { reconcile, requestSummary } from "./summaries/runner.ts";
@@ -265,6 +265,15 @@ const server = createServer(async (req, res) => {
       const out = await focusItermSession(tab);
       const code = out.result === "ok" ? 200 : out.result === "missing" ? 404 : 500;
       res.writeHead(code, { "Content-Type": "application/json" }).end(JSON.stringify(out));
+    } else if (url.pathname === "/api/history") {
+      const [parsed, reported, pulls] = await Promise.all([sessions.scan(), readReportedStatuses(config.statusDir), prs.get(false)]);
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify(buildHistory(parsed, reported, pulls, Date.now())));
+    } else if (url.pathname === "/api/transcript") {
+      const sessionId = url.searchParams.get("session") ?? "";
+      const file = sessions.fileFor(sessionId) ?? ((await sessions.scan()) && sessions.fileFor(sessionId));
+      if (!file) return void res.writeHead(404, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "no such session" }));
+      const body = { sessionId, turns: transcriptTurns(await readFile(file, "utf8")) };
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify(body));
     } else if (url.pathname === "/api/events") {
       res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store", Connection: "keep-alive" });
       res.write("retry: 3000\n\n");

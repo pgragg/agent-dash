@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AttentionItem, AttentionKind, Dashboard, Note, PullRequest, Run, ThreadStatusChange, TicketGroup, TicketSummaryState } from "../../shared/types.ts";
+import type { AttentionItem, AttentionKind, Dashboard, HistoryRun, Note, PullRequest, Run, ThreadStatusChange, TicketGroup, TicketSummaryState, Turn } from "../../shared/types.ts";
+import { filterHistory, groupByDay } from "./history.ts";
 import { countPrs, groupOpenPrs } from "./prs.ts";
-import { age, api, dirLabel, dueLabel, elapsed, Markdown, plural, prName, resumeCommand, runTitle, shortDate, stamp, useDashboard, useNow } from "./lib.tsx";
+import { age, api, dirLabel, dueLabel, elapsed, Markdown, type NotifyState, plural, prName, resumeCommand, runTitle, shortDate, stamp, useDashboard, useNow, useWaitNotifications } from "./lib.tsx";
 
 /**
  * agent-dash answers one question: "what do I work on next?".
@@ -167,7 +168,7 @@ function CopyButton({ text, label, className = "btn ghost" }: { text: string; la
   );
 }
 
-function OpenTab({ run, onError, className = "btn ghost", label = "Open in iTerm", hotkey = false }: { run: Run; onError: (m: string | null) => void; className?: string; label?: string; hotkey?: boolean }) {
+function OpenTab({ run, onError, className = "btn ghost", label = "Open in iTerm", hotkey = false }: { run: HistoryRun; onError: (m: string | null) => void; className?: string; label?: string; hotkey?: boolean }) {
   if (!run.itermSessionId) return <CopyButton text={resumeCommand(run)} label="Copy resume" className={className} />;
   return (
     <button className={className} title="Bring this session's iTerm tab to the front" onClick={async () => onError(await api.focusTab(run.sessionId))}>
@@ -176,14 +177,14 @@ function OpenTab({ run, onError, className = "btn ghost", label = "Open in iTerm
   );
 }
 
-function statusText(run: Run, now: number): string {
+function statusText(run: HistoryRun, now: number): string {
   const guess = run.statusSource === "heuristic" ? " (guess)" : "";
   if (run.status === "awaiting_input") return `waiting ${age(run.statusSince, now)}${guess}`;
   if (run.status === "working") return `working ${age(run.statusSince, now)}${guess}`;
   return `finished ${age(run.lastActivityAt, now)} ago`;
 }
 
-function runTone(run: Run): string {
+function runTone(run: HistoryRun): string {
   return run.endedInError ? "bad" : run.status === "awaiting_input" ? "waiting" : run.status === "working" ? "working" : "muted";
 }
 
@@ -894,6 +895,173 @@ function PrsView({ data, now }: { data: Dashboard; now: number }) {
   );
 }
 
+// ---- History view -------------------------------------------------------------------
+
+/** Rows rendered at first. A year of chats is about a thousand rows, which is slow to render at once. */
+const HISTORY_PAGE = 150;
+/** Turns shown when a chat opens. The newest are kept, because that is where the chat stopped. */
+const TURNS_SHOWN = 40;
+
+/** Loads again whenever the key changes, which the page passes as the dashboard's last update. */
+function useLoad<T>(load: () => Promise<T>, key: unknown): { value: T | null; error: string | null } {
+  const [value, setValue] = useState<T | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let current = true;
+    load()
+      .then((v) => {
+        if (!current) return;
+        setValue(v);
+        setError(null);
+      })
+      .catch((err: Error) => current && setError(err.message));
+    return () => {
+      current = false;
+    };
+  }, [key]);
+  return { value, error };
+}
+
+function Chat({ sessionId, refreshKey }: { sessionId: string; refreshKey: unknown }) {
+  const { value, error } = useLoad(() => api.transcript(sessionId), `${sessionId} ${refreshKey}`);
+  const [all, setAll] = useState(false);
+  if (error && !value) return <p className="meta chat-note">{error}</p>;
+  if (!value) return <p className="meta chat-note">Loading the chat…</p>;
+  const turns: Turn[] = value.turns;
+  const shown = all ? turns : turns.slice(-TURNS_SHOWN);
+  return (
+    <div className="chat">
+      {turns.length > shown.length && (
+        <button className="btn ghost small" onClick={() => setAll(true)}>
+          Show {plural(turns.length - shown.length, "earlier message")}
+        </button>
+      )}
+      {shown.length === 0 && <p className="meta">This chat has no text yet.</p>}
+      {shown.map((t, i) => (
+        <div key={turns.length - shown.length + i} className={`turn ${t.role}`}>
+          <div className="turn-head">
+            <b>{t.role === "user" ? "You" : "Agent"}</b>
+            {t.at && <span className="meta">{stamp(t.at)}</span>}
+          </div>
+          <Markdown text={t.text} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function HistoryView({ data, now }: { data: Dashboard; now: number }) {
+  const { value: runs, error } = useLoad(api.history, data.generatedAt);
+  const [query, setQuery] = useState("");
+  const [limit, setLimit] = useState(HISTORY_PAGE);
+  const [open, setOpen] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const tickets = useMemo(() => new Map([...data.myTickets, ...data.otherTickets].map((g) => [g.ticket.key, g.ticket])), [data]);
+  const found = useMemo(() => filterHistory(runs ?? [], query), [runs, query]);
+  const groups = groupByDay(found.slice(0, limit), now);
+  const live = (runs ?? []).filter((r) => r.status !== "finished").length;
+
+  return (
+    <article className="workspace">
+      <header className="ws-head">
+        <h1>Chat history</h1>
+        <div className="ws-meta">
+          <span className="meta">{runs ? `${plural(runs.length, "chat")} · ${live} live · newest first` : "Loading…"}</span>
+        </div>
+        <input
+          className="search"
+          type="search"
+          placeholder="Search names, prompts, last replies, folders, tickets"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setLimit(HISTORY_PAGE);
+          }}
+        />
+      </header>
+      {error && <div className="toast">{error}</div>}
+      {actionError && (
+        <div className="toast">
+          {actionError}
+          <button className="btn ghost small" onClick={() => setActionError(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
+      {runs && found.length === 0 && <div className="zero big">{query ? "No chat matches." : "No chats yet."}</div>}
+      {groups.map((g) => (
+        <div className="stack" key={g.label}>
+          <h2 className="section-title">{g.label}</h2>
+          <div className="card flush">
+            <ol className="history">
+              {g.runs.map((r) => (
+                <li key={r.sessionId} className={open === r.sessionId ? "open" : ""}>
+                  <div className="h-row one-line">
+                    <Dot tone={runTone(r)} pulse={r.status === "working"} />
+                    <button className="h-title" onClick={() => setOpen(open === r.sessionId ? null : r.sessionId)} title={r.firstPrompt}>
+                      {runTitle(r)}
+                    </button>
+                    {r.tickets.map((k) =>
+                      tickets.has(k) ? (
+                        <a key={k} className="key-link" href={`#/t:${encodeURIComponent(k)}`} title={`${tickets.get(k)!.summary} · open on the board`}>
+                          {k}
+                        </a>
+                      ) : (
+                        <span key={k} className="key-link">
+                          {k}
+                        </span>
+                      ),
+                    )}
+                    <span className="meta shrink">
+                      {dirLabel(r.cwd)} · {plural(r.userMessageCount, "prompt")} · started {stamp(r.startedAt)}
+                    </span>
+                    <span className="grow" />
+                    <span className="meta">{statusText(r, now)}</span>
+                    <OpenTab run={r} onError={setActionError} className="btn ghost small" label="Open" />
+                  </div>
+                  {open !== r.sessionId && r.lastReply && <p className="h-last">{r.lastReply}</p>}
+                  {/* A live chat reloads with the dashboard, so new turns show up; a finished one never changes. */}
+                  {open === r.sessionId && <Chat sessionId={r.sessionId} refreshKey={r.status === "finished" ? r.lastActivityAt : data.generatedAt} />}
+                </li>
+              ))}
+            </ol>
+          </div>
+        </div>
+      ))}
+      {found.length > limit && (
+        <button className="btn" onClick={() => setLimit(limit + HISTORY_PAGE)}>
+          Show {Math.min(HISTORY_PAGE, found.length - limit)} more of {found.length - limit}
+        </button>
+      )}
+    </article>
+  );
+}
+
+const NOTIFY_HINT = "A notification comes when an agent that worked for 45 s or more starts to wait for you. It needs this page open in a tab.";
+
+function NotifyButton({ state, onEnable, onMute }: { state: NotifyState; onEnable: () => void; onMute: () => void }) {
+  if (state === "unsupported") return null;
+  if (state === "blocked") {
+    return (
+      <span className="meta tone-text-warn" title="Allow notifications for this site in Chrome (the icon to the left of the address), and for Google Chrome in macOS System Settings → Notifications.">
+        Notifications blocked
+      </span>
+    );
+  }
+  if (state === "on") {
+    return (
+      <button className="btn ghost" onClick={onMute} title={`${NOTIFY_HINT} Click to mute.`}>
+        Notifications on
+      </button>
+    );
+  }
+  return (
+    <button className={`btn ${state === "ask" ? "" : "ghost"}`} onClick={onEnable} title={NOTIFY_HINT}>
+      {state === "ask" ? "Turn on notifications" : "Notifications muted"}
+    </button>
+  );
+}
+
 // ---- help ---------------------------------------------------------------------------
 
 const KEYS: [string, string][] = [
@@ -932,16 +1100,17 @@ function Help({ onClose }: { onClose: () => void }) {
 
 // ---- page ---------------------------------------------------------------------------
 
-type View = "board" | "prs";
+type View = "board" | "prs" | "history";
 
-/** `#/prs` is the PRs view. Anything else is the board, and `#/t:KEY` or `#/r:ID` selects an entry on it. */
+/** `#/prs` and `#/history` are views. Anything else is the board, and `#/t:KEY` or `#/r:ID` selects an entry on it. */
 function parseHash(): { view: View; id: string | null } {
   const path = decodeURIComponent(location.hash.slice(2));
-  return path === "prs" ? { view: "prs", id: null } : { view: "board", id: path || null };
+  return path === "prs" || path === "history" ? { view: path, id: null } : { view: "board", id: path || null };
 }
 
 export function App() {
   const { data, error, loading, refresh } = useDashboard();
+  const notify = useWaitNotifications(data);
   const now = useNow(1_000);
   const snoozed = useSnoozed();
   const [view, setView] = useState<View>(() => parseHash().view);
@@ -970,7 +1139,7 @@ export function App() {
     const onHash = () => {
       const { view, id } = parseHash();
       setView(view);
-      // The PRs view keeps the board's selection, so going back lands on the same entry.
+      // The other views keep the board's selection, so going back lands on the same entry.
       if (view === "board") setSelectedId(id);
     };
     window.addEventListener("hashchange", onHash);
@@ -1051,6 +1220,9 @@ export function App() {
             <a href="#/prs" className={view === "prs" ? "active" : ""} aria-current={view === "prs" ? "page" : undefined}>
               PRs {openPrs > 0 && <span className="count">{openPrs}</span>}
             </a>
+            <a href="#/history" className={view === "history" ? "active" : ""} aria-current={view === "history" ? "page" : undefined}>
+              History
+            </a>
           </nav>
         </div>
         <div className="headline">
@@ -1075,6 +1247,7 @@ export function App() {
           <Dot tone={down.length ? "bad" : "good"} />
         </span>
         <span className="meta">updated {age(data.generatedAt, now)} ago</span>
+        <NotifyButton state={notify.state} onEnable={notify.enable} onMute={notify.mute} />
         <button className="btn ghost" onClick={refresh} disabled={loading}>
           {loading ? "Refreshing…" : "Refresh"}
         </button>
@@ -1086,6 +1259,10 @@ export function App() {
       {view === "prs" ? (
         <main className="main">
           <PrsView data={data} now={now} />
+        </main>
+      ) : view === "history" ? (
+        <main className="main">
+          <HistoryView data={data} now={now} />
         </main>
       ) : (
         <div className="columns">

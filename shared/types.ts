@@ -26,6 +26,8 @@ export interface Run {
   askedQuestion: boolean;
   /** The latest assistant message ended in an API error. */
   endedInError: boolean;
+  /** You pressed Esc on the latest reply. */
+  stoppedByUser: boolean;
   /** Ticket keys, strongest link first. */
   tickets: string[];
   /** PRs that this run opened with `gh pr create`. */
@@ -37,6 +39,21 @@ export interface Run {
   itermSessionId: string | null;
   /** The live session runs a status extension with a reply inbox, so the dash can send it a message. */
   canReply: boolean;
+}
+
+/** A run in the History view. The whole last message stays out, so the list of every chat stays small. */
+export type HistoryRun = Omit<Run, "lastMessage">;
+
+/** One prompt or reply of a chat. Tool calls and their output are left out. */
+export interface Turn {
+  role: "user" | "assistant";
+  text: string;
+  at: string | null;
+}
+
+export interface Transcript {
+  sessionId: string;
+  turns: Turn[];
 }
 
 export type CheckState = "success" | "failure" | "pending" | "none";

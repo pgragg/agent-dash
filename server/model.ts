@@ -1,4 +1,4 @@
-import type { AttentionItem, Dashboard, PullRequest, Run, RunStatus, ThreadStatusChange, Ticket, TicketGroup } from "../shared/types.ts";
+import type { AttentionItem, Dashboard, HistoryRun, PullRequest, Run, RunStatus, ThreadStatusChange, Ticket, TicketGroup } from "../shared/types.ts";
 import { rankAttention } from "./attention.ts";
 import { heuristicStatus, type ParsedSession } from "./sources/sessions.ts";
 import { resolveReported, type ReportedStatus } from "./sources/status.ts";
@@ -43,6 +43,7 @@ export function toRuns(sessions: ParsedSession[], reported: Map<string, Reported
         statusSince: since,
         askedQuestion: s.askedQuestion,
         endedInError: !s.midRun && s.lastStopReason === "error",
+        stoppedByUser: !s.midRun && s.lastStopReason === "aborted",
         tickets: [...s.tickets],
         createdPrs: s.createdPrs,
         mentionedPrs: s.mentionedPrs,
@@ -68,6 +69,13 @@ export function crossLink(runs: Run[], prs: PullRequest[]): void {
       if (pr.tickets.length === 0 && run.tickets[0]) pr.tickets.push(run.tickets[0]);
     }
   }
+}
+
+/** Every chat, newest first, for the History view. Unlike the board, it has no time window. */
+export function buildHistory(sessions: ParsedSession[], reported: Map<string, ReportedStatus>, prs: PullRequest[], now: number, isAlive?: (pid: number) => boolean): HistoryRun[] {
+  const runs = toRuns(sessions, reported, now, isAlive);
+  crossLink(runs, prs.map((p) => ({ ...p, tickets: [...p.tickets] })));
+  return runs.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt)).map(({ lastMessage: _cut, ...rest }) => rest);
 }
 
 export function isRecent(iso: string, now: number, days: number): boolean {

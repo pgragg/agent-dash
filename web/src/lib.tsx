@@ -1,5 +1,6 @@
 import { Fragment, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import type { Dashboard, Run } from "../../shared/types.ts";
+import type { Dashboard, HistoryRun, Transcript } from "../../shared/types.ts";
+import { boardHash, newlyWaiting, runsOf, type Seen, snapshot } from "./notify.ts";
 
 // ---- time ---------------------------------------------------------------------------
 
@@ -61,11 +62,11 @@ export function dirLabel(cwd: string): string {
   return cwd.split("/").filter(Boolean).pop() ?? cwd;
 }
 
-export function runTitle(run: Run): string {
+export function runTitle(run: HistoryRun): string {
   return run.name ?? run.firstPrompt;
 }
 
-export function resumeCommand(run: Run): string {
+export function resumeCommand(run: HistoryRun): string {
   return `cd '${run.cwd.replace(/'/g, "'\\''")}' && pi --session ${run.sessionId}`;
 }
 
@@ -111,6 +112,60 @@ export function useDashboard() {
   return { data, error, loading, refresh: () => load(true) };
 }
 
+// ---- notifications ------------------------------------------------------------------
+
+const MUTE_KEY = "agent-dash:notifications-muted";
+
+export type NotifyState = "unsupported" | "ask" | "on" | "muted" | "blocked";
+
+/**
+ * Browser notifications for runs that start to wait for you. They replace the pi extension
+ * that asked macOS for a notification, so they fire only while this page is open in a tab.
+ */
+export function useWaitNotifications(data: Dashboard | null) {
+  const supported = typeof Notification !== "undefined";
+  const [permission, setPermission] = useState(supported ? Notification.permission : "denied");
+  const [muted, setMuted] = useState(() => localStorage.getItem(MUTE_KEY) === "1");
+  const seen = useRef<Map<string, Seen> | null>(null);
+
+  useEffect(() => {
+    if (!data) return;
+    const runs = runsOf(data);
+    const fresh = newlyWaiting(seen.current, runs);
+    seen.current = snapshot(runs);
+    if (!supported || muted || Notification.permission !== "granted") return;
+    for (const r of fresh) {
+      const title = runTitle(r);
+      // The tag makes a second open dash tab replace this notification instead of adding one.
+      const n = new Notification(`pi: ${title.length > 80 ? `${title.slice(0, 79)}…` : title}`, { body: r.lastReply || "Waiting for you", tag: r.sessionId });
+      n.onclick = () => {
+        window.focus();
+        location.hash = boardHash(r);
+        n.close();
+      };
+    }
+  }, [data, muted, supported]);
+
+  const state: NotifyState = !supported ? "unsupported" : permission === "denied" ? "blocked" : permission === "default" ? "ask" : muted ? "muted" : "on";
+  const setMute = (m: boolean) => {
+    setMuted(m);
+    localStorage.setItem(MUTE_KEY, m ? "1" : "0");
+  };
+  return {
+    state,
+    /** Must run from a click: browsers ask for permission only after a user gesture. */
+    enable: async () => {
+      if (!supported) return;
+      const p = await Notification.requestPermission();
+      setPermission(p);
+      if (p !== "granted") return;
+      setMute(false);
+      new Notification("agent-dash notifications are on", { body: "You get one when an agent starts to wait for you.", tag: "agent-dash-test" });
+    },
+    mute: () => setMute(true),
+  };
+}
+
 /** The custom header makes the browser send a CORS preflight, which the server never answers. */
 async function post(path: string, body?: unknown, method = "POST"): Promise<string | null> {
   const res = await fetch(path, { method, headers: { "X-Agent-Dash": "1", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -134,6 +189,16 @@ export const api = {
   agentContext: async (ticket: string): Promise<string> => {
     const res = await fetch(`/api/agents/context?ticket=${encodeURIComponent(ticket)}`, { headers: { "X-Agent-Dash": "1" } });
     return res.ok ? res.text() : `Could not build the context (${res.status}).`;
+  },
+  history: async (): Promise<HistoryRun[]> => {
+    const res = await fetch("/api/history");
+    if (!res.ok) throw new Error(`could not load the history (${res.status})`);
+    return res.json();
+  },
+  transcript: async (sessionId: string): Promise<Transcript> => {
+    const res = await fetch(`/api/transcript?session=${encodeURIComponent(sessionId)}`);
+    if (!res.ok) throw new Error(`could not load the chat (${res.status})`);
+    return res.json();
   },
   setThread: (ticket: string, sessionId: string, status: "resolved" | "relevant", reason?: string) =>
     post(`/api/threads?ticket=${encodeURIComponent(ticket)}&session=${encodeURIComponent(sessionId)}`, { status, reason }),

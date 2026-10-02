@@ -1,6 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { RunStatus } from "../../shared/types.ts";
+import type { RunStatus, Turn } from "../../shared/types.ts";
 import { stripHandoff } from "../handoff.ts";
 
 /** Everything the log says about one pi session. Status is decided later, in status.ts. */
@@ -183,12 +183,12 @@ export function parseSession(raw: string, sessionFile: string, mtime: Date, tick
   };
 }
 
-/**
- * The conversation without tool traffic: your prompts and the agent's replies, newest kept
- * when it is too long. A summary agent reads this instead of a multi-megabyte log.
- */
-export function digestSession(raw: string, maxChars: number): string {
-  const turns: string[] = [];
+/** Longest turn in a transcript. A pasted log or a long skill file would bury the chat. */
+const TURN_MAX = 20_000;
+
+/** Your prompts and the agent's replies, in order, without tool traffic. */
+export function transcriptTurns(raw: string, maxTurnChars = TURN_MAX): Turn[] {
+  const turns: Turn[] = [];
   for (const line of raw.split("\n")) {
     if (!line) continue;
     let entry: any;
@@ -201,8 +201,18 @@ export function digestSession(raw: string, maxChars: number): string {
     const role = entry.message?.role;
     if (role !== "user" && role !== "assistant") continue;
     const text = stripHandoff(textOf(entry.message.content)).trim();
-    if (text) turns.push(`${role === "user" ? "USER" : "AGENT"} (${entry.timestamp ?? "?"}): ${text}`);
+    if (!text) continue;
+    turns.push({ role, text: text.length > maxTurnChars ? `${text.slice(0, maxTurnChars)}\n\n[…cut…]` : text, at: entry.timestamp ?? null });
   }
+  return turns;
+}
+
+/**
+ * The conversation without tool traffic: your prompts and the agent's replies, newest kept
+ * when it is too long. A summary agent reads this instead of a multi-megabyte log.
+ */
+export function digestSession(raw: string, maxChars: number): string {
+  const turns = transcriptTurns(raw, Infinity).map((t) => `${t.role === "user" ? "USER" : "AGENT"} (${t.at ?? "?"}): ${t.text}`);
   let out = turns.join("\n\n");
   if (out.length > maxChars) out = `[…earlier turns cut…]\n${out.slice(out.length - maxChars)}`;
   return out;
@@ -254,5 +264,11 @@ export class SessionIndex {
       }),
     );
     return [...this.cache.values()].flatMap((v) => (v.parsed ? [v.parsed] : []));
+  }
+
+  /** The log file of a session seen by the last scan. The page names a session by id, never by path. */
+  fileFor(sessionId: string): string | null {
+    for (const [file, v] of this.cache) if (v.parsed?.sessionId === sessionId) return file;
+    return null;
   }
 }

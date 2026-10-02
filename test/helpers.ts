@@ -40,6 +40,7 @@ export function run(over: Partial<Run> = {}): Run {
     statusSince: minutesAgo(5),
     askedQuestion: false,
     endedInError: false,
+    stoppedByUser: false,
     tickets: [],
     createdPrs: [],
     mentionedPrs: [],
