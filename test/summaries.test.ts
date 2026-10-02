@@ -7,7 +7,7 @@ import { test } from "node:test";
 import * as db from "../server/summaries/db.ts";
 import { buildContext, buildPrompt, finish } from "../server/summaries/runner.ts";
 import { digestSession } from "../server/sources/sessions.ts";
-import { header, jsonl, reply, ticket, toolCall, toolResult, user } from "./helpers.ts";
+import { header, jsonl, reply, run, ticket, toolCall, toolResult, user } from "./helpers.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "agent-dash-test-"));
 const dbPath = join(dir, "test.db");
@@ -102,4 +102,25 @@ test("a summary run gets the notes, with their times, ahead of the other sources
   assert.match(ctx, /- \[2026-10-02T10:00:00.000Z\] Arie said: wait for the cutover.\n  Then merge./);
   assert.ok(ctx.indexOf("private notes") < ctx.indexOf("## PRs"));
   assert.match(buildPrompt("FSDK-9", 1, "/w"), /private notes/);
+});
+
+test("thread status is append-only; the newest change wins, and only 'resolved' keeps a reason", () => {
+  db.setThreadStatus("FSDK-10", "sess-0001", "resolved", "duplicate of another run", new Date("2026-10-02T10:00:00Z"));
+  db.setThreadStatus("FSDK-10", "sess-0001", "relevant", "ignored", new Date("2026-10-02T10:05:00Z"));
+  db.setThreadStatus("FSDK-10", "sess-0002", "resolved", null);
+  const now = db.currentThreadStatuses().filter((t) => t.ticket === "FSDK-10");
+  assert.deepEqual(now.map((t) => [t.sessionId, t.status, t.reason]).sort(), [["sess-0001", "relevant", null], ["sess-0002", "resolved", null]]);
+  assert.deepEqual(db.threadHistory("FSDK-10", "sess-0001").map((t) => [t.status, t.reason]), [["resolved", "duplicate of another run"], ["relevant", null]]);
+});
+
+test("a summary run sees resolved threads by name and reason only, not their history", async () => {
+  const runFile = join(dir, "resolved.jsonl");
+  writeFileSync(runFile, jsonl(header(), user("OLD PLAN that no longer applies"), reply("ok")));
+  const r = run({ sessionId: "gone", name: "Old approach", sessionFile: runFile, tickets: ["FSDK-11"] });
+  const threads = { gone: { id: 1, ticket: "FSDK-11", sessionId: "gone", status: "resolved" as const, reason: "approach dropped", createdAt: "2026-10-02T10:00:00.000Z" } };
+  const ctx = await buildContext({ ticket: ticket({ key: "FSDK-11" }), runs: [r], prs: [], threads });
+  assert.match(ctx, /marked resolved for FSDK-11/);
+  assert.match(ctx, /- Old approach \(resolved 2026-10-02T10:00:00.000Z: approach dropped\)/);
+  assert.doesNotMatch(ctx, /OLD PLAN/);
+  assert.match(ctx, /pi sessions about FSDK-11 \(0,/);
 });

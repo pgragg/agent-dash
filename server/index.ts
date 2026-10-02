@@ -107,6 +107,7 @@ async function dashboard(force: boolean) {
     extensionInstalled: existsSync(EXTENSION_PATH),
     summaries,
     notes: summaryDb.notesByTicket(),
+    threads: summaryDb.currentThreadStatuses(),
     jiraServer: config.jira.server,
   });
 }
@@ -195,6 +196,18 @@ const server = createServer(async (req, res) => {
       const note = summaryDb.addNote(ticket, body.trim());
       broadcast();
       json(201, note);
+    } else if (url.pathname === "/api/threads" && req.method === "POST") {
+      if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
+      const json = (code: number, body: unknown) => void res.writeHead(code, { "Content-Type": "application/json" }).end(JSON.stringify(body));
+      const ticket = url.searchParams.get("ticket") ?? "";
+      const session = url.searchParams.get("session") ?? "";
+      if (!new RegExp(`^${config.ticketPattern.source}$`).test(ticket)) return json(400, { error: `not a ticket key: ${ticket}` });
+      if (!/^[\w-]{8,64}$/.test(session)) return json(400, { error: "not a session id" });
+      const { status, reason } = JSON.parse((await readBody(req, 16_000)) || "{}") as { status?: string; reason?: string };
+      if (status !== "resolved" && status !== "relevant") return json(400, { error: "status must be resolved or relevant" });
+      const change = summaryDb.setThreadStatus(ticket, session, status, reason?.trim() || null);
+      broadcast();
+      json(201, change);
     } else if (url.pathname === "/api/reply" && req.method === "POST") {
       if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
       const sessionId = url.searchParams.get("session") ?? "";

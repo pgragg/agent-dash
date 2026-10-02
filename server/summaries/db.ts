@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { Note, TicketSummary } from "../../shared/types.ts";
+import type { Note, ThreadStatus, ThreadStatusChange, TicketSummary } from "../../shared/types.ts";
 
 export const DB_PATH = process.env.AGENT_DASH_DB ?? join(homedir(), ".agent-dash/agent-dash.db");
 
@@ -27,6 +27,17 @@ CREATE TABLE IF NOT EXISTS notes (
   body       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS notes_by_ticket ON notes (ticket, id);
+
+-- Append-only: each row is one change; the newest row per (ticket, session_id) is the current state.
+CREATE TABLE IF NOT EXISTS PiConversationStatusChange (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket     TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  status     TEXT NOT NULL CHECK (status IN ('relevant', 'resolved')),
+  reason     TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS pi_conversation_status_by_thread ON PiConversationStatusChange (ticket, session_id, id);
 `;
 
 interface Row {
@@ -137,6 +148,31 @@ export function notesByTicket(): Record<string, Note[]> {
     (out[n.ticket] ??= []).push({ ...n });
   }
   return out;
+}
+
+// ---- thread status: is a pi thread still relevant to a ticket? -----------------------
+
+const THREAD_COLUMNS = "id, ticket, session_id AS sessionId, status, reason, created_at AS createdAt";
+
+export function setThreadStatus(ticket: string, sessionId: string, status: ThreadStatus, reason: string | null, now = new Date()): ThreadStatusChange {
+  return {
+    ...(open()
+      .prepare(`INSERT INTO PiConversationStatusChange (ticket, session_id, status, reason, created_at) VALUES (?, ?, ?, ?, ?) RETURNING ${THREAD_COLUMNS}`)
+      .get(ticket, sessionId, status, status === "resolved" ? reason : null, now.toISOString()) as unknown as ThreadStatusChange),
+  };
+}
+
+/** The current state of every (ticket, thread) pair that has ever changed. */
+export function currentThreadStatuses(): ThreadStatusChange[] {
+  return (
+    open()
+      .prepare(`SELECT ${THREAD_COLUMNS} FROM PiConversationStatusChange WHERE id IN (SELECT max(id) FROM PiConversationStatusChange GROUP BY ticket, session_id)`)
+      .all() as unknown as ThreadStatusChange[]
+  ).map((r) => ({ ...r }));
+}
+
+export function threadHistory(ticket: string, sessionId: string): ThreadStatusChange[] {
+  return (open().prepare(`SELECT ${THREAD_COLUMNS} FROM PiConversationStatusChange WHERE ticket = ? AND session_id = ? ORDER BY id`).all(ticket, sessionId) as unknown as ThreadStatusChange[]).map((r) => ({ ...r }));
 }
 
 export function inProgress(): SummaryRecord[] {

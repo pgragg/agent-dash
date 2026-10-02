@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { buildDashboard } from "../server/model.ts";
 import type { ParsedSession } from "../server/sources/sessions.ts";
 import type { ReportedStatus } from "../server/sources/status.ts";
+import type { ThreadStatusChange } from "../shared/types.ts";
 import { NOW, minutesAgo, pr, ticket } from "./helpers.ts";
 
 function session(over: Partial<ParsedSession>): ParsedSession {
@@ -29,8 +30,9 @@ function session(over: Partial<ParsedSession>): ParsedSession {
 }
 
 const ok = { ok: true };
-const build = (sessions: ParsedSession[], prs = [pr()], myTickets = [ticket()]) =>
+const build = (sessions: ParsedSession[], prs = [pr()], myTickets = [ticket()], threads: ThreadStatusChange[] = []) =>
   buildDashboard({
+    threads,
     sessions,
     reported: new Map(),
     myTickets,
@@ -118,4 +120,27 @@ test("every focus row gets a run: a PR row the run that opened it, a ticket row 
   assert.equal(rows.ci_failing, "opener");
   assert.equal(rows.overdue, "live");
   assert.equal(d.attention.find((a) => a.kind === "overdue")?.ticketUrl, "https://jira/browse/FSDK-1");
+});
+
+test("a thread resolved for a ticket stays under it, but no longer puts the ticket in the queue", () => {
+  // Waiting for input: the log ends on a finished reply 5 minutes ago.
+  const waiting = session({ sessionId: "w", tickets: ["FSDK-1"], lastActivityAt: minutesAgo(5), lastStopReason: "stop", midRun: false });
+  const before = build([waiting], []);
+  assert.ok(before.attention.some((a) => a.kind === "awaiting_input" && a.ticketKey === "FSDK-1"));
+
+  const resolved: ThreadStatusChange = { id: 1, ticket: "FSDK-1", sessionId: "w", status: "resolved", reason: "answered in Slack", createdAt: minutesAgo(1) };
+  const after = build([waiting], [], [ticket()], [resolved]);
+  const item = after.attention.find((a) => a.kind === "awaiting_input");
+  assert.equal(item?.ticketKey, null, "the waiting run shows on its own, not on FSDK-1");
+  assert.deepEqual(after.myTickets[0].runs.map((r) => r.sessionId), ["w"]);
+  assert.equal(after.myTickets[0].threads.w.reason, "answered in Slack");
+
+  const relevantAgain = build([waiting], [], [ticket()], [{ ...resolved, id: 2, status: "relevant", reason: null }]);
+  assert.ok(relevantAgain.attention.some((a) => a.kind === "awaiting_input" && a.ticketKey === "FSDK-1"));
+});
+
+test("a thread resolved for one of its tickets still counts for the others", () => {
+  const waiting = session({ sessionId: "w", tickets: ["FSDK-1", "FSDK-2"], lastActivityAt: minutesAgo(5), lastStopReason: "stop", midRun: false });
+  const d = build([waiting], [], [ticket(), ticket({ key: "FSDK-2" })], [{ id: 1, ticket: "FSDK-1", sessionId: "w", status: "resolved", reason: null, createdAt: minutesAgo(1) }]);
+  assert.equal(d.attention.find((a) => a.kind === "awaiting_input")?.ticketKey, "FSDK-2");
 });

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AttentionItem, AttentionKind, Dashboard, Note, PullRequest, Run, TicketGroup, TicketSummaryState } from "../../shared/types.ts";
+import type { AttentionItem, AttentionKind, Dashboard, Note, PullRequest, Run, ThreadStatusChange, TicketGroup, TicketSummaryState } from "../../shared/types.ts";
 import { age, api, dirLabel, dueLabel, elapsed, Markdown, plural, prName, resumeCommand, runTitle, shortDate, stamp, useDashboard, useNow } from "./lib.tsx";
 
 /**
@@ -75,8 +75,18 @@ function subjectTitle(s: Subject): string {
 }
 
 /** Live agents first (waiting before working), then the newest. */
+/** You marked this thread as no longer relevant to the subject's ticket. */
+function isResolved(s: Subject, run: Run): boolean {
+  return s.ticket?.threads[run.sessionId]?.status === "resolved";
+}
+
+/** The ticket's threads that still matter: everything you have not marked resolved. */
+function relevantRuns(s: Subject): Run[] {
+  return s.ticket ? s.ticket.runs.filter((r) => !isResolved(s, r)) : s.run ? [s.run] : [];
+}
+
 function liveRuns(s: Subject): Run[] {
-  const runs = s.ticket ? s.ticket.runs : s.run ? [s.run] : [];
+  const runs = relevantRuns(s);
   const rank = (r: Run) => (r.status === "awaiting_input" ? 0 : r.status === "working" ? 1 : 2);
   return runs.filter((r) => r.status !== "finished").sort((a, b) => rank(a) - rank(b) || b.lastActivityAt.localeCompare(a.lastActivityAt));
 }
@@ -223,7 +233,7 @@ function NextSteps({ s, state, notes, now, onError }: { s: Subject; state: Ticke
   const running = latest?.status === "in_progress";
   const stuck = running && now - Date.parse(latest!.requestedAt) > STALE_MS;
   // Activity after the summary was written makes it out of date.
-  const lastActivity = [...(s.ticket?.runs.map((r) => r.lastActivityAt) ?? []), ...(s.ticket?.prs.map((p) => p.updatedAt) ?? []), ...notes.map((n) => n.createdAt)].sort().at(-1);
+  const lastActivity = [...relevantRuns(s).map((r) => r.lastActivityAt), ...(s.ticket?.prs.map((p) => p.updatedAt) ?? []), ...notes.map((n) => n.createdAt)].sort().at(-1);
   const outdated = shown?.generatedAt && lastActivity && Date.parse(lastActivity) - Date.parse(shown.generatedAt) > 60_000;
 
   return (
@@ -404,7 +414,49 @@ function Composer({ run, onError, focusSignal }: { run: Run; onError: (m: string
   );
 }
 
-function AgentCard({ run, now, onError, focusSignal, primary }: { run: Run; now: number; onError: (m: string | null) => void; focusSignal: number; primary: boolean }) {
+/** "Resolve" with an optional reason: the thread stops counting for this ticket. */
+function ResolveButton({ ticket, run, onError, className = "btn ghost" }: { ticket: string; run: Run; onError: (m: string | null) => void; className?: string }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const submit = async () => {
+    setSaving(true);
+    onError(await api.setThread(ticket, run.sessionId, "resolved", reason));
+    setSaving(false);
+    setOpen(false);
+    setReason("");
+  };
+  if (!open) {
+    return (
+      <button className={className} onClick={() => setOpen(true)} title={`This thread no longer matters to ${ticket}`}>
+        Resolve
+      </button>
+    );
+  }
+  return (
+    <span className="resolve-form">
+      <input
+        autoFocus
+        value={reason}
+        maxLength={500}
+        placeholder="Why? (optional)"
+        onChange={(e) => setReason(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") submit();
+          if (e.key === "Escape") setOpen(false);
+        }}
+      />
+      <button className="btn small primary" onClick={submit} disabled={saving}>
+        Resolve
+      </button>
+      <button className="btn ghost small" onClick={() => setOpen(false)}>
+        Cancel
+      </button>
+    </span>
+  );
+}
+
+function AgentCard({ run, now, onError, focusSignal, primary, ticket }: { run: Run; now: number; onError: (m: string | null) => void; focusSignal: number; primary: boolean; ticket?: string }) {
   const [expanded, setExpanded] = useState(false);
   const long = run.lastMessage.length > 900;
   return (
@@ -418,6 +470,7 @@ function AgentCard({ run, now, onError, focusSignal, primary }: { run: Run; now:
           </span>
         </div>
         <span className="grow" />
+        {ticket && <ResolveButton ticket={ticket} run={run} onError={onError} />}
         <OpenTab run={run} onError={onError} hotkey={primary} />
       </header>
       {run.lastMessage && (
@@ -451,9 +504,12 @@ function PrRow({ pr, now }: { pr: PullRequest; now: number }) {
   );
 }
 
-function History({ runs, now, onError }: { runs: Run[]; now: number; onError: (m: string | null) => void }) {
+function History({ runs: allRuns, now, onError, ticket, threads = {} }: { runs: Run[]; now: number; onError: (m: string | null) => void; ticket?: string; threads?: Record<string, ThreadStatusChange> }) {
   const [open, setOpen] = useState<string | null>(null);
   const [all, setAll] = useState(false);
+  const [showResolved, setShowResolved] = useState(false);
+  const runs = allRuns.filter((r) => threads[r.sessionId]?.status !== "resolved");
+  const resolved = allRuns.filter((r) => threads[r.sessionId]?.status === "resolved");
   const shown = all ? runs : runs.slice(-6);
   return (
     <ol className="history">
@@ -477,6 +533,7 @@ function History({ runs, now, onError }: { runs: Run[]; now: number; onError: (m
             </span>
             <span className="grow" />
             <span className="meta">{statusText(r, now)}</span>
+            {ticket && <ResolveButton ticket={ticket} run={r} onError={onError} className="btn ghost small" />}
             <OpenTab run={r} onError={onError} className="btn ghost small" label="Open" />
           </div>
           {open === r.sessionId && r.lastMessage && (
@@ -486,6 +543,37 @@ function History({ runs, now, onError }: { runs: Run[]; now: number; onError: (m
           )}
         </li>
       ))}
+      {ticket && resolved.length > 0 && (
+        <li className="resolved-group">
+          <button className="btn ghost small" onClick={() => setShowResolved(!showResolved)}>
+            <span className={`chev ${showResolved ? "open" : ""}`}>›</span> Resolved · {resolved.length}
+          </button>
+        </li>
+      )}
+      {ticket &&
+        showResolved &&
+        resolved.map((r) => {
+          const t = threads[r.sessionId];
+          return (
+            <li key={r.sessionId} className="resolved">
+              <div className="h-row">
+                <span className="resolved-mark" aria-hidden>
+                  ✓
+                </span>
+                <span className="h-title" title={r.firstPrompt}>
+                  {runTitle(r)}
+                </span>
+                <span className="meta" title={t.createdAt}>
+                  resolved {age(t.createdAt, now)} ago{t.reason ? ` · ${t.reason}` : ""}
+                </span>
+                <span className="grow" />
+                <button className="btn ghost small" onClick={async () => onError(await api.setThread(ticket, r.sessionId, "relevant"))} title={`Count this thread for ${ticket} again`}>
+                  Mark relevant
+                </button>
+              </div>
+            </li>
+          );
+        })}
     </ol>
   );
 }
@@ -508,7 +596,8 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
   const live = liveRuns(s);
   const primary = primaryRun(s);
   // A ticket with no live agent still shows its latest run, so you can read where it stopped.
-  const featured = live.length ? live : primary ? [primary] : s.ticket?.runs.length ? [s.ticket.runs.at(-1)!] : [];
+  const relevant = relevantRuns(s);
+  const featured = live.length ? live : primary && !isResolved(s, primary) ? [primary] : relevant.length ? [relevant.at(-1)!] : [];
   const prs = s.ticket?.prs ?? [];
   const runs = s.ticket?.runs ?? (s.run ? [s.run] : []);
   const top = s.items[0];
@@ -583,7 +672,7 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
         <div className="stack">
           <h2 className="section-title">{live.length ? (live.length === 1 ? "Agent" : `Agents · ${live.length}`) : "Last run"}</h2>
           {featured.map((r) => (
-            <AgentCard key={r.sessionId} run={r} now={now} onError={setError} focusSignal={focusSignal} primary={r.sessionId === primary?.sessionId} />
+            <AgentCard key={r.sessionId} run={r} now={now} onError={setError} focusSignal={focusSignal} primary={r.sessionId === primary?.sessionId} ticket={s.ticket?.ticket.key} />
           ))}
         </div>
       )}
@@ -605,7 +694,7 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
         <div className="stack">
           <h2 className="section-title">History · {plural(runs.length, "run")}</h2>
           <div className="card flush">
-            <History runs={runs} now={now} onError={setError} />
+            <History runs={runs} now={now} onError={setError} ticket={s.ticket?.ticket.key} threads={s.ticket?.threads} />
           </div>
         </div>
       )}

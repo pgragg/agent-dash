@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode, useCallback, useEffect, useState } from "react";
+import { Fragment, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { Dashboard, Run } from "../../shared/types.ts";
 
 // ---- time ---------------------------------------------------------------------------
@@ -80,17 +80,24 @@ export function useDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const sent = useRef(0);
+  const applied = useRef(0);
   const load = useCallback(async (refresh = false) => {
+    // Loads overlap when changes come fast; a slow, older answer must not overwrite a newer one.
+    const seq = ++sent.current;
     setLoading(true);
     try {
       const res = await fetch(`/api/dashboard${refresh ? "?refresh" : ""}`);
       if (!res.ok) throw new Error(await res.text());
-      setData(await res.json());
+      const body = await res.json();
+      if (seq < applied.current) return;
+      applied.current = seq;
+      setData(body);
       setError(null);
     } catch (err) {
-      setError((err as Error).message);
+      if (seq >= applied.current) setError((err as Error).message);
     } finally {
-      setLoading(false);
+      if (seq === sent.current) setLoading(false);
     }
   }, []);
 
@@ -123,6 +130,8 @@ export const api = {
   reply: (sessionId: string, text: string) => post(`/api/reply?session=${encodeURIComponent(sessionId)}`, { text }),
   addNote: (ticket: string, body: string) => post(`/api/notes?ticket=${encodeURIComponent(ticket)}`, { body }),
   deleteNote: (id: number) => post(`/api/notes?id=${id}`, undefined, "DELETE"),
+  setThread: (ticket: string, sessionId: string, status: "resolved" | "relevant", reason?: string) =>
+    post(`/api/threads?ticket=${encodeURIComponent(ticket)}&session=${encodeURIComponent(sessionId)}`, { status, reason }),
 };
 
 // ---- markdown -----------------------------------------------------------------------

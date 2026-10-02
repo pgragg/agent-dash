@@ -23,8 +23,19 @@ pnpm build && pnpm start # http://127.0.0.1:7777
 - **Right: a workspace for the selected entry.** In order: why the entry is in the queue, the drafted [next steps](#next-steps-summaries), each live agent's whole last message with a reply box, the PRs, and the run history.
 - **Done for now** (`E`) hides an entry until one of its signals changes, so the queue works like an inbox. It is saved in the browser's localStorage.
 - **Notes**: each ticket's workspace has a private, timestamped notes list (`N`). Notes are saved in SQLite (`notes` table: `ticket`, `created_at`, `body`) and never leave your machine, except that a next-steps draft reads them first and trusts them over older sources. A note newer than the draft marks it **out of date**.
+- **Resolve a thread**: **Resolve** on an agent card or a history row says "this pi thread no longer matters to this ticket", with an optional reason. A resolved thread moves to **Resolved** under the ticket's history, with its reason, and **Mark relevant** undoes it. A resolved thread no longer puts the ticket in the queue or shows as its agent, and next-steps drafts see only its name and reason. If it still waits for you and is resolved for all its tickets, it shows in the queue on its own.
 - **Keyboard**: `J`/`K` move, `E` done for now, `R` reply, `N` note, `O` open the iTerm tab, `S` draft next steps, `⌘↵` send, `?` help.
 - `#/t:FSDK-123` or `#/r:<sessionId>` in the URL selects an entry.
+
+## Storage
+
+Everything you write lives in SQLite at `~/.agent-dash/agent-dash.db`:
+
+| Table | Rows |
+|---|---|
+| `summaries` | One per next-steps request: `ticket`, `status`, `requested_at`, `generated_at`, `summary`, `error` |
+| `notes` | One per note: `ticket`, `created_at`, `body` |
+| `PiConversationStatusChange` | One per change to a thread's relevance: `ticket`, `session_id`, `status` (`relevant` or `resolved`), `reason` (resolved only, optional), `created_at`. Append-only; the newest row per ticket and thread is the current state. |
 
 ## Reply to an agent
 

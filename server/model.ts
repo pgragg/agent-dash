@@ -1,4 +1,4 @@
-import type { AttentionItem, Dashboard, PullRequest, Run, RunStatus, Ticket, TicketGroup } from "../shared/types.ts";
+import type { AttentionItem, Dashboard, PullRequest, Run, RunStatus, ThreadStatusChange, Ticket, TicketGroup } from "../shared/types.ts";
 import { rankAttention } from "./attention.ts";
 import { heuristicStatus, type ParsedSession } from "./sources/sessions.ts";
 import { resolveReported, type ReportedStatus } from "./sources/status.ts";
@@ -15,6 +15,8 @@ export interface ModelInput {
   extensionInstalled: boolean;
   summaries?: Dashboard["summaries"];
   notes?: Dashboard["notes"];
+  /** Current status of each (ticket, thread) pair that has one. */
+  threads?: ThreadStatusChange[];
   isAlive?: (pid: number) => boolean;
   jiraServer: string;
 }
@@ -80,12 +82,34 @@ export function otherTicketKeys(sessions: ParsedSession[], prs: PullRequest[], m
   return [...keys].filter((k) => !myKeys.has(k)).sort();
 }
 
-function group(ticket: Ticket, runs: Run[], prs: PullRequest[]): TicketGroup {
+type ThreadMap = Map<string, ThreadStatusChange>;
+const threadKey = (ticket: string, sessionId: string) => `${ticket} ${sessionId}`;
+
+function group(ticket: Ticket, runs: Run[], prs: PullRequest[], threads: ThreadMap): TicketGroup {
+  const mine = runs.filter((r) => r.tickets.includes(ticket.key)).sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+  const states: Record<string, ThreadStatusChange> = {};
+  for (const r of mine) {
+    const t = threads.get(threadKey(ticket.key, r.sessionId));
+    if (t) states[r.sessionId] = t;
+  }
   return {
     ticket,
-    runs: runs.filter((r) => r.tickets.includes(ticket.key)).sort((a, b) => a.startedAt.localeCompare(b.startedAt)),
+    runs: mine,
     prs: prs.filter((p) => p.tickets.includes(ticket.key)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    threads: states,
   };
+}
+
+/**
+ * The same runs, minus the tickets that you marked them resolved for. Ranking uses these, so a
+ * resolved thread no longer puts its ticket in the queue. A thread resolved for all of its
+ * tickets still shows as a run of its own while it waits for you.
+ */
+export function withoutResolved(runs: Run[], threads: ThreadMap): Run[] {
+  return runs.map((r) => {
+    const tickets = r.tickets.filter((k) => threads.get(threadKey(k, r.sessionId))?.status !== "resolved");
+    return tickets.length === r.tickets.length ? r : { ...r, tickets };
+  });
 }
 
 function stubTicket(key: string, server: string): Ticket {
@@ -122,9 +146,10 @@ export function buildDashboard(input: ModelInput): Dashboard {
   const prs = input.prs.map((p) => ({ ...p, tickets: [...p.tickets] }));
   crossLink(runs, prs);
 
+  const threads: ThreadMap = new Map((input.threads ?? []).map((t) => [threadKey(t.ticket, t.sessionId), t]));
   const recentRuns = runs.filter((r) => r.status !== "finished" || isRecent(r.lastActivityAt, now, recentDays));
-  const attention = rankAttention(recentRuns, prs, input.myTickets, now, input.jiraServer);
-  attachRuns(attention, runs);
+  const attention = rankAttention(withoutResolved(recentRuns, threads), prs, input.myTickets, now, input.jiraServer);
+  attachRuns(attention, withoutResolved(runs, threads));
 
   // Tickets with the most urgent item come first, so the list reads in the same order as the queue.
   const topScore = new Map<string, number>();
@@ -133,7 +158,7 @@ export function buildDashboard(input: ModelInput): Dashboard {
 
   const myKeys = new Set(input.myTickets.map((t) => t.key));
   const myTickets = input.myTickets
-    .map((t) => group(t, runs, prs))
+    .map((t) => group(t, runs, prs, threads))
     .sort(
       (a, b) =>
         (topScore.get(b.ticket.key) ?? 0) - (topScore.get(a.ticket.key) ?? 0) ||
@@ -145,7 +170,7 @@ export function buildDashboard(input: ModelInput): Dashboard {
   const otherKeys = new Set([...recentRuns.flatMap((r) => r.tickets), ...prs.filter((p) => isRecent(p.updatedAt, now, recentDays)).flatMap((p) => p.tickets)]);
   const otherTickets = [...otherKeys]
     .filter((k) => !myKeys.has(k))
-    .map((k) => group(known.get(k) ?? stubTicket(k, input.jiraServer), runs, prs))
+    .map((k) => group(known.get(k) ?? stubTicket(k, input.jiraServer), runs, prs, threads))
     .sort((a, b) => lastRunAt(b).localeCompare(lastRunAt(a)));
 
   const unlinkedRuns = recentRuns.filter((r) => r.tickets.length === 0).sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));

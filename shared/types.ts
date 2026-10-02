@@ -119,11 +119,26 @@ export interface Note {
   body: string;
 }
 
+export type ThreadStatus = "relevant" | "resolved";
+
+/** One change to whether a pi thread still matters to a ticket. The newest change is the current state. */
+export interface ThreadStatusChange {
+  id: number;
+  ticket: string;
+  sessionId: string;
+  status: ThreadStatus;
+  /** Why it was resolved. Optional, and only for "resolved". */
+  reason: string | null;
+  createdAt: string;
+}
+
 export interface TicketGroup {
   ticket: Ticket;
-  /** Oldest first. */
+  /** Oldest first. Resolved threads stay here; `threads` says which ones they are. */
   runs: Run[];
   prs: PullRequest[];
+  /** The newest status change per session, for this ticket's threads that have one. No entry means relevant. */
+  threads: Record<string, ThreadStatusChange>;
 }
 
 export interface SourceHealth {

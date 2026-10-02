@@ -3,7 +3,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Note, PullRequest, Run, Ticket } from "../../shared/types.ts";
+import type { Note, PullRequest, Run, ThreadStatusChange, Ticket } from "../../shared/types.ts";
 import { digestSession } from "../sources/sessions.ts";
 import { isAlive } from "../sources/status.ts";
 import * as db from "./db.ts";
@@ -27,6 +27,8 @@ export interface SummaryInput {
   runs: Run[];
   prs: PullRequest[];
   notes?: Note[];
+  /** Newest status change per session; a "resolved" thread is listed but not digested. */
+  threads?: Record<string, ThreadStatusChange>;
 }
 
 function prLine(p: PullRequest): string {
@@ -35,7 +37,10 @@ function prLine(p: PullRequest): string {
 }
 
 /** What agent-dash already knows, so the agent spends its time on Jira, PR comments and Slack. */
-export async function buildContext({ ticket, runs, prs, notes = [] }: SummaryInput): Promise<string> {
+export async function buildContext({ ticket, runs: allRuns, prs, notes = [], threads = {} }: SummaryInput): Promise<string> {
+  // Piper marked these threads as no longer relevant to the ticket; their history would mislead.
+  const resolved = allRuns.filter((r) => threads[r.sessionId]?.status === "resolved");
+  const runs = allRuns.filter((r) => threads[r.sessionId]?.status !== "resolved");
   const out: string[] = [
     `# ${ticket.key}: ${ticket.summary}`,
     "",
@@ -65,6 +70,13 @@ export async function buildContext({ ticket, runs, prs, notes = [] }: SummaryInp
     const d = digestSession(raw, Math.min(PER_SESSION_MAX, left));
     digests.set(r.sessionId, d);
     left -= d.length;
+  }
+  if (resolved.length) {
+    out.push("", `## Threads Piper marked resolved for ${ticket.key} (no longer relevant; do not plan from them)`);
+    for (const r of resolved) {
+      const t = threads[r.sessionId];
+      out.push(`- ${r.name ?? r.firstPrompt.slice(0, 80)} (resolved ${t.createdAt}${t.reason ? `: ${t.reason}` : ""})`);
+    }
   }
   out.push("", `## pi sessions about ${ticket.key} (${runs.length}, oldest first)`);
   if (runs.length === 0) out.push("", "No pi session names this ticket.");
