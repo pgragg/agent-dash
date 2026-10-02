@@ -67,3 +67,9 @@ test("heuristic: a finished turn waits for input for a few hours, then counts as
   assert.equal(heuristicStatus(s, NOW).status, "awaiting_input");
   assert.equal(heuristicStatus({ ...s, lastActivityAt: minutesAgo(5 * 60) }, NOW).status, "finished");
 });
+
+test("a ticket named only in passing in many replies does not link the run", () => {
+  const replies = Array.from({ length: 10 }, (_, i) => reply(`Status ${i}: FSDK-60 is still overdue.`));
+  const s = parse(jsonl(header(), user("build me a dashboard"), ...replies));
+  assert.deepEqual(s.tickets, []);
+});

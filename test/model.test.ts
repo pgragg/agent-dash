@@ -101,3 +101,19 @@ test("only a live run with a reported iTerm tab offers 'open tab'", () => {
   const tab = Object.fromEntries(d.unlinkedRuns.map((r) => [r.sessionId, r.itermSessionId]));
   assert.deepEqual(tab, { live: "UUID-1", dead: null });
 });
+
+test("every focus row gets a run: a PR row the run that opened it, a ticket row the ticket's live run", () => {
+  const url = "https://github.com/o/r/pull/9";
+  const d = build(
+    [
+      session({ sessionId: "opener", createdPrs: [url], lastActivityAt: minutesAgo(3000) }),
+      session({ sessionId: "old", tickets: ["FSDK-1"], lastActivityAt: minutesAgo(10) }),
+      session({ sessionId: "live", tickets: ["FSDK-1"], lastActivityAt: minutesAgo(2), midRun: true }),
+    ],
+    [pr({ url, checks: "failure", tickets: ["FSDK-7"] })],
+    [ticket({ dueDate: "2026-09-01" })],
+  );
+  const rows = Object.fromEntries(d.attention.map((a) => [a.kind, a.run?.sessionId]));
+  assert.equal(rows.ci_failing, "opener");
+  assert.equal(rows.overdue, "live");
+});

@@ -102,26 +102,30 @@ const FOCUS_ERRORS: Record<string, string> = {
   not_authorized: "allow it: System Settings → Privacy & Security → Automation → iTerm → iTerm2",
 };
 
-function OpenTabButton({ run }: { run: Run }) {
-  const [error, setError] = useState<string | null>(null);
+/** Ask the server to bring the run's iTerm tab to the front. Returns an error message, or null. */
+async function focusTab(run: Run): Promise<string | null> {
+  const res = await fetch(`/api/focus?session=${encodeURIComponent(run.sessionId)}`, { method: "POST", headers: { "X-Agent-Dash": "1" } });
+  if (res.ok) return null;
+  const body = await res.json().catch(() => ({}));
+  return FOCUS_ERRORS[body.result] ?? body.detail ?? `failed (${res.status})`;
+}
+
+/** "open tab" for a live run; "copy resume" for a finished one, or when the tab cannot be found. */
+function TabOrResume({ run, onError }: { run: Run; onError: (message: string | null) => void }) {
+  const [failed, setFailed] = useState(false);
+  if (!run.itermSessionId || failed) return <CopyButton text={resumeCommand(run)} label="copy resume" />;
   return (
-    <>
-      <button
-        className="link-button open-tab"
-        title="Bring this session's iTerm tab to the front"
-        onClick={async () => {
-          setError(null);
-          const res = await fetch(`/api/focus?session=${encodeURIComponent(run.sessionId)}`, { method: "POST", headers: { "X-Agent-Dash": "1" } });
-          if (res.ok) return;
-          const body = await res.json().catch(() => ({}));
-          setError(FOCUS_ERRORS[body.result] ?? body.detail ?? `failed (${res.status})`);
-        }}
-      >
-        open tab
-      </button>
-      {error && <span className="focus-error">{error}</span>}
-      {error && <CopyButton text={resumeCommand(run)} label="copy resume" />}
-    </>
+    <button
+      className="link-button open-tab"
+      title="Bring this session's iTerm tab to the front"
+      onClick={async () => {
+        const error = await focusTab(run);
+        onError(error);
+        if (error) setFailed(true);
+      }}
+    >
+      open tab
+    </button>
   );
 }
 
@@ -139,6 +143,7 @@ function PrChip({ pr }: { pr: PullRequest }) {
 }
 
 function RunRow({ run }: { run: Run }) {
+  const [tabError, setTabError] = useState<string | null>(null);
   return (
     <li className={`run run-${run.status}`} id={`run-${run.sessionId}`}>
       <div className="run-head">
@@ -168,7 +173,8 @@ function RunRow({ run }: { run: Run }) {
             ))}
           </details>
         )}
-        {run.itermSessionId ? <OpenTabButton run={run} /> : <CopyButton text={resumeCommand(run)} label="copy resume" />}
+        <TabOrResume run={run} onError={setTabError} />
+        {tabError && <span className="focus-error">{tabError}</span>}
       </div>
       {run.status === "awaiting_input" && run.lastReply && <div className={`run-reply ${run.askedQuestion ? "question" : ""}`}>{run.lastReply}</div>}
     </li>
@@ -177,6 +183,13 @@ function RunRow({ run }: { run: Run }) {
 
 function Runs({ runs }: { runs: Run[] }) {
   const [all, setAll] = useState(false);
+  useEffect(() => {
+    const unfold = () => {
+      if (runs.some((r) => location.hash === `#run-${r.sessionId}`)) setAll(true);
+    };
+    window.addEventListener("hashchange", unfold);
+    return () => window.removeEventListener("hashchange", unfold);
+  }, [runs]);
   if (runs.length === 0) return <div className="muted small">No agent runs yet.</div>;
   // Live runs always show; only old finished runs fold away.
   const visible = all ? runs : runs.filter((r, i) => i >= runs.length - RUNS_SHOWN || r.status !== "finished");
@@ -253,6 +266,28 @@ const KIND_LABEL: Record<AttentionItem["kind"], string> = {
   stalled: "stalled",
 };
 
+function FocusRow({ item }: { item: AttentionItem }) {
+  const [tabError, setTabError] = useState<string | null>(null);
+  return (
+    <li className={`focus-item kind-${item.kind}`}>
+      <span className="focus-kind">{KIND_LABEL[item.kind]}</span>
+      <span className="focus-reason">{item.reason}</span>
+      {/* One cell per link, empty when there is none, so each link type lines up in a column. */}
+      <span className="focus-cell">{item.ticketKey && <a href={`#ticket-${item.ticketKey}`}>{item.ticketKey}</a>}</span>
+      <span className="focus-cell">
+        {item.prUrl && (
+          <a href={item.prUrl} target="_blank" rel="noreferrer">
+            PR
+          </a>
+        )}
+      </span>
+      <span className="focus-cell">{item.sessionId && <a href={`#run-${item.sessionId}`}>run</a>}</span>
+      <span className="focus-cell">{item.run && <TabOrResume run={item.run} onError={setTabError} />}</span>
+      {tabError && <span className="focus-error focus-row-error">{tabError}</span>}
+    </li>
+  );
+}
+
 function FocusNext({ items }: { items: AttentionItem[] }) {
   const [all, setAll] = useState(false);
   if (items.length === 0) return <p className="muted">Nothing needs you. The agents are working or done.</p>;
@@ -260,20 +295,16 @@ function FocusNext({ items }: { items: AttentionItem[] }) {
   return (
     <>
       <ol className="focus">
+        <li className="focus-item focus-header" aria-hidden>
+          <span />
+          <span />
+          <span className="focus-cell">ticket</span>
+          <span className="focus-cell">PR</span>
+          <span className="focus-cell">run</span>
+          <span className="focus-cell">jump</span>
+        </li>
         {shown.map((a, i) => (
-          <li key={i} className={`focus-item kind-${a.kind}`}>
-            <span className="focus-kind">{KIND_LABEL[a.kind]}</span>
-            <span className="focus-reason">{a.reason}</span>
-            <span className="focus-links">
-              {a.ticketKey && <a href={`#ticket-${a.ticketKey}`}>{a.ticketKey}</a>}
-              {a.prUrl && (
-                <a href={a.prUrl} target="_blank" rel="noreferrer">
-                  PR
-                </a>
-              )}
-              {a.sessionId && <a href={`#run-${a.sessionId}`}>run</a>}
-            </span>
-          </li>
+          <FocusRow key={`${a.kind}-${a.sessionId ?? a.prUrl ?? a.ticketKey}-${i}`} item={a} />
         ))}
       </ol>
       {items.length > shown.length && (
@@ -300,7 +331,8 @@ export function App() {
 
   // A focus link can point into a collapsed section, so open it before scrolling.
   useEffect(() => {
-    const reveal = () => {
+    // Wait a frame, so a Runs list that unfolds on the same hashchange has rendered the target.
+    const reveal = () => requestAnimationFrame(() => {
       const el = document.getElementById(decodeURIComponent(location.hash.slice(1)));
       if (!el) return;
       for (let d = el.closest("details"); d; d = d.parentElement?.closest("details") ?? null) d.open = true;
@@ -308,7 +340,7 @@ export function App() {
       el.classList.remove("flash");
       void el.offsetWidth;
       el.classList.add("flash");
-    };
+    });
     window.addEventListener("hashchange", reveal);
     return () => window.removeEventListener("hashchange", reveal);
   }, []);

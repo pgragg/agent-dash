@@ -45,7 +45,7 @@ A ticket key (`FSDK-123`, `EFSUP-45`, any case) is scored by where it appears in
 | Session name | 5 |
 | Your prompts | 3 |
 | Tool-call arguments (branch names, `gh pr create --title`) | 1 |
-| Assistant text | 1 |
+| Assistant text | 1, at most once per session |
 | Tool results | ignored: one `board` call prints every open ticket |
 
 A run links to its strongest keys: at most 3, each with a score of at least 3 and at least a third of the top score.

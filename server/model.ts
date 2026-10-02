@@ -1,4 +1,4 @@
-import type { Dashboard, PullRequest, Run, RunStatus, Ticket, TicketGroup } from "../shared/types.ts";
+import type { AttentionItem, Dashboard, PullRequest, Run, RunStatus, Ticket, TicketGroup } from "../shared/types.ts";
 import { rankAttention } from "./attention.ts";
 import { heuristicStatus, type ParsedSession } from "./sources/sessions.ts";
 import { resolveReported, type ReportedStatus } from "./sources/status.ts";
@@ -88,6 +88,28 @@ function stubTicket(key: string, server: string): Ticket {
   return { key, url: `${server}/browse/${key}`, summary: "(not found in Jira)", status: "?", statusCategory: "new", priority: null, dueDate: null, updatedAt: "", assignedToMe: false };
 }
 
+const byRecent = (a: Run, b: Run) => b.lastActivityAt.localeCompare(a.lastActivityAt);
+
+/**
+ * Give every row a run to jump to, so each one can open a tab or copy a resume command.
+ * A ticket row prefers a live run, because its tab is where the work continues.
+ */
+export function attachRuns(items: AttentionItem[], runs: Run[]): void {
+  const byId = new Map(runs.map((r) => [r.sessionId, r]));
+  for (const item of items) {
+    let run = item.sessionId ? byId.get(item.sessionId) : undefined;
+    if (!run && item.prUrl) run = runs.filter((r) => r.createdPrs.includes(item.prUrl!)).sort(byRecent)[0];
+    if (!run && item.ticketKey) {
+      const mine = runs.filter((r) => r.tickets.includes(item.ticketKey!)).sort(byRecent);
+      run = mine.find((r) => r.status !== "finished") ?? mine[0];
+    }
+    if (run) {
+      item.run = run;
+      item.sessionId = run.sessionId;
+    }
+  }
+}
+
 const CATEGORY_ORDER: Record<Ticket["statusCategory"], number> = { indeterminate: 0, new: 1, done: 2 };
 
 export function buildDashboard(input: ModelInput): Dashboard {
@@ -98,6 +120,7 @@ export function buildDashboard(input: ModelInput): Dashboard {
 
   const recentRuns = runs.filter((r) => r.status !== "finished" || isRecent(r.lastActivityAt, now, recentDays));
   const attention = rankAttention(recentRuns, prs, input.myTickets, now);
+  attachRuns(attention, runs);
 
   // Tickets with the most urgent item come first, so the list reads in the same order as the queue.
   const topScore = new Map<string, number>();

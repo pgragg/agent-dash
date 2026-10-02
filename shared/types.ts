@@ -84,6 +84,8 @@ export interface AttentionItem {
   sessionId?: string;
   prUrl?: string;
   since: string;
+  /** The run to jump to from this row: the run itself, the run that opened the PR, or the ticket's latest run. */
+  run?: Run;
 }
 
 export interface TicketGroup {

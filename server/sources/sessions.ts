@@ -31,6 +31,11 @@ const PR_URL = /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/g;
  * what the run is about. Tool results are ignored: one `board` call lists every open ticket.
  */
 const WEIGHT = { name: 5, user: 3, toolCall: 1, assistant: 1 } as const;
+/**
+ * Most that one source can add to a key over a whole session. Without a cap, a long session
+ * that keeps naming a ticket in passing (a status report, a board review) links to it.
+ */
+const CAP: Partial<Record<keyof typeof WEIGHT, number>> = { assistant: 1 };
 const MAX_TICKETS = 3;
 
 interface ContentPart {
@@ -90,8 +95,15 @@ export function parseSession(raw: string, sessionFile: string, mtime: Date, tick
   const mentioned = new Set<string>();
   const prCreateCalls = new Set<string>();
 
-  const score = (text: string, weight: number) => {
-    for (const key of extractTickets(text, ticketPattern)) scores.set(key, (scores.get(key) ?? 0) + weight);
+  const added = new Map<string, number>();
+  const score = (text: string, source: keyof typeof WEIGHT) => {
+    for (const key of extractTickets(text, ticketPattern)) {
+      const sofar = added.get(`${source}:${key}`) ?? 0;
+      const add = Math.min(WEIGHT[source], (CAP[source] ?? Infinity) - sofar);
+      if (add <= 0) continue;
+      added.set(`${source}:${key}`, sofar + add);
+      scores.set(key, (scores.get(key) ?? 0) + add);
+    }
   };
   const mention = (text: string) => {
     for (const url of text.match(PR_URL) ?? []) mentioned.add(url);
@@ -114,19 +126,19 @@ export function parseSession(raw: string, sessionFile: string, mtime: Date, tick
         const text = textOf(msg.content);
         userMessageCount += 1;
         if (!firstPrompt) firstPrompt = oneLine(text, 400);
-        score(text, WEIGHT.user);
+        score(text, "user");
         mention(text);
         midRun = true;
       } else if (msg.role === "assistant") {
         model = msg.model ?? model;
         const text = textOf(msg.content);
         if (text.trim()) lastReplyText = text;
-        score(text, WEIGHT.assistant);
+        score(text, "assistant");
         mention(text);
         for (const part of (msg.content ?? []) as ContentPart[]) {
           if (part?.type !== "toolCall") continue;
           const args = JSON.stringify(part.arguments ?? {});
-          score(args, WEIGHT.toolCall);
+          score(args, "toolCall");
           mention(args);
           if (part.name === "bash" && args.includes("gh pr create") && part.id) prCreateCalls.add(part.id);
         }
@@ -142,7 +154,7 @@ export function parseSession(raw: string, sessionFile: string, mtime: Date, tick
   }
 
   if (!header?.id) return null;
-  if (name) score(name, WEIGHT.name);
+  if (name) score(name, "name");
 
   const replyLines = nonEmptyLines(lastReplyText);
   return {
