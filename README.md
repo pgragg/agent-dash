@@ -55,7 +55,7 @@ Your open PRs, grouped by ticket. A PR links to a ticket as on the board, so a P
 
 ### The ticket section
 
-The **Ticket** section under the workspace header is closed at first. A click or `T` opens it, and the page then reads the ticket from Jira: the description and the 10 newest comments. `GET /api/ticket?key=KEY` makes three read-only GETs (`/rest/api/3/issue/KEY`, its `/comment` list, and its `/transitions`), turns Jira's rich text (ADF) into markdown (`shared/adf.ts`), and caches the answer for 2 minutes. **Reload** reads it again. The `KEY ↗` link and the `↗` in the section still open the ticket in Jira.
+The **Ticket** section under the workspace header is closed at first. A click or `T` opens it, and the page then reads the ticket from Jira: the description and the 10 newest comments. `GET /api/ticket?key=KEY` (with the `X-Agent-Dash` guard, because each call can reach Jira with your token) makes three read-only GETs (`/rest/api/3/issue/KEY`, its `/comment` list, and its `/transitions`), turns Jira's rich text (ADF) into markdown (`shared/adf.ts`), and caches the answer for 2 minutes. **Reload** reads it again. The `KEY ↗` link and the `↗` in the section still open the ticket in Jira.
 
 The section also has two **Jira verbs**. The page itself never writes to Jira: each verb starts a new agent (`POST /api/agents?ticket=KEY`, as **Start a new agent** does) with a first message from `shared/jiraVerbs.ts`. The message tells the agent to use the `jira-tickets` skill and to make that one change and nothing else. Your click is the approval.
 

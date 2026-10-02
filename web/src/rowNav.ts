@@ -15,9 +15,9 @@ function rows(): HTMLElement[] {
 export function rowKey(key: string): boolean {
   const all = rows();
   const i = all.findIndex((r) => r.hasAttribute(MARK));
-  if (key === "j" || key === "ArrowDown" || key === "k" || key === "ArrowUp") {
-    if (!all.length) return true;
-    const down = key === "j" || key === "ArrowDown";
+  // The arrows keep scrolling these long pages.
+  if ((key === "j" || key === "k") && all.length) {
+    const down = key === "j";
     const next = all[i < 0 ? 0 : Math.max(0, Math.min(all.length - 1, i + (down ? 1 : -1)))];
     all[i]?.removeAttribute(MARK);
     next.setAttribute(MARK, "");

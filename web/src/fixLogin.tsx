@@ -12,18 +12,23 @@ export function FixLogin({ sources, onFixed }: { sources: Dashboard["sources"]; 
   if (!down.length) return null;
   const fix = async (name: string) => {
     setBusy(name);
-    const res = await fetch(`/api/login?source=${encodeURIComponent(name)}`, { method: "POST", headers: { "X-Agent-Dash": "1" } });
-    const body = await res.json().catch(() => ({}));
-    setBusy(null);
-    setResult((r) => ({ ...r, [name]: res.ok ? "" : (body.error ?? `failed (${res.status})`) }));
-    if (res.ok) onFixed();
+    try {
+      const res = await fetch(`/api/login?source=${encodeURIComponent(name)}`, { method: "POST", headers: { "X-Agent-Dash": "1" } });
+      const body = await res.json().catch(() => ({}));
+      setResult((r) => ({ ...r, [name]: res.ok ? "" : (body.error ?? `failed (${res.status})`) }));
+      if (res.ok) onFixed();
+    } catch (err) {
+      setResult((r) => ({ ...r, [name]: (err as Error).message }));
+    } finally {
+      setBusy(null);
+    }
   };
   const shown = Object.entries(result).find(([, m]) => m);
   return (
     <>
       {down.map(([name]) => (
         <button key={name} className="btn small" disabled={busy !== null} onClick={() => fix(name)} title={`Run pi-auth ensure for ${FIXABLE[name]}. It can open Chrome.`}>
-          {busy === name ? `Logging in to ${FIXABLE[name]}…` : `Fix ${FIXABLE[name]} login`}
+          {busy === name ? `Logging in to ${FIXABLE[name]}… (can take minutes)` : `Fix ${FIXABLE[name]} login`}
         </button>
       ))}
       {shown && (

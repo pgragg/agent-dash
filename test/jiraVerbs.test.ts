@@ -41,5 +41,7 @@ test("a due date message needs a real date", () => {
 });
 
 test("the default due date is two weeks out", () => {
-  assert.equal(defaultDueDate(new Date("2026-10-02T12:00:00Z")), "2026-10-16");
+  // Local times: late in the evening is still the same day.
+  assert.equal(defaultDueDate(new Date(2026, 9, 2, 12)), "2026-10-16");
+  assert.equal(defaultDueDate(new Date(2026, 9, 2, 23, 30)), "2026-10-16");
 });

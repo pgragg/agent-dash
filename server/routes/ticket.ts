@@ -31,8 +31,13 @@ async function fetchDetail(key: string): Promise<TicketDetail> {
   };
 }
 
-export async function handle(_req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
+export async function handle(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
   if (url.pathname !== "/api/ticket") return false;
+  // Each miss sends authenticated GETs to Jira, so another web page must not trigger them.
+  if (req.headers["x-agent-dash"] !== "1") {
+    res.writeHead(403).end();
+    return true;
+  }
   const json = (code: number, body: unknown) => void res.writeHead(code, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify(body));
   const key = url.searchParams.get("key") ?? "";
   // The key goes into a Jira URL, so only a real ticket key.

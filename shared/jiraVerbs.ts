@@ -43,7 +43,8 @@ ${rule} If the current due date is not what agent-dash shows, follow the rule fo
 Make exactly this one change and nothing else: no transition, no comment, no other field. When you are done, reply with the old and the new due date.`;
 }
 
-/** Two weeks from today, the skill's default when no date is named. */
+/** Two weeks from today, the skill's default when no date is named. A local day, as Jira's due date is. */
 export function defaultDueDate(now: Date): string {
-  return new Date(now.getTime() + 14 * 86_400_000).toISOString().slice(0, 10);
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 14);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }

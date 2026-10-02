@@ -18,7 +18,8 @@ function run(args: string[], timeout: number): Promise<{ code: number; output: s
   return new Promise((resolve) => {
     execFile(PI_AUTH, args, { timeout, encoding: "utf8" }, (err, stdout, stderr) => {
       const code = err ? (typeof err.code === "number" ? err.code : 1) : 0;
-      resolve({ code, output: `${stdout}${stderr}`.trim() });
+      // A missing binary has no output; its error message says why.
+      resolve({ code, output: `${stdout}${stderr}`.trim() || (err && typeof err.code !== "number" ? err.message : "") });
     });
   });
 }
@@ -44,7 +45,9 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   running.add(target);
   try {
     const known = await run(["targets"], 10_000);
-    if (!known.output.split("\n").includes(target)) return json(501, { error: `pi-auth has no ${target} target. ${MANUAL[source]}` });
+    if (known.code !== 0) return json(500, { error: `could not run ${PI_AUTH}: ${known.output || `exit ${known.code}`}. ${MANUAL[source]}` });
+    // Tolerate decorated lines such as "  jira (ok)".
+    if (!known.output.split("\n").some((l) => l.trim().split(/[\s(]/)[0] === target)) return json(501, { error: `pi-auth has no ${target} target. ${MANUAL[source]}` });
     // pi-auth stops waiting for a login after 300 s.
     const out = await run(["ensure", target], 320_000);
     if (out.code === 0) return json(200, { ok: true, output: out.output });

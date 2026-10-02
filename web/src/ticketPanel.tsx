@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { defaultDueDate, dueDateMessage, moveMessage } from "../../shared/jiraVerbs.ts";
 import type { Ticket, TicketDetail } from "../../shared/types.ts";
 import { age, api, Markdown, plural, stamp } from "./lib.tsx";
@@ -14,7 +14,7 @@ const cache = new Map<string, { at: number; value: TicketDetail }>();
 async function loadDetail(key: string, refresh: boolean): Promise<TicketDetail> {
   const hit = cache.get(key);
   if (hit && !refresh && Date.now() - hit.at < TTL_MS) return hit.value;
-  const res = await fetch(`/api/ticket?key=${encodeURIComponent(key)}${refresh ? "&refresh" : ""}`);
+  const res = await fetch(`/api/ticket?key=${encodeURIComponent(key)}${refresh ? "&refresh" : ""}`, { headers: { "X-Agent-Dash": "1" } });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error ?? `could not read ${key} (${res.status})`);
   cache.set(key, { at: Date.now(), value: body });
@@ -25,11 +25,18 @@ function useDetail(key: string, open: boolean) {
   const [detail, setDetail] = useState<TicketDetail | null>(() => cache.get(key)?.value ?? null);
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
+  const forced = useRef(0);
   useEffect(() => {
     if (!open) return;
     let current = true;
-    loadDetail(key, nonce > 0)
-      .then((d) => current && (setDetail(d), setError(null)))
+    // Only the Reload click itself skips the caches, not each later open.
+    loadDetail(key, nonce !== forced.current)
+      .then((d) => {
+        forced.current = nonce;
+        if (!current) return;
+        setDetail(d);
+        setError(null);
+      })
       .catch((err: Error) => current && setError(err.message));
     return () => {
       current = false;

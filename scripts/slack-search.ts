@@ -60,7 +60,7 @@ try {
   }
   console.log(`${res.total} messages match ${JSON.stringify(query)}; newest ${res.matches.length}:`);
   const hits = process.env.AGENT_DASH_SLACK_HITS;
-  if (hits) appendFileSync(hits, res.matches.map((m: Record<string, unknown>) => `${JSON.stringify({ permalink: m.permalink, channel: m.channel, user: m.user, ts: m.ts, text: m.text })}\n`).join(""));
+  if (hits) appendFileSync(hits, res.matches.map((m: Record<string, unknown>) => `${JSON.stringify({ permalink: m.permalink, channel: m.channel, user: m.user, ts: m.ts, text: String(m.text).slice(0, 2000) })}\n`).join(""));
   for (const m of res.matches) {
     const when = new Date(Number(m.ts) * 1000).toISOString().slice(0, 16).replace("T", " ");
     console.log(`\n[${when}] #${m.channel} @${m.user}: ${String(m.text).replace(/\s+/g, " ").slice(0, 400)}\n  ${m.permalink}`);

@@ -1315,8 +1315,8 @@ function ConversationView({ sessionId, data, now }: { sessionId: string; data: D
 // ---- help ---------------------------------------------------------------------------
 
 const KEYS: [string, string][] = [
-  ["J / ↓", "Next item (on PRs and History: next row)"],
-  ["K / ↑", "Previous item (on PRs and History: previous row)"],
+  ["J / ↓", "Next item (on PRs and History, J: next row)"],
+  ["K / ↑", "Previous item (on PRs and History, K: previous row)"],
   ["↵", "On PRs and History: open the selected row"],
   ["T", "Show or hide the ticket's description and comments"],
   ["E", "Done for now (comes back when something changes)"],
@@ -1418,7 +1418,7 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
-      if (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || el.tagName === "SELECT" || e.metaKey || e.ctrlKey || e.altKey) return;
       if ((view === "prs" || view === "history") && rowKey(e.key)) return void e.preventDefault();
       if (view !== "board" && e.key !== "?" && e.key !== "Escape") return;
       if (e.key === "j" || e.key === "ArrowDown") move(1);
