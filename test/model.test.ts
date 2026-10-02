@@ -30,6 +30,18 @@ function session(over: Partial<ParsedSession>): ParsedSession {
 }
 
 const ok = { ok: true };
+const base = (sessions: ParsedSession[]) => ({
+  sessions,
+  reported: new Map(),
+  myTickets: [ticket()],
+  otherTickets: [],
+  prs: [],
+  now: NOW,
+  recentDays: 14,
+  sources: { jira: ok, github: ok, sessions: ok },
+  extensionInstalled: false,
+  jiraServer: "https://jira",
+});
 const build = (sessions: ParsedSession[], prs = [pr()], myTickets = [ticket()], threads: ThreadStatusChange[] = []) =>
   buildDashboard({
     threads,
@@ -143,4 +155,20 @@ test("a thread resolved for one of its tickets still counts for the others", () 
   const waiting = session({ sessionId: "w", tickets: ["FSDK-1", "FSDK-2"], lastActivityAt: minutesAgo(5), lastStopReason: "stop", midRun: false });
   const d = build([waiting], [], [ticket(), ticket({ key: "FSDK-2" })], [{ id: 1, ticket: "FSDK-1", sessionId: "w", status: "resolved", reason: null, createdAt: minutesAgo(1) }]);
   assert.equal(d.attention.find((a) => a.kind === "awaiting_input")?.ticketKey, "FSDK-2");
+});
+
+test("a waiting run counts for its open ticket first; on a Done ticket it is context only", () => {
+  const waiting = (tickets: string[]) => session({ sessionId: "w", tickets, lastActivityAt: minutesAgo(5), lastStopReason: "stop", midRun: false });
+  const closed = ticket({ key: "FSDK-9", statusCategory: "done", status: "Done", assignedToMe: false });
+  const open = build([waiting(["FSDK-9", "FSDK-1"])], [], [ticket()]);
+  // FSDK-9 is unknown to Jira here, so it is not Done: the run keeps its first ticket.
+  assert.equal(open.attention[0].ticketKey, "FSDK-9");
+
+  const d = buildDashboard({ ...base([waiting(["FSDK-9", "FSDK-1"])]), otherTickets: [closed] });
+  assert.equal(d.attention[0].ticketKey, "FSDK-1");
+  assert.equal(d.attention[0].info, undefined);
+
+  const allDone = buildDashboard({ ...base([waiting(["FSDK-9"])]), otherTickets: [closed] });
+  assert.equal(allDone.attention[0].ticketKey, "FSDK-9");
+  assert.equal(allDone.attention[0].info, true);
 });

@@ -105,10 +105,12 @@ function group(ticket: Ticket, runs: Run[], prs: PullRequest[], threads: ThreadM
  * resolved thread no longer puts its ticket in the queue. A thread resolved for all of its
  * tickets still shows as a run of its own while it waits for you.
  */
-export function withoutResolved(runs: Run[], threads: ThreadMap): Run[] {
+export function withoutResolved(runs: Run[], threads: ThreadMap, done: Set<string> = new Set()): Run[] {
   return runs.map((r) => {
     const tickets = r.tickets.filter((k) => threads.get(threadKey(k, r.sessionId))?.status !== "resolved");
-    return tickets.length === r.tickets.length ? r : { ...r, tickets };
+    // A run counts first for a ticket that is still open, so a Done ticket does not take its signal.
+    tickets.sort((a, b) => Number(done.has(a)) - Number(done.has(b)));
+    return tickets.join() === r.tickets.join() ? r : { ...r, tickets };
   });
 }
 
@@ -148,8 +150,11 @@ export function buildDashboard(input: ModelInput): Dashboard {
 
   const threads: ThreadMap = new Map((input.threads ?? []).map((t) => [threadKey(t.ticket, t.sessionId), t]));
   const recentRuns = runs.filter((r) => r.status !== "finished" || isRecent(r.lastActivityAt, now, recentDays));
-  const attention = rankAttention(withoutResolved(recentRuns, threads), prs, input.myTickets, now, input.jiraServer);
-  attachRuns(attention, withoutResolved(runs, threads));
+  const done = new Set([...input.myTickets, ...input.otherTickets].filter((t) => t.statusCategory === "done").map((t) => t.key));
+  const attention = rankAttention(withoutResolved(recentRuns, threads, done), prs, input.myTickets, now, input.jiraServer);
+  // The ticket is closed, so nothing on it is a task any more: an open tab there is only worth knowing about.
+  for (const a of attention) if (a.ticketKey && done.has(a.ticketKey)) a.info = true;
+  attachRuns(attention, withoutResolved(runs, threads, done));
 
   // Tickets with the most urgent item come first, so the list reads in the same order as the queue.
   const topScore = new Map<string, number>();

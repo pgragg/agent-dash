@@ -70,6 +70,11 @@ function buildSubjects(d: Dashboard): Map<string, Subject> {
   return out;
 }
 
+/** The ticket is Done in Jira. */
+function isDone(s: Subject): boolean {
+  return s.ticket?.ticket.statusCategory === "done";
+}
+
 /** Something here needs you, not only someone else. */
 function actionable(s: Subject): boolean {
   return s.items.some((a) => !a.info);
@@ -190,8 +195,10 @@ function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0 }: { s
   useEffect(() => {
     if (selected) ref.current?.scrollIntoView({ block: "nearest" });
   }, [selected]);
+  const done = isDone(s);
   const headline = top ? KIND[top.kind].title : run ? statusText(run, now) : s.ticket?.ticket.status ?? "";
-  const tone = top ? KIND[top.kind].tone : run ? runTone(run) : "muted";
+  // On a Done ticket nothing is urgent, so the headline goes quiet and the green tag says why.
+  const tone = done ? "muted" : top ? KIND[top.kind].tone : run ? runTone(run) : "muted";
   const when = top?.kind === "awaiting_input" && run ? age(run.statusSince, now) : age(top?.updatedAt ?? run?.lastActivityAt ?? s.ticket?.ticket.updatedAt, now);
   const extra = otherKinds(s);
   return (
@@ -206,12 +213,13 @@ function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0 }: { s
         <span className="q-title">{subjectTitle(s)}</span>
         <span className="q-tags">
           {s.ticket && <span className="q-key">{s.ticket.ticket.key}</span>}
+          {done && <span className="tag tone-good">done</span>}
           {extra.map((k) => (
             <span key={k} className={`tag tone-${KIND[k].tone}`}>
               {SHORT[k]}
             </span>
           ))}
-          {summary && <span className="tag tone-muted" title="Next steps drafted">✦ next steps</span>}
+          {summary && !done && <span className="tag tone-muted" title="Next steps drafted">✦ next steps</span>}
           {notes > 0 && <span className="tag tone-muted" title={`${plural(notes, "note")}`}>✎ {notes}</span>}
         </span>
       </span>
@@ -691,7 +699,7 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
   const [error, setError] = useState<string | null>(null);
   useEffect(() => setError(null), [s.id]);
   const t = s.ticket?.ticket;
-  const due = t ? dueLabel(t.dueDate) : null;
+  const due = t && t.statusCategory !== "done" ? dueLabel(t.dueDate) : null;
   const live = liveRuns(s);
   const primary = primaryRun(s);
   // A ticket with no live agent still shows its latest run, so you can read where it stopped.
@@ -705,7 +713,15 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
     <article className="workspace" key={s.id}>
       <header className="ws-head">
         <div className="eyebrow">
-          {top ? (
+          {isDone(s) && (
+            <>
+              <Dot tone="good" />
+              <span className="tone-text-good">Done in Jira</span>
+            </>
+          )}
+          {top && isDone(s) ? (
+            <span className={`tag tone-${KIND[top.kind].tone}`}>{SHORT[top.kind]}</span>
+          ) : top ? (
             <>
               <Dot tone={KIND[top.kind].tone} />
               <span className={`tone-text-${KIND[top.kind].tone}`}>{KIND[top.kind].title}</span>
@@ -715,7 +731,7 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
                 </span>
               ))}
             </>
-          ) : (
+          ) : isDone(s) ? null : (
             <span>{live.length ? "Agents at work" : "Quiet"}</span>
           )}
           {position && <span className="meta">· {position}</span>}
@@ -864,10 +880,12 @@ export function App() {
   const queue = ranked.filter((s) => !snoozed.isSnoozed(s));
   const done = ranked.filter((s) => snoozed.isSnoozed(s));
   // Only context left, such as a PR out for review: the ball is with someone else.
-  const othersTurn = all.filter((s) => s.items.length && !actionable(s)).sort((a, b) => lead(b)!.score - lead(a)!.score);
-  const working = all.filter((s) => !s.items.length && liveRuns(s).length);
+  const othersTurn = all.filter((s) => s.items.length && !actionable(s) && !isDone(s)).sort((a, b) => lead(b)!.score - lead(a)!.score);
+  const working = all.filter((s) => !s.items.length && liveRuns(s).length && !isDone(s));
+  // Closed in Jira, but agents still open on it: worth a glance to close the tabs, never a task.
+  const doneInJira = all.filter((s) => isDone(s) && (s.items.length || liveRuns(s).length));
   const quiet = data ? data.myTickets.map((g) => subjects.get(`t:${g.ticket.key}`)!).filter((s) => !s.items.length && !liveRuns(s).length) : [];
-  const order = [...queue, ...othersTurn, ...working, ...done, ...quiet];
+  const order = [...queue, ...othersTurn, ...working, ...done, ...doneInJira, ...quiet];
 
   const selected = (selectedId && subjects.get(selectedId)) || queue[0] || order[0] || null;
 
@@ -1003,6 +1021,11 @@ export function App() {
           <RailSection title="Done for now" count={done.length} defaultOpen={false} hint="Back in the queue when something changes">
             {done.map((s) => (
               <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
+            ))}
+          </RailSection>
+          <RailSection title="Done in Jira" count={doneInJira.length} defaultOpen={false} hint="Closed tickets that still have agents open">
+            {doneInJira.map((s) => (
+              <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} />
             ))}
           </RailSection>
           <RailSection title="Quiet tickets" count={quiet.length} defaultOpen={false} hint="Your tickets with nothing going on">
