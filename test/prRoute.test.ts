@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { logTail, parseRef, toDetail } from "../server/routes/pr.ts";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { handle, logTail, parseRef, toDetail } from "../server/routes/pr.ts";
 import { contextState, failedCheckNames } from "../server/sources/github.ts";
 import { PATTERN } from "./helpers.ts";
 
@@ -75,4 +76,19 @@ test("the panel gets unresolved threads only, every check, and the ticket keys",
   assert.deepEqual(d.requestedReviewers, ["rev", "team"]);
   assert.deepEqual(d.tickets, ["FSDK-9", "FSDK-10"]);
   assert.equal(d.fetchedAt, "2026-10-02T12:00:00.000Z");
+});
+
+test("/api/pr needs the X-Agent-Dash header and a valid ref before it runs gh", async () => {
+  const call = async (path: string, headers: Record<string, string> = { "x-agent-dash": "1" }, method = "GET") => {
+    const out = { code: 0, body: "" };
+    const res = { writeHead: (code: number) => ((out.code = code), res), end: (b = "") => void (out.body = b) } as unknown as ServerResponse;
+    const handled = await handle({ method, headers } as IncomingMessage, res, new URL(path, "http://localhost"));
+    return { handled, ...out };
+  };
+  assert.equal((await call("/api/dashboard")).handled, false);
+  assert.equal((await call("/api/pr?ref=o/r/1", {}, "GET")).code, 403);
+  assert.equal((await call("/api/pr?ref=o/r/1", {}, "POST")).handled, false);
+  const bad = await call("/api/pr?ref=o/../1");
+  assert.equal(bad.code, 400);
+  assert.match(bad.body, /not a PR ref/);
 });

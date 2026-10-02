@@ -117,14 +117,27 @@ const KEEP_BYTES = 256 * 1024;
 function fetchLogTail(repo: string, jobId: number): Promise<string | undefined> {
   return new Promise((resolve) => {
     // gh refuses to print a log with colour codes unless told to; logTail strips them.
-    const child = spawn("gh", ["api", "--allow-escape-sequences", `repos/${repo}/actions/jobs/${jobId}/logs`], { stdio: ["ignore", "pipe", "ignore"], timeout: 20_000 });
-    let tail = Buffer.alloc(0);
+    const child = spawn("gh", ["api", "--allow-escape-sequences", `repos/${repo}/actions/jobs/${jobId}/logs`], { stdio: ["ignore", "pipe", "ignore"], timeout: 30_000 });
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let cut = false;
     child.stdout.on("data", (chunk: Buffer) => {
-      tail = Buffer.concat([tail, chunk]);
-      if (tail.length > 2 * KEEP_BYTES) tail = tail.subarray(-KEEP_BYTES);
+      chunks.push(chunk);
+      size += chunk.length;
+      while (size - chunks[0].length >= KEEP_BYTES) {
+        size -= chunks.shift()!.length;
+        cut = true;
+      }
     });
     child.on("error", () => resolve(undefined));
-    child.on("close", (code) => resolve(code === 0 ? logTail(tail.subarray(-KEEP_BYTES).toString("utf8")) : undefined));
+    child.on("close", (code, signal) => {
+      // A timeout still leaves the end that came in, which is better than no log.
+      if (code !== 0 && !signal) return resolve(undefined);
+      let text = Buffer.concat(chunks).toString("utf8");
+      // The first line may start mid-character after a cut.
+      if (cut) text = text.slice(text.indexOf("\n") + 1);
+      resolve(text.trim() ? logTail(text) + (signal ? "\n… (the log took too long to load; this is where it stopped)" : "") : undefined);
+    });
   });
 }
 

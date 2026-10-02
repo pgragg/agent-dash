@@ -25,7 +25,7 @@ const name = (pr: VerbPr) => `${pr.repo.split("/")[1]}#${pr.number}`;
 /** Check names come from someone else's workflow files: no backticks or newlines into a prompt. */
 const clean = (n: string) => n.replace(/[`\r\n]/g, "").slice(0, 80);
 const ticks = (names: string[]) => names.map((n) => `\`${clean(n)}\``).join(", ");
-const branch = (pr: VerbPr) => (pr.headRef ? ` (branch \`${pr.headRef}\`)` : "");
+const branch = (pr: VerbPr) => (pr.headRef ? ` (branch \`${clean(pr.headRef)}\`)` : "");
 
 /** A working copy is the user's; an agent that checks out a branch there must not lose their work. */
 const checkout = (pr: VerbPr) =>

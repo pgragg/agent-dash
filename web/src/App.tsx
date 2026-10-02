@@ -903,10 +903,8 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
 
 // ---- PRs view -----------------------------------------------------------------------
 
-function PrsView({ data, now, focus }: { data: Dashboard; now: number; focus: string | null }) {
-  useFlash(focus);
+function PrsView({ data, now }: { data: Dashboard; now: number }) {
   const groups = useMemo(() => groupOpenPrs(data), [data]);
-  const missing = focus && !groups.some((g) => g.prs.some((e) => prRef(e.pr.url) === focus)) ? focus.slice(3) : null;
   const total = countPrs(groups);
   const ticketCount = groups.filter((g) => g.ticket).length;
   return (
@@ -919,14 +917,6 @@ function PrsView({ data, now, focus }: { data: Dashboard; now: number; focus: st
           </span>
         </div>
       </header>
-      {missing && (
-        <div className="toast">
-          {missing} is not an open PR of yours from the last 14 days.{" "}
-          <a href={`https://github.com/${missing.replace(/\/(\d+)$/, "/pull/$1")}`} target="_blank" rel="noreferrer">
-            Open it on GitHub ↗
-          </a>
-        </div>
-      )}
       {groups.length === 0 && <div className="zero big">You have no open PRs.</div>}
       {groups.map((g) => {
         const t = g.ticket;
@@ -1518,7 +1508,7 @@ export function App() {
         </main>
       ) : route.view === "prs" ? (
         <main className="main">
-          {route.pr ? <PrPanel key={route.pr} refId={route.pr} data={data} now={now} /> : <PrsView data={data} now={now} focus={route.pr} />}
+          {route.pr ? <PrPanel key={route.pr} refId={route.pr} data={data} now={now} /> : <PrsView data={data} now={now} />}
         </main>
       ) : view === "history" ? (
         <main className="main">
