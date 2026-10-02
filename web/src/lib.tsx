@@ -185,6 +185,7 @@ export const api = {
   reply: (sessionId: string, text: string) => post(`/api/reply?session=${encodeURIComponent(sessionId)}`, { text }),
   addNote: (ticket: string, body: string) => post(`/api/notes?ticket=${encodeURIComponent(ticket)}`, { body }),
   deleteNote: (id: number) => post(`/api/notes?id=${id}`, undefined, "DELETE"),
+  newConversation: () => post("/api/conversations"),
   startAgent: (ticket: string, message: string, cwd: string) => post(`/api/agents?ticket=${encodeURIComponent(ticket)}`, { message, cwd }),
   /** The server writes the first message from the stored step. */
   startStep: (ticket: string, step: number, cwd: string) => post(`/api/agents?ticket=${encodeURIComponent(ticket)}`, { step, cwd }),

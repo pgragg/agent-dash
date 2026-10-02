@@ -1100,6 +1100,28 @@ function NotifyButton({ state, onEnable, onMute }: { state: NotifyState; onEnabl
   );
 }
 
+/** Opens a plain pi in a new iTerm tab, in the home folder, with no ticket context. */
+function NewConversation({ signal }: { signal: number }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const start = useCallback(async () => {
+    setBusy(true);
+    setError(await api.newConversation());
+    setBusy(false);
+  }, []);
+  useEffect(() => {
+    if (signal) start();
+  }, [signal, start]);
+  return (
+    <div className="new-conversation">
+      <button className="btn" onClick={start} disabled={busy} title="Open pi in a new iTerm tab, with no ticket context">
+        {busy ? "Opening…" : "+ New conversation"} <Kbd>C</Kbd>
+      </button>
+      {error && <p className="new-conversation-error">{error}</p>}
+    </div>
+  );
+}
+
 // ---- help ---------------------------------------------------------------------------
 
 const KEYS: [string, string][] = [
@@ -1111,6 +1133,7 @@ const KEYS: [string, string][] = [
   ["S", "Draft next steps"],
   ["N", "Add a note"],
   ["A", "Start a new agent with this ticket's context"],
+  ["C", "Start a new conversation with pi, with no context"],
   ["⌘↵", "Send the reply"],
   ["Esc", "Leave the reply box"],
   ["?", "Show or hide this help"],
@@ -1157,6 +1180,7 @@ export function App() {
   const [focusSignal, setFocusSignal] = useState(0);
   const [noteSignal, setNoteSignal] = useState(0);
   const [agentSignal, setAgentSignal] = useState(0);
+  const [conversationSignal, setConversationSignal] = useState(0);
 
   const subjects = useMemo(() => (data ? buildSubjects(data) : new Map<string, Subject>()), [data]);
   const all = [...subjects.values()];
@@ -1219,6 +1243,7 @@ export function App() {
       else if (e.key === "r") setFocusSignal((n) => n + 1);
       else if (e.key === "n" && selected?.ticket) setNoteSignal((n) => n + 1);
       else if (e.key === "a" && selected?.ticket) setAgentSignal((n) => n + 1);
+      else if (e.key === "c") setConversationSignal((n) => n + 1);
       else if (e.key === "o" && selected) {
         const run = primaryRun(selected);
         if (run?.itermSessionId) api.focusTab(run.sessionId);
@@ -1305,6 +1330,7 @@ export function App() {
       ) : (
         <div className="columns">
           <nav className="rail">
+            <NewConversation signal={conversationSignal} />
             <RailSection title="Up next" count={queue.length}>
               {queue.map((s, i) => (
                 <QueueItem key={s.id} s={s} rank={i + 1} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />

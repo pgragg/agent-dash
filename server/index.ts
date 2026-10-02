@@ -6,7 +6,7 @@ import { basename, dirname, extname, join, normalize } from "node:path";
 import type { Dashboard, PullRequest, SourceHealth, Ticket } from "../shared/types.ts";
 import { config } from "./config.ts";
 import { buildHandoff, stepMessage } from "./handoff.ts";
-import { focusItermSession, piCommand, runInNewItermTab } from "./iterm.ts";
+import { focusItermSession, piCommand, runInNewItermTab, shellQuote } from "./iterm.ts";
 import { buildDashboard, buildHistory, otherTicketKeys } from "./model.ts";
 import { fetchMyPrs } from "./sources/github.ts";
 import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
@@ -230,6 +230,12 @@ const server = createServer(async (req, res) => {
       const out = await runInNewItermTab(command);
       if (out.result !== "ok") return json(500, { error: out.result === "not_authorized" ? "Allow it in System Settings → Privacy & Security → Automation → iTerm2." : (out.detail ?? "could not open iTerm") });
       json(201, { ok: true, contextFile: `${base}.md` });
+    } else if (url.pathname === "/api/conversations" && req.method === "POST") {
+      // A plain pi in a new tab: no ticket, no context file, no first message.
+      if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
+      const out = await runInNewItermTab(`cd ${shellQuote(homedir())} && pi`);
+      if (out.result !== "ok") return void res.writeHead(500, { "Content-Type": "application/json" }).end(JSON.stringify(out));
+      res.writeHead(201).end();
     } else if (url.pathname === "/api/threads" && req.method === "POST") {
       if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
       const json = (code: number, body: unknown) => void res.writeHead(code, { "Content-Type": "application/json" }).end(JSON.stringify(body));
