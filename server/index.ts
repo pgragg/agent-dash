@@ -7,7 +7,7 @@ import type { Dashboard, PullRequest, SourceHealth, Ticket } from "../shared/typ
 import { actionCandidates, keepWhenDown, toActions } from "./actions.ts";
 import { config } from "./config.ts";
 import { startConversation } from "./conversations.ts";
-import { buildHandoff, stepMessage } from "./handoff.ts";
+import { agentMessage, agentName, buildHandoff, stepMessage } from "./handoff.ts";
 import { focusItermSession, piCommand, runInNewItermTab } from "./iterm.ts";
 import { buildDashboard, buildHistory, otherTicketKeys } from "./model.ts";
 import { fetchMyPrs } from "./sources/github.ts";
@@ -16,6 +16,7 @@ import { SessionIndex, transcriptTurns } from "./sources/sessions.ts";
 import { isAlive, readReportedStatuses } from "./sources/status.ts";
 import * as summaryDb from "./summaries/db.ts";
 import { reconcile, requestSummary } from "./summaries/runner.ts";
+import * as resumeRoute from "./routes/resume.ts";
 
 const WEB_DIST = new URL("../web/dist/", import.meta.url).pathname;
 const EXTENSION_PATH = join(homedir(), ".pi/agent/extensions/agent-dash-status.ts");
@@ -173,6 +174,7 @@ async function serveStatic(path: string, res: ServerResponse): Promise<void> {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   try {
+    if (await resumeRoute.handle(req, res, url, sessions)) return;
     if (url.pathname === "/api/dashboard") {
       const body = JSON.stringify(await dashboard(url.searchParams.has("refresh")));
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(body);
@@ -213,7 +215,7 @@ const server = createServer(async (req, res) => {
       const context = buildHandoff({ group, notes: d.notes[key] ?? [], summary: d.summaries[key], now: new Date() });
       if (url.pathname === "/api/agents/context") return void res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8" }).end(context);
 
-      const body = JSON.parse((await readBody(req, 64_000)) || "{}") as { message?: string; step?: number; cwd?: string };
+      const body = JSON.parse((await readBody(req, 64_000)) || "{}") as { message?: string; step?: number; cwd?: string; terminal?: boolean };
       const cwd = body.cwd ?? homedir();
       // A step is read from the database, so the button starts the step that the page shows.
       const step = body.step === undefined ? null : summaryDb.getStep(Number(body.step));
@@ -227,10 +229,11 @@ const server = createServer(async (req, res) => {
       const base = join(config.handoffDir, `${key}-${stamp}`);
       mkdirSync(config.handoffDir, { recursive: true });
       writeFileSync(`${base}.md`, context);
+      const name = agentName(key, step?.body ?? message);
+      // Headless by default, so the page is where you talk to the agent.
+      if (!body.terminal) return json(201, { ok: true, contextFile: `${base}.md`, sessionId: startConversation({ cwd: dir, message: agentMessage(context, message), name }) });
       // A leading "-" would read as a pi option; the space keeps it a message.
       writeFileSync(`${base}.txt`, message.trim().startsWith("-") ? ` ${message.trim()}` : message.trim());
-      // The name carries the key, so the new run links to the ticket at once.
-      const name = `${key}: ${(step?.body.replace(/[*`]/g, "") ?? message).trim().split("\n")[0].slice(0, 60)}`;
       const command = piCommand(dir, name, `${base}.md`, `${base}.txt`);
       const out = await runInNewItermTab(command);
       if (out.result !== "ok") return json(500, { error: out.result === "not_authorized" ? "Allow it in System Settings → Privacy & Security → Automation → iTerm2." : (out.detail ?? "could not open iTerm") });
@@ -243,7 +246,7 @@ const server = createServer(async (req, res) => {
       if (!body.message?.trim()) return json(400, { error: "write the first message" });
       const dir = (body.cwd?.trim() || "~").replace(/^~(?=\/|$)/, homedir());
       if (!dir.startsWith("/") || !existsSync(dir) || !statSync(dir).isDirectory()) return json(400, { error: `not a folder: ${body.cwd}` });
-      json(201, { sessionId: startConversation(dir, body.message.trim()) });
+      json(201, { sessionId: startConversation({ cwd: dir, message: body.message.trim() }) });
     } else if (url.pathname === "/api/conversations/end" && req.method === "POST") {
       if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
       const status = (await readReportedStatuses(config.statusDir)).get(url.searchParams.get("session") ?? "");

@@ -268,6 +268,9 @@ kbd {
 .agent .card-head { align-items: flex-start; }
 .agent .card-head .dot { margin-top: 7px; }
 .agent-title { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+/* The title shortens before the buttons wrap under it. */
+.agent .agent-title { flex: 1 1 220px; }
+.chat-toggle { margin: 0 0 6px -9px; }
 .agent-title h3 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .agent-message { position: relative; padding: 2px 0 6px; }
 .agent-message.clamped { max-height: 340px; overflow: hidden; }

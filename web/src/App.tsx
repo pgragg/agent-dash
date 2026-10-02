@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { splitSummary } from "../../shared/nextSteps.ts";
 import { prRef } from "../../shared/refs.ts";
 import type { Action, ActionKind, AttentionItem, AttentionKind, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState, Turn } from "../../shared/types.ts";
+import { conversationHash, launchAgent, ResumeHere } from "./agents.tsx";
 import { filterHistory, groupByDay } from "./history.ts";
 import { countPrs, groupOpenPrs } from "./prs.ts";
 import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, resumeCommand, runTitle, shortDate, stamp, useDashboard, useFlash, useNow, useWaitNotifications } from "./lib.tsx";
@@ -179,7 +180,10 @@ function OpenTab({ run, onError, className = "btn ghost", label = "Open in iTerm
       </a>
     );
   }
-  if (!run.itermSessionId) return <CopyButton text={resumeCommand(run)} label="Copy resume" className={className} />;
+  if (!run.itermSessionId) {
+    const copy = <CopyButton text={resumeCommand(run)} label="Copy resume" className={className} />;
+    return run.status === "finished" ? <><ResumeHere run={run} onError={onError} small={className.includes("small")} />{copy}</> : copy;
+  }
   return (
     <button className={className} title="Bring this session's iTerm tab to the front" onClick={async () => onError(await api.focusTab(run.sessionId))}>
       {label} {hotkey && <Kbd>O</Kbd>}
@@ -261,18 +265,24 @@ const STALE_MS = 30 * 60_000;
 /** One drafted step, with a button that starts a pi agent on it, with the same context as "Start a new agent". */
 function StepRow({ ticket, step, cwd, onError }: { ticket: string; step: NextStep; cwd: string; onError: (m: string | null) => void }) {
   const [state, setState] = useState<"idle" | "starting" | "started">("idle");
-  const start = async () => {
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const start = async (terminal: boolean) => {
     setState("starting");
-    const err = await api.startStep(ticket, step.id, cwd);
-    onError(err);
-    setState(err ? "idle" : "started");
+    try {
+      setSessionId(await launchAgent(ticket, { step: step.id, cwd, terminal }));
+      onError(null);
+      setState("started");
+    } catch (err) {
+      onError((err as Error).message);
+      setState("idle");
+    }
   };
   return (
     <li className="step" id={`step:${step.id}`}>
       <span className="step-body">{inline(step.body)}</span>
-      <button className="btn ghost small" onClick={start} disabled={state !== "idle" || !cwd.trim()} title={`Start a pi agent in ${cwd} on this step, with this page as context`}>
+      {sessionId ? <a className="btn ghost small" href={conversationHash(sessionId)}>Started ✓ Open</a> : <button className="btn ghost small" onClick={(e) => start(e.altKey)} disabled={state !== "idle" || !cwd.trim()} title={`Start a pi agent in ${cwd} on this step, with this page as context. ⌥-click opens it in a new iTerm tab.`}>
         {state === "starting" ? "Starting…" : state === "started" ? "Started ✓" : "Start agent"}
-      </button>
+      </button>}
     </li>
   );
 }
@@ -447,7 +457,8 @@ function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd:
   const folders = workFolders(s);
   const [message, setMessage] = useState("");
   const [starting, setStarting] = useState(false);
-  const [started, setStarted] = useState<number | null>(null);
+  const [started, setStarted] = useState<{ at: number; sessionId: string | null } | null>(null);
+  const [terminal, setTerminal] = useState(false);
   const [context, setContext] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -456,19 +467,21 @@ function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd:
   const start = async () => {
     if (!message.trim()) return;
     setStarting(true);
-    const err = await api.startAgent(key, message, cwd);
-    setStarting(false);
-    onError(err);
-    if (!err) {
+    try {
+      const sessionId = await launchAgent(key, { message, cwd, terminal });
+      onError(null);
       setMessage("");
-      setStarted(Date.now());
+      setStarted({ at: Date.now(), sessionId });
+    } catch (err) {
+      onError((err as Error).message);
     }
+    setStarting(false);
   };
   return (
     <section className="card start-agent">
       <header className="card-head">
         <h3>Start a new agent</h3>
-        <span className="meta">opens pi in a new iTerm tab, with this page as context</span>
+        <span className="meta">starts pi with this page as context; you talk to it here</span>
       </header>
       <div className="composer">
         <textarea
@@ -495,12 +508,19 @@ function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd:
               ))}
             </datalist>
           </label>
+          <label className="meta" title="Open pi in a new iTerm tab instead of on this page">
+            <input type="checkbox" checked={terminal} onChange={(e) => setTerminal(e.target.checked)} /> in iTerm
+          </label>
           <button className="btn primary" onClick={start} disabled={starting || !message.trim() || !cwd.trim()}>
             {starting ? "Starting…" : "Start agent"} <Kbd>⌘↵</Kbd>
           </button>
         </div>
       </div>
-      {started && Date.now() - started < 30_000 && <p className="meta started">Started in a new iTerm tab. It shows under Agents once it is running.</p>}
+      {started && Date.now() - started.at < 30_000 && (
+        <p className="meta started">
+          {started.sessionId ? <>Started. It shows under Agents once pi saves the first message, or <a href={conversationHash(started.sessionId)}>open its page</a>.</> : "Started in a new iTerm tab. It shows under Agents once it is running."}
+        </p>
+      )}
       <details
         className="context-preview"
         onToggle={async (e) => {
@@ -610,6 +630,7 @@ function ResolveButton({ ticket, run, onError, className = "btn ghost" }: { tick
 
 function AgentCard({ run, now, onError, focusSignal, primary, ticket }: { run: Run; now: number; onError: (m: string | null) => void; focusSignal: number; primary: boolean; ticket?: string }) {
   const [expanded, setExpanded] = useState(false);
+  const [chat, setChat] = useState(false);
   const long = run.lastMessage.length > 900;
   return (
     <section className={`card agent tone-border-${runTone(run)}`} id={`r:${run.sessionId}`}>
@@ -625,7 +646,9 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket }: { run: R
         {ticket && <ResolveButton ticket={ticket} run={run} onError={onError} />}
         <OpenTab run={run} onError={onError} hotkey={primary} />
       </header>
-      {run.lastMessage && (
+      {/* The whole chat ends with the last message, so it replaces it. */}
+      {chat && <Chat sessionId={run.sessionId} refreshKey={run.lastActivityAt + run.status} />}
+      {!chat && run.lastMessage && (
         <div className={`agent-message ${long && !expanded ? "clamped" : ""}`}>
           <Markdown text={run.lastMessage} />
           {long && (
@@ -635,6 +658,7 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket }: { run: R
           )}
         </div>
       )}
+      <button className="btn ghost small chat-toggle" onClick={() => setChat(!chat)}>{chat ? "Show only the last message" : "Show the conversation"}</button>
       {run.status !== "finished" && <Composer run={run} onError={onError} focusSignal={primary ? focusSignal : 0} />}
     </section>
   );
@@ -1279,7 +1303,7 @@ function ConversationView({ sessionId, data, now }: { sessionId: string; data: D
                 {statusText(run, now)} · {dirLabel(run.cwd)} · {plural(run.userMessageCount, "prompt")}
               </span>
               {run.headless ? (
-                <button className="btn ghost small" title="Stop this pi process. Copy resume continues it in a terminal." onClick={async () => setError(await api.endConversation(sessionId))}>
+                <button className="btn ghost small" title="Stop this pi process. Resume here continues it later." onClick={async () => setError(await api.endConversation(sessionId))}>
                   End conversation
                 </button>
               ) : (
@@ -1296,7 +1320,7 @@ function ConversationView({ sessionId, data, now }: { sessionId: string; data: D
       {run && <Chat sessionId={sessionId} refreshKey={run.lastActivityAt + run.status} />}
       {run?.status === "working" && <p className="meta">The agent is working…</p>}
       {run && run.status !== "finished" && <Composer run={run} onError={setError} focusSignal={0} />}
-      {run?.status === "finished" && <p className="meta">This conversation ended. Copy resume continues it in a terminal.</p>}
+      {run?.status === "finished" && <p className="meta">This conversation ended. Resume here (at the top) continues it on this page, and Copy resume in a terminal.</p>}
       <div ref={end} />
     </article>
   );
