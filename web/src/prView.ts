@@ -1,6 +1,7 @@
-import type { Dashboard, Run } from "../../shared/types.ts";
+import { checkList } from "../../shared/prVerbs.ts";
+import type { Dashboard, PullRequest, Run } from "../../shared/types.ts";
 
-/** Where a PR verb starts its agent. Kept free of React so the tests can import it. */
+/** PR logic of the PR panel and the verb buttons. Kept free of React so the tests can import it. */
 
 type Data = Pick<Dashboard, "myTickets" | "otherTickets" | "unlinkedRuns">;
 
@@ -33,4 +34,18 @@ export function verbStart(d: Data, pr: { url: string; tickets: string[] }, prefe
   const runs = (g?.runs ?? []).filter((r) => g!.threads[r.sessionId]?.status !== "resolved" && r.cwd);
   const newest = runs.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt))[0];
   return { ticket, cwd: newest ? home(newest.cwd) : "~" };
+}
+
+/** The PR's tag for its checks: "CI failure: lint, test" names what broke. */
+export function ciTag(pr: Pick<PullRequest, "checks" | "failedChecks">): { text: string; tone: string; title?: string } | null {
+  if (pr.checks === "none") return null;
+  const tone = pr.checks === "success" ? "good" : pr.checks === "failure" ? "bad" : "warn";
+  const names = pr.checks === "failure" && pr.failedChecks?.length ? pr.failedChecks : null;
+  return names ? { text: `CI failure: ${checkList(names, 2)}`, tone, title: names.join("\n") } : { text: `CI ${pr.checks}`, tone };
+}
+
+/** "pr:owner/repo/N" as owner/repo/N and its GitHub URL, or null for an address that is not a PR. */
+export function panelTarget(ref: string): { path: string; url: string } | null {
+  const m = ref.match(/^pr:([^/\s]+\/[^/\s]+)\/(\d+)$/);
+  return m ? { path: `${m[1]}/${m[2]}`, url: `https://github.com/${m[1]}/pull/${m[2]}` } : null;
 }

@@ -3,7 +3,8 @@ import { splitSummary } from "../../shared/nextSteps.ts";
 import { prRef } from "../../shared/refs.ts";
 import type { Action, ActionKind, AttentionItem, AttentionKind, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState, Turn } from "../../shared/types.ts";
 import { filterHistory, groupByDay } from "./history.ts";
-import { ciTag, PrPanel, PrVerbButton } from "./prPanel.tsx";
+import { PrPanel, PrVerbButton } from "./prPanel.tsx";
+import { ciTag } from "./prView.ts";
 import { countPrs, groupOpenPrs } from "./prs.ts";
 import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, resumeCommand, runTitle, shortDate, stamp, useDashboard, useFlash, useNow, useWaitNotifications } from "./lib.tsx";
 import { href, humanAge, parseHash, resolveBoardRef, type Route } from "./routes.ts";
@@ -656,7 +657,7 @@ function PrRow({ pr, now }: { pr: PullRequest; now: number }) {
         {open && pr.mergeable === "CONFLICTING" && <span className="tag tone-bad">conflict</span>}
         <span className="meta">{age(pr.updatedAt, now)}</span>
       </a>
-      <a className="ext-link pr-ext" href={pr.url} target="_blank" rel="noreferrer" title="Open on GitHub">
+      <a className="ext-link pr-ext" href={pr.url} target="_blank" rel="noreferrer" title="Open on GitHub" aria-label="Open on GitHub">
         ↗
       </a>
     </div>
@@ -818,7 +819,7 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
               <a className="key-link" href={href(prRef(s.prUrl) ?? "prs")} title="Open the PR panel">
                 {prName(s.prUrl)}
               </a>
-              <a className="ext-link" href={s.prUrl} target="_blank" rel="noreferrer" title="Open on GitHub">
+              <a className="ext-link" href={s.prUrl} target="_blank" rel="noreferrer" title="Open on GitHub" aria-label="Open on GitHub">
                 ↗
               </a>
             </>
@@ -838,7 +839,8 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
         {s.items.length > 0 && (
           <ul className="why">
             {s.items.map((a, i) => (
-              <li key={i}>
+              // A stable key: the verb button keeps its "Started" state when the list changes order.
+              <li key={`${a.kind}:${a.prUrl ?? a.sessionId ?? a.ticketKey ?? i}`}>
                 <Dot tone={KIND[a.kind].tone} />
                 <span>{a.reason}</span>
                 <PrVerbButton item={a} data={data} />

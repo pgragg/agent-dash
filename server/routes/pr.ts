@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { promisify } from "node:util";
 import type { PrCheck, PrDetail } from "../../shared/types.ts";
@@ -111,14 +111,21 @@ export function toDetail(pr: any, ticketPattern: RegExp, now = new Date()): Omit
   };
 }
 
-async function fetchLogTail(repo: string, jobId: number): Promise<string | undefined> {
-  try {
+/** Job logs can be hundreds of MB; only this much of the end is kept in memory. */
+const KEEP_BYTES = 256 * 1024;
+
+function fetchLogTail(repo: string, jobId: number): Promise<string | undefined> {
+  return new Promise((resolve) => {
     // gh refuses to print a log with colour codes unless told to; logTail strips them.
-    const { stdout } = await run("gh", ["api", "--allow-escape-sequences", `repos/${repo}/actions/jobs/${jobId}/logs`], { timeout: 20_000, maxBuffer: 64 * 1024 * 1024 });
-    return logTail(stdout);
-  } catch {
-    return undefined;
-  }
+    const child = spawn("gh", ["api", "--allow-escape-sequences", `repos/${repo}/actions/jobs/${jobId}/logs`], { stdio: ["ignore", "pipe", "ignore"], timeout: 20_000 });
+    let tail = Buffer.alloc(0);
+    child.stdout.on("data", (chunk: Buffer) => {
+      tail = Buffer.concat([tail, chunk]);
+      if (tail.length > 2 * KEEP_BYTES) tail = tail.subarray(-KEEP_BYTES);
+    });
+    child.on("error", () => resolve(undefined));
+    child.on("close", (code) => resolve(code === 0 ? logTail(tail.subarray(-KEEP_BYTES).toString("utf8")) : undefined));
+  });
 }
 
 async function fetchPrDetail(ref: { owner: string; name: string; number: number }): Promise<PrDetail> {
@@ -151,6 +158,11 @@ function cached(key: string, ref: NonNullable<ReturnType<typeof parseRef>>, forc
 
 export async function handle(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
   if (url.pathname !== "/api/pr" || req.method !== "GET") return false;
+  // Same guard as the POST routes: each request runs gh with your login, so another site must not trigger it.
+  if (req.headers["x-agent-dash"] !== "1") {
+    res.writeHead(403).end();
+    return true;
+  }
   const json = (code: number, body: unknown) => void res.writeHead(code, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify(body));
   const raw = url.searchParams.get("ref") ?? "";
   const ref = parseRef(raw);

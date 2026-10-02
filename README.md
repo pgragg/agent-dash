@@ -58,11 +58,11 @@ Your open PRs, grouped by ticket. A PR links to a ticket as on the board, so a P
 
 - The title, state, author, branches, review decision, and the PR's signals, each with its [verb button](#pr-verbs).
 - The tickets in the title or branch (each opens `#/t:KEY`), and the run that opened the PR with `gh pr create`.
-- Each unresolved review thread: the file and line, and each comment with its author.
-- Each check run and status context with its state, failures first. A failed GitHub Actions check shows the end of its job log, up to the last `##[error]` line (at most 40 lines, 4,000 characters, 3 logs).
+- Each unresolved review thread (of the first 100): the file and line, and each comment with its author.
+- Each check run and status context (the first 100) with its state, failures first. A failed GitHub Actions check shows the end of its job log, up to the last `##[error]` line (at most 40 lines, 4,000 characters, 3 logs).
 - The description (as markdown), the diffstat, and the changed files with their `+`/`−` counts (the first 100).
 
-The page loads it from `GET /api/pr?ref=<owner>/<repo>/<number>` (`server/routes/pr.ts`). The server checks that the ref is an owner, a repo and a number, and nothing else. It reads the PR with `gh api graphql` and the logs with `gh api`, with your `gh` login, and keeps each answer for 60 s. **Refresh** on the panel skips that cache. It is not part of `/api/dashboard`, so the board stays small.
+The page loads it from `GET /api/pr?ref=<owner>/<repo>/<number>` (`server/routes/pr.ts`), with the `X-Agent-Dash` guard, because each request runs `gh` with your login. The server checks that the ref is an owner, a repo and a number, and nothing else. It keeps only the last 256 KB of a job log in memory. It reads the PR with `gh api graphql` and the logs with `gh api`, with your `gh` login, and keeps each answer for 60 s. **Refresh** on the panel skips that cache. It is not part of `/api/dashboard`, so the board stays small.
 
 ### PR verbs
 

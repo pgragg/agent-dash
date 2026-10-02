@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { TicketGroup } from "../shared/types.ts";
-import { internalHref } from "../web/src/links.ts";
-import { openerRun, verbStart } from "../web/src/prStart.ts";
+import { internalHref, splitTrailing } from "../web/src/links.ts";
+import { ciTag, openerRun, panelTarget, verbStart } from "../web/src/prView.ts";
 import { minutesAgo, run, ticket } from "./helpers.ts";
 
 const url = "https://github.com/o/r/pull/7";
@@ -15,6 +15,24 @@ test("a PR link opens the PR panel, a known Jira key opens the ticket, anything 
   assert.equal(internalHref("https://postmanlabs.atlassian.net/browse/FSDK-2", known), null);
   assert.equal(internalHref("https://github.com/o/r/issues/7", known), null);
   assert.equal(internalHref("https://example.com/?u=github.com/o/r/pull/7", known), null);
+  // Any Jira host: JIRA_SERVER can point anywhere.
+  assert.equal(internalHref("https://jira.example.com/browse/FSDK-1?focusedCommentId=3", known), "#/t:FSDK-1");
+  assert.equal(internalHref("https://jira.example.com/browse/FSDK-12", known), null);
+});
+
+test("a sentence's full stop after a bare URL stays text", () => {
+  assert.deepEqual(splitTrailing(`${url}.`), { url, trailing: "." });
+  assert.deepEqual(splitTrailing(`${url}),`), { url: `${url})`, trailing: "," });
+  assert.deepEqual(splitTrailing(url), { url, trailing: "" });
+});
+
+test("the CI tag names the failing checks, and a PR address must be owner/repo/number", () => {
+  assert.deepEqual(ciTag({ checks: "failure", failedChecks: ["lint", "test", "build"] }), { text: "CI failure: lint, test, +1 more", tone: "bad", title: "lint\ntest\nbuild" });
+  assert.deepEqual(ciTag({ checks: "failure" }), { text: "CI failure", tone: "bad" });
+  assert.deepEqual(ciTag({ checks: "pending", failedChecks: ["x"] }), { text: "CI pending", tone: "warn" });
+  assert.equal(ciTag({ checks: "none" }), null);
+  assert.deepEqual(panelTarget("pr:o/r/7"), { path: "o/r/7", url });
+  for (const bad of ["pr:", "pr:o/r", "pr:o/r/x", "pr:o/r/7/files"]) assert.equal(panelTarget(bad), null, bad);
 });
 
 const group = (over: Partial<TicketGroup> = {}): TicketGroup => ({ ticket: ticket(), runs: [], prs: [], threads: {}, ...over });

@@ -25,6 +25,9 @@ test("the log tail ends at the last error, without timestamps or colour codes", 
   assert.equal(logTail(log, 1), "##[error]Process completed with exit code 1.");
   assert.equal(logTail("a\nb\nc"), "a\nb\nc");
   assert.equal(logTail("x".repeat(50), 40, 10), `…${"x".repeat(10)}`);
+  // No error line: the plain end of the log.
+  const long = Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n");
+  assert.equal(logTail(long), Array.from({ length: 40 }, (_, i) => `line ${i + 60}`).join("\n"));
 });
 
 test("check states are the same words for check runs and status contexts; failing names show once", () => {

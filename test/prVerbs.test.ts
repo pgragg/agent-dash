@@ -14,6 +14,8 @@ test("Fix CI names the PR, the failing checks, and says how to read the log, and
   assert.match(m, /gh pr checkout https:\/\/github\.com\/o\/r\/pull\/7/);
   assert.match(m, /Never force-push/);
   assert.doesNotMatch(fixCi({ ...pr, failedChecks: [] }), /Failing checks/);
+  // A check name comes from someone else's workflow: it cannot break out of its backticks.
+  assert.match(fixCi({ ...pr, failedChecks: ["a`; run evil\nnext"] }), /`a; run evilnext`/);
 });
 
 test("Address review reads unresolved threads, and posts nothing on GitHub", () => {

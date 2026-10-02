@@ -22,7 +22,9 @@ export function checkList(names: string[], max = 3): string {
 }
 
 const name = (pr: VerbPr) => `${pr.repo.split("/")[1]}#${pr.number}`;
-const ticks = (names: string[]) => names.map((n) => `\`${n}\``).join(", ");
+/** Check names come from someone else's workflow files: no backticks or newlines into a prompt. */
+const clean = (n: string) => n.replace(/[`\r\n]/g, "").slice(0, 80);
+const ticks = (names: string[]) => names.map((n) => `\`${clean(n)}\``).join(", ");
 const branch = (pr: VerbPr) => (pr.headRef ? ` (branch \`${pr.headRef}\`)` : "");
 
 /** A working copy is the user's; an agent that checks out a branch there must not lose their work. */
@@ -34,7 +36,7 @@ const noForce = "Push a new commit to the PR branch. Never force-push, amend, or
 export function fixCi(pr: VerbPr): string {
   const failed = pr.failedChecks?.length ? ticks(pr.failedChecks) : null;
   return [
-    `Fix CI on ${name(pr)}${failed ? `: ${checkList(pr.failedChecks!)}` : ""}`,
+    `Fix CI on ${name(pr)}${failed ? `: ${checkList(pr.failedChecks!.map(clean))}` : ""}`,
     "",
     `CI is red on ${pr.url}${branch(pr)}.${failed ? ` Failing checks: ${failed}.` : ""}`,
     "",

@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { Dashboard, HistoryRun, PrDetail, Transcript } from "../../shared/types.ts";
-import { internalHref } from "./links.ts";
+import { internalHref, JIRA_BROWSE, splitTrailing } from "./links.ts";
 import { boardHash, newlyWaiting, runsOf, type Seen, snapshot } from "./notify.ts";
 
 // ---- time ---------------------------------------------------------------------------
@@ -232,7 +232,7 @@ export const api = {
   },
   /** One PR in full. The server caches it for a minute; `refresh` skips the cache. */
   prDetail: async (ref: string, refresh = false): Promise<PrDetail> => {
-    const res = await fetch(`/api/pr?ref=${encodeURIComponent(ref)}${refresh ? "&refresh" : ""}`);
+    const res = await fetch(`/api/pr?ref=${encodeURIComponent(ref)}${refresh ? "&refresh" : ""}`, { headers: { "X-Agent-Dash": "1" } });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(json.error ?? `could not load the PR (${res.status})`);
     return json;
@@ -249,11 +249,10 @@ export const api = {
 // ---- markdown -----------------------------------------------------------------------
 
 const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\(https?:\/\/[^)\s]+\))|(https?:\/\/[^\s)<>\]]+)/g;
-const JIRA = /atlassian\.net\/browse\/([A-Z]+-\d+)/;
 
 function linkLabel(url: string): string {
   if (/github\.com\/.+\/pull\/\d+/.test(url)) return prName(url);
-  const jira = url.match(JIRA);
+  const jira = url.match(JIRA_BROWSE);
   return jira ? jira[1] : url.replace(/^https?:\/\//, "");
 }
 
@@ -272,7 +271,7 @@ function Link({ url, label }: { url: string; label: ReactNode }) {
       <a href={internal} title={`Open in agent-dash · ${url}`}>
         {label}
       </a>
-      <a className="ext-link" href={url} target="_blank" rel="noreferrer" title={`Open ${url}`}>
+      <a className="ext-link" href={url} target="_blank" rel="noreferrer" title={`Open ${url}`} aria-label={`Open ${url}`}>
         ↗
       </a>
     </>
@@ -291,8 +290,7 @@ export function inline(text: string): ReactNode[] {
       const [, label, url] = tok.match(/^\[([^\]]+)\]\((.+)\)$/)!;
       out.push(<Link key={m.index} url={url} label={label} />);
     } else {
-      // A sentence's full stop is not part of the URL; it stays as text.
-      const url = tok.replace(/[.,;:!?'"]+$/, "");
+      const { url } = splitTrailing(tok);
       out.push(<Link key={m.index} url={url} label={linkLabel(url)} />);
       last = m.index + url.length;
       continue;

@@ -1,7 +1,8 @@
 import { prRef } from "../../shared/refs.ts";
 import { href } from "./routes.ts";
 
-const JIRA = /atlassian\.net\/browse\/([A-Z][A-Z0-9]*-\d+)/;
+/** A Jira browse link on any host, because JIRA_SERVER can point anywhere. */
+export const JIRA_BROWSE = /\/browse\/([A-Z][A-Z0-9]*-\d+)(?=[/?#]|$)/;
 
 /**
  * The agent-dash address for a link in an agent message, or null to keep it external.
@@ -11,6 +12,12 @@ export function internalHref(url: string, knownTickets: ReadonlySet<string>): st
   if (!/^https?:\/\//.test(url)) return null;
   const pr = /^https?:\/\/github\.com\//.test(url) ? prRef(url) : null;
   if (pr) return href(pr);
-  const key = url.match(JIRA)?.[1];
+  const key = url.match(JIRA_BROWSE)?.[1];
   return key && knownTickets.has(key) ? href(`t:${key}`) : null;
+}
+
+/** "see https://x.y/a." links "https://x.y/a": a sentence's full stop is not part of the URL. */
+export function splitTrailing(token: string): { url: string; trailing: string } {
+  const url = token.replace(/[.,;:!?'"]+$/, "");
+  return { url, trailing: token.slice(url.length) };
 }

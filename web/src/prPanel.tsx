@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { checkList, verbFor } from "../../shared/prVerbs.ts";
+import { verbFor } from "../../shared/prVerbs.ts";
 import { prRef } from "../../shared/refs.ts";
-import type { AttentionItem, AttentionKind, Dashboard, PrCheck, PrDetail, PullRequest } from "../../shared/types.ts";
+import type { AttentionItem, AttentionKind, Dashboard, PrCheck, PrDetail } from "../../shared/types.ts";
 import { age, api, Markdown, plural, prName, runTitle } from "./lib.tsx";
-import { openerRun, verbStart } from "./prStart.ts";
+import { openerRun, panelTarget, verbStart } from "./prView.ts";
 import { href } from "./routes.ts";
 
 /**
@@ -20,14 +20,6 @@ const TONE: Partial<Record<AttentionKind, string>> = {
 };
 
 const Dot = ({ tone }: { tone: string }) => <span className={`dot tone-${tone}`} aria-hidden />;
-
-/** The PR's tag for its checks: "CI failure: lint, test" names what broke. */
-export function ciTag(pr: Pick<PullRequest, "checks" | "failedChecks">): { text: string; tone: string; title?: string } | null {
-  if (pr.checks === "none") return null;
-  const tone = pr.checks === "success" ? "good" : pr.checks === "failure" ? "bad" : "warn";
-  const names = pr.checks === "failure" && pr.failedChecks?.length ? pr.failedChecks : null;
-  return names ? { text: `CI failure: ${checkList(names, 2)}`, tone, title: names.join("\n") } : { text: `CI ${pr.checks}`, tone };
-}
 
 type StartState = { s: "idle" } | { s: "confirm" } | { s: "starting" } | { s: "started"; conversation: string | null } | { s: "error"; error: string };
 
@@ -118,7 +110,7 @@ function Checks({ checks }: { checks: PrCheck[] }) {
             <span className={`tag tone-${checkTone(c.state)}`}>{c.state}</span>
             <span className="grow" />
             {c.url && (
-              <a className="ext-link" href={c.url} target="_blank" rel="noreferrer" title="Open the check's page">
+              <a className="ext-link" href={c.url} target="_blank" rel="noreferrer" title="Open the check's page" aria-label="Open the check's page">
                 ↗
               </a>
             )}
@@ -156,21 +148,38 @@ const stripHtml = (body: string) =>
     .trim();
 
 export function PrPanel({ refId, data, now }: { refId: string; data: Dashboard; now: number }) {
-  const path = refId.slice(3);
-  const url = `https://github.com/${path.replace(/\/(\d+)$/, "/pull/$1")}`;
+  const target = panelTarget(refId);
+  if (!target) {
+    return (
+      <article className="workspace">
+        <div className="toast">
+          <code>{refId}</code> is not a PR address. A PR address looks like <code>#/pr:owner/repo/123</code>. <a href="#/prs">Open pull requests</a>
+        </div>
+      </article>
+    );
+  }
+  return <Panel refId={refId} path={target.path} url={target.url} data={data} now={now} />;
+}
+
+function Panel({ refId, path, url, data, now }: { refId: string; path: string; url: string; data: Dashboard; now: number }) {
   const pr = data.prs.find((p) => prRef(p.url)?.toLowerCase() === refId.toLowerCase());
   const [detail, setDetail] = useState<PrDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // A slow refresh must not overwrite a newer answer that came back first.
+  const sent = useRef(0);
   const load = async (refresh: boolean) => {
+    const seq = ++sent.current;
     setLoading(true);
     try {
-      setDetail(await api.prDetail(path, refresh));
+      const d = await api.prDetail(path, refresh);
+      if (seq !== sent.current) return;
+      setDetail(d);
       setError(null);
     } catch (err) {
-      setError((err as Error).message);
+      if (seq === sent.current) setError((err as Error).message);
     } finally {
-      setLoading(false);
+      if (seq === sent.current) setLoading(false);
     }
   };
   // Again when the dashboard sees the PR change; the server cache keeps this cheap.
@@ -186,6 +195,7 @@ export function PrPanel({ refId, data, now }: { refId: string; data: Dashboard; 
   const draft = (detail?.isDraft ?? pr?.isDraft) && state === "open";
   const review = REVIEW[detail?.reviewDecision ?? pr?.reviewDecision ?? ""];
   const title = detail?.title ?? pr?.title ?? prName(url);
+  const body = detail ? stripHtml(detail.body) : "";
 
   return (
     <article className="workspace pr-panel" id={refId}>
@@ -290,7 +300,7 @@ export function PrPanel({ refId, data, now }: { refId: string; data: Dashboard; 
                           <b>{c.author}</b>
                           <span className="meta">{age(c.createdAt, now)} ago</span>
                           {c.url && (
-                            <a className="ext-link" href={c.url} target="_blank" rel="noreferrer" title="Open on GitHub">
+                            <a className="ext-link" href={c.url} target="_blank" rel="noreferrer" title="Open on GitHub" aria-label="Open on GitHub">
                               ↗
                             </a>
                           )}
@@ -317,7 +327,7 @@ export function PrPanel({ refId, data, now }: { refId: string; data: Dashboard; 
             <header className="card-head">
               <h3>Description</h3>
             </header>
-            {stripHtml(detail.body) ? <Markdown text={stripHtml(detail.body)} /> : <p className="meta">No description.</p>}
+            {body ? <Markdown text={body} /> : <p className="meta">No description.</p>}
           </section>
 
           <section className="card">
