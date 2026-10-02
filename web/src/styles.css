@@ -401,3 +401,25 @@ a.pr-group-title:hover { text-decoration: underline; text-underline-offset: 3px;
 /* The object that a link points at. */
 .flash { animation: flash 1.8s ease-out; }
 @keyframes flash { 0%, 30% { background: var(--waiting-bg); box-shadow: 0 0 0 2px var(--waiting); } 100% { box-shadow: 0 0 0 2px transparent; } }
+
+/* Ticket section: Jira's description and comments, read when it opens, and the Jira verbs. */
+.ticket-panel:not(.open) { padding-top: 10px; padding-bottom: 10px; }
+.ticket-panel:not(.open) .card-head { margin-bottom: 0; }
+.ticket-toggle { display: flex; align-items: center; gap: 10px; border: 0; background: none; padding: 0; cursor: pointer; color: inherit; font: inherit; }
+.ticket-comments { list-style: none; margin: 12px 0 0; padding: 0; }
+.ticket-comments > li { padding: 10px 0 10px 14px; border-left: 2px solid var(--line-2); }
+.verbs { display: flex; flex-wrap: wrap; gap: 10px 22px; padding-top: 12px; border-top: 1px solid var(--line); }
+.verb { display: inline-flex; align-items: center; gap: 8px; }
+.verb > .meta:first-child { white-space: nowrap; }
+.verb select, .verb input { height: 26px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--bg); font: 12.5px var(--sans); color: var(--ink); }
+.why li .verb, .why li > .btn { margin-left: auto; }
+
+/* Slack messages that a next-steps draft links to. */
+.slack-quotes { margin-top: 8px; font-size: 13px; }
+.slack-quotes summary { cursor: pointer; color: var(--muted); }
+.slack-quotes blockquote { margin: 8px 0 0; padding: 6px 12px; border-left: 3px solid var(--line-2); background: var(--hover); border-radius: 0 8px 8px 0; }
+.slack-quotes blockquote p { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-2); }
+
+/* The selected row on the PRs and History views (J/K). */
+[data-nav-selected] { box-shadow: inset 3px 0 0 var(--waiting); background: var(--hover); }
+.login-toast { position: fixed; top: 64px; right: 24px; z-index: 20; max-width: 460px; }

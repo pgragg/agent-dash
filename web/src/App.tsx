@@ -6,6 +6,10 @@ import { filterHistory, groupByDay } from "./history.ts";
 import { countPrs, groupOpenPrs } from "./prs.ts";
 import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, resumeCommand, runTitle, shortDate, stamp, useDashboard, useFlash, useNow, useWaitNotifications } from "./lib.tsx";
 import { href, humanAge, parseHash, resolveBoardRef, type Route } from "./routes.ts";
+import { FixLogin } from "./fixLogin.tsx";
+import { rowKey } from "./rowNav.ts";
+import { SlackQuotes } from "./slackQuotes.tsx";
+import { DueDateVerb, TicketPanel } from "./ticketPanel.tsx";
 
 /**
  * agent-dash answers one question: "what do I work on next?".
@@ -352,7 +356,10 @@ function NextSteps({ s, state, notes, now, cwd, onError }: { s: Subject; state: 
         </div>
       )}
       {shown?.summary ? (
-        <SummaryBody ticket={key} summary={shown} cwd={cwd} onError={onError} />
+        <>
+          <SummaryBody ticket={key} summary={shown} cwd={cwd} onError={onError} />
+          <SlackQuotes summaryId={shown.id} text={shown.summary} />
+        </>
       ) : (
         !running && (
           <div className="empty-draft">
@@ -829,11 +836,14 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
               <li key={i}>
                 <Dot tone={KIND[a.kind].tone} />
                 <span>{a.reason}</span>
+                {t && (a.kind === "overdue" || a.kind === "due_soon") && <DueDateVerb ticket={t} cwd={cwd} onError={setError} compact />}
               </li>
             ))}
           </ul>
         )}
       </header>
+
+      {t && <TicketPanel key={t.key} ticket={t} cwd={cwd} onError={setError} />}
 
       {error && (
         <div className="toast" role="alert">
@@ -1305,8 +1315,10 @@ function ConversationView({ sessionId, data, now }: { sessionId: string; data: D
 // ---- help ---------------------------------------------------------------------------
 
 const KEYS: [string, string][] = [
-  ["J / ↓", "Next item"],
-  ["K / ↑", "Previous item"],
+  ["J / ↓", "Next item (on PRs and History: next row)"],
+  ["K / ↑", "Previous item (on PRs and History: previous row)"],
+  ["↵", "On PRs and History: open the selected row"],
+  ["T", "Show or hide the ticket's description and comments"],
   ["E", "Done for now (comes back when something changes)"],
   ["R", "Reply to the agent"],
   ["O", "Open the agent's iTerm tab, or its page if it has no tab"],
@@ -1407,6 +1419,7 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
       if (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || e.metaKey || e.ctrlKey || e.altKey) return;
+      if ((view === "prs" || view === "history") && rowKey(e.key)) return void e.preventDefault();
       if (view !== "board" && e.key !== "?" && e.key !== "Escape") return;
       if (e.key === "j" || e.key === "ArrowDown") move(1);
       else if (e.key === "k" || e.key === "ArrowUp") move(-1);
@@ -1486,6 +1499,7 @@ export function App() {
           {down.length ? `${down.map(([n]) => n).join(", ")} down` : "Jira · GitHub · pi"}
           <Dot tone={down.length ? "bad" : "good"} />
         </span>
+        <FixLogin sources={data.sources} onFixed={refresh} />
         <span className="meta">updated {age(data.generatedAt, now)} ago</span>
         <NotifyButton state={notify.state} onEnable={notify.enable} onMute={notify.mute} />
         <button className="btn ghost" onClick={refresh} disabled={loading}>

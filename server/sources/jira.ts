@@ -13,15 +13,28 @@ function token(): string {
   return line.replace(/^(export\s+)?JIRA_API_TOKEN=/, "").replace(/^["']|["']$/g, "").trim();
 }
 
+function basicAuth(): string {
+  return `Basic ${Buffer.from(`${config.jira.login}:${token()}`).toString("base64")}`;
+}
+
+/** A read-only GET on the Jira REST API, such as `/rest/api/3/issue/KEY`. */
+export async function jiraGet(path: string): Promise<any> {
+  const res = await fetch(`${config.jira.server}${path}`, {
+    headers: { Authorization: basicAuth(), Accept: "application/json" },
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) throw new Error(`Jira ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  return res.json();
+}
+
 /** Read-only: POST /search/jql is a query, not a write. */
 async function search(jql: string): Promise<any[]> {
-  const auth = Buffer.from(`${config.jira.login}:${token()}`).toString("base64");
   const issues: any[] = [];
   let nextPageToken: string | undefined;
   do {
     const res = await fetch(`${config.jira.server}/rest/api/3/search/jql`, {
       method: "POST",
-      headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json", Accept: "application/json" },
+      headers: { Authorization: basicAuth(), "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ jql, fields: FIELDS, maxResults: 100, nextPageToken }),
       signal: AbortSignal.timeout(20_000),
     });
