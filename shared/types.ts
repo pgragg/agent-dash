@@ -111,6 +111,14 @@ export interface TicketSummaryState {
   lastDone: TicketSummary | null;
 }
 
+/** A private note you wrote on a ticket. Summary runs read these. */
+export interface Note {
+  id: number;
+  ticket: string;
+  createdAt: string;
+  body: string;
+}
+
 export interface TicketGroup {
   ticket: Ticket;
   /** Oldest first. */
@@ -136,6 +144,8 @@ export interface Dashboard {
   counts: Record<RunStatus, number>;
   /** Next-steps summaries by ticket key. */
   summaries: Record<string, TicketSummaryState>;
+  /** Private notes by ticket key, oldest first. */
+  notes: Record<string, Note[]>;
   sources: { jira: SourceHealth; github: SourceHealth; sessions: SourceHealth };
   extensionInstalled: boolean;
 }

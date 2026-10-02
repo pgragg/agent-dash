@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { TicketSummary } from "../../shared/types.ts";
+import type { Note, TicketSummary } from "../../shared/types.ts";
 
 export const DB_PATH = process.env.AGENT_DASH_DB ?? join(homedir(), ".agent-dash/agent-dash.db");
 
@@ -19,6 +19,14 @@ CREATE TABLE IF NOT EXISTS summaries (
   work_dir     TEXT
 );
 CREATE INDEX IF NOT EXISTS summaries_by_ticket ON summaries (ticket, id DESC);
+
+CREATE TABLE IF NOT EXISTS notes (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket     TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  body       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS notes_by_ticket ON notes (ticket, id);
 `;
 
 interface Row {
@@ -105,6 +113,30 @@ export function summariesByTicket(): Map<string, { latest: SummaryRecord; lastDo
   const done = d.prepare("SELECT * FROM summaries WHERE id IN (SELECT max(id) FROM summaries WHERE status = 'done' GROUP BY ticket)").all() as unknown as Row[];
   const doneBy = new Map(done.map((r) => [r.ticket, toRecord(r)]));
   return new Map(latest.map((r) => [r.ticket, { latest: toRecord(r), lastDone: doneBy.get(r.ticket) ?? null }]));
+}
+
+// ---- notes: private, timestamped notes on a ticket ------------------------------------
+
+export function addNote(ticket: string, body: string, now = new Date()): Note {
+  return open().prepare("INSERT INTO notes (ticket, created_at, body) VALUES (?, ?, ?) RETURNING id, ticket, created_at AS createdAt, body").get(ticket, now.toISOString(), body) as unknown as Note;
+}
+
+export function deleteNote(id: number): boolean {
+  return open().prepare("DELETE FROM notes WHERE id = ?").run(id).changes > 0;
+}
+
+/** Oldest first. */
+export function notesForTicket(ticket: string): Note[] {
+  return open().prepare("SELECT id, ticket, created_at AS createdAt, body FROM notes WHERE ticket = ? ORDER BY id").all(ticket) as unknown as Note[];
+}
+
+/** Every ticket's notes, oldest first. */
+export function notesByTicket(): Record<string, Note[]> {
+  const out: Record<string, Note[]> = {};
+  for (const n of open().prepare("SELECT id, ticket, created_at AS createdAt, body FROM notes ORDER BY id").all() as unknown as Note[]) {
+    (out[n.ticket] ??= []).push({ ...n });
+  }
+  return out;
 }
 
 export function inProgress(): SummaryRecord[] {

@@ -106,6 +106,7 @@ async function dashboard(force: boolean) {
     sources: { jira, github: prs.health, sessions: sessionsHealth },
     extensionInstalled: existsSync(EXTENSION_PATH),
     summaries,
+    notes: summaryDb.notesByTicket(),
     jiraServer: config.jira.server,
   });
 }
@@ -178,6 +179,22 @@ const server = createServer(async (req, res) => {
       const rec = await requestSummary(group, { force: url.searchParams.has("force"), onChange: broadcast });
       broadcast();
       res.writeHead(202, { "Content-Type": "application/json" }).end(JSON.stringify({ id: rec.id, status: rec.status }));
+    } else if (url.pathname === "/api/notes" && (req.method === "POST" || req.method === "DELETE")) {
+      if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
+      const json = (code: number, body: unknown) => void res.writeHead(code, { "Content-Type": "application/json" }).end(JSON.stringify(body));
+      if (req.method === "DELETE") {
+        const ok = summaryDb.deleteNote(Number(url.searchParams.get("id")));
+        broadcast();
+        return json(ok ? 200 : 404, ok ? { ok } : { error: "no such note" });
+      }
+      const ticket = url.searchParams.get("ticket") ?? "";
+      // Only a real ticket key, so a typo cannot file notes under a key that never shows.
+      if (!new RegExp(`^${config.ticketPattern.source}$`).test(ticket)) return json(400, { error: `not a ticket key: ${ticket}` });
+      const { body } = JSON.parse((await readBody(req, 64_000)) || "{}") as { body?: string };
+      if (!body?.trim()) return json(400, { error: "empty note" });
+      const note = summaryDb.addNote(ticket, body.trim());
+      broadcast();
+      json(201, note);
     } else if (url.pathname === "/api/reply" && req.method === "POST") {
       if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
       const sessionId = url.searchParams.get("session") ?? "";

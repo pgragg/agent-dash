@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AttentionItem, AttentionKind, Dashboard, PullRequest, Run, TicketGroup, TicketSummaryState } from "../../shared/types.ts";
-import { age, api, dirLabel, dueLabel, elapsed, Markdown, plural, prName, resumeCommand, runTitle, shortDate, useDashboard, useNow } from "./lib.tsx";
+import type { AttentionItem, AttentionKind, Dashboard, Note, PullRequest, Run, TicketGroup, TicketSummaryState } from "../../shared/types.ts";
+import { age, api, dirLabel, dueLabel, elapsed, Markdown, plural, prName, resumeCommand, runTitle, shortDate, stamp, useDashboard, useNow } from "./lib.tsx";
 
 /**
  * agent-dash answers one question: "what do I work on next?".
@@ -155,7 +155,7 @@ function runTone(run: Run): string {
 
 // ---- queue (left rail) --------------------------------------------------------------
 
-function QueueItem({ s, selected, onSelect, now, summary, rank }: { s: Subject; selected: boolean; onSelect: () => void; now: number; summary?: TicketSummaryState; rank?: number }) {
+function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0 }: { s: Subject; selected: boolean; onSelect: () => void; now: number; summary?: TicketSummaryState; rank?: number; notes?: number }) {
   const top = s.items[0];
   const run = primaryRun(s);
   const ref = useRef<HTMLButtonElement>(null);
@@ -184,6 +184,7 @@ function QueueItem({ s, selected, onSelect, now, summary, rank }: { s: Subject; 
             </span>
           ))}
           {summary && <span className="tag tone-muted" title="Next steps drafted">✦ next steps</span>}
+          {notes > 0 && <span className="tag tone-muted" title={`${plural(notes, "note")}`}>✎ {notes}</span>}
         </span>
       </span>
     </button>
@@ -209,7 +210,7 @@ function RailSection({ title, count, children, defaultOpen = true, hint }: { tit
 
 const STALE_MS = 30 * 60_000;
 
-function NextSteps({ s, state, now, onError }: { s: Subject; state: TicketSummaryState | undefined; now: number; onError: (m: string | null) => void }) {
+function NextSteps({ s, state, notes, now, onError }: { s: Subject; state: TicketSummaryState | undefined; notes: Note[]; now: number; onError: (m: string | null) => void }) {
   const key = s.ticket!.ticket.key;
   const [starting, setStarting] = useState(false);
   const ask = async (force: boolean) => {
@@ -222,7 +223,7 @@ function NextSteps({ s, state, now, onError }: { s: Subject; state: TicketSummar
   const running = latest?.status === "in_progress";
   const stuck = running && now - Date.parse(latest!.requestedAt) > STALE_MS;
   // Activity after the summary was written makes it out of date.
-  const lastActivity = [...(s.ticket?.runs.map((r) => r.lastActivityAt) ?? []), ...(s.ticket?.prs.map((p) => p.updatedAt) ?? [])].sort().at(-1);
+  const lastActivity = [...(s.ticket?.runs.map((r) => r.lastActivityAt) ?? []), ...(s.ticket?.prs.map((p) => p.updatedAt) ?? []), ...notes.map((n) => n.createdAt)].sort().at(-1);
   const outdated = shown?.generatedAt && lastActivity && Date.parse(lastActivity) - Date.parse(shown.generatedAt) > 60_000;
 
   return (
@@ -279,6 +280,74 @@ function NextSteps({ s, state, now, onError }: { s: Subject; state: TicketSummar
           </div>
         )
       )}
+    </section>
+  );
+}
+
+function Notes({ ticket, notes, now, onError, focusSignal }: { ticket: string; notes: Note[]; now: number; onError: (m: string | null) => void; focusSignal: number }) {
+  const [text, setText] = useState("");
+  const [saving, setSaving] = useState(false);
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (focusSignal) ref.current?.focus();
+  }, [focusSignal]);
+  const add = async () => {
+    if (!text.trim()) return;
+    setSaving(true);
+    const err = await api.addNote(ticket, text);
+    setSaving(false);
+    onError(err);
+    if (!err) setText("");
+  };
+  return (
+    <section className="card notes">
+      <header className="card-head">
+        <h3>Notes</h3>
+        <span className="meta">private · next-steps drafts read them</span>
+      </header>
+      {notes.length > 0 && (
+        <ol className="note-list">
+          {[...notes].reverse().map((n) => (
+            <li key={n.id}>
+              <div className="note-meta">
+                <span title={n.createdAt}>{stamp(n.createdAt)}</span>
+                <span>· {age(n.createdAt, now)} ago</span>
+                <button
+                  className="btn ghost small note-delete"
+                  onClick={async () => {
+                    if (confirm("Delete this note?")) onError(await api.deleteNote(n.id));
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+              <Markdown text={n.body} />
+            </li>
+          ))}
+        </ol>
+      )}
+      <div className="composer note-composer">
+        <textarea
+          ref={ref}
+          rows={2}
+          value={text}
+          placeholder="Add a note: a decision, a hunch, what you are waiting for…"
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              add();
+            }
+            if (e.key === "Escape") (e.target as HTMLTextAreaElement).blur();
+          }}
+        />
+        <div className="composer-bar">
+          <span className="meta">saved on {ticket} with the time</span>
+          <button className="btn" onClick={add} disabled={saving || !text.trim()}>
+            {saving ? "Saving…" : "Add note"} <Kbd>⌘↵</Kbd>
+          </button>
+        </div>
+      </div>
     </section>
   );
 }
@@ -421,7 +490,7 @@ function History({ runs, now, onError }: { runs: Run[]; now: number; onError: (m
   );
 }
 
-function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSignal }: {
+function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSignal, noteSignal }: {
   s: Subject;
   data: Dashboard;
   now: number;
@@ -430,6 +499,7 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
   onSnooze: () => void;
   onWake: () => void;
   focusSignal: number;
+  noteSignal: number;
 }) {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => setError(null), [s.id]);
@@ -505,7 +575,9 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
         </div>
       )}
 
-      {s.ticket && <NextSteps s={s} state={data.summaries[s.ticket.ticket.key]} now={now} onError={setError} />}
+      {s.ticket && <NextSteps s={s} state={data.summaries[s.ticket.ticket.key]} notes={data.notes[s.ticket.ticket.key] ?? []} now={now} onError={setError} />}
+
+      {s.ticket && <Notes ticket={s.ticket.ticket.key} notes={data.notes[s.ticket.ticket.key] ?? []} now={now} onError={setError} focusSignal={noteSignal} />}
 
       {featured.length > 0 && (
         <div className="stack">
@@ -552,6 +624,7 @@ const KEYS: [string, string][] = [
   ["R", "Reply to the agent"],
   ["O", "Open the agent's iTerm tab"],
   ["S", "Draft next steps"],
+  ["N", "Add a note"],
   ["⌘↵", "Send the reply"],
   ["Esc", "Leave the reply box"],
   ["?", "Show or hide this help"],
@@ -586,6 +659,7 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(() => decodeURIComponent(location.hash.slice(2)) || null);
   const [help, setHelp] = useState(false);
   const [focusSignal, setFocusSignal] = useState(0);
+  const [noteSignal, setNoteSignal] = useState(0);
 
   const subjects = useMemo(() => (data ? buildSubjects(data) : new Map<string, Subject>()), [data]);
   const all = [...subjects.values()];
@@ -636,6 +710,7 @@ export function App() {
       else if (e.key === "?") setHelp((h) => !h);
       else if (e.key === "Escape") setHelp(false);
       else if (e.key === "r") setFocusSignal((n) => n + 1);
+      else if (e.key === "n" && selected?.ticket) setNoteSignal((n) => n + 1);
       else if (e.key === "o" && selected) {
         const run = primaryRun(selected);
         if (run?.itermSessionId) api.focusTab(run.sessionId);
@@ -702,7 +777,7 @@ export function App() {
         <nav className="rail">
           <RailSection title="Up next" count={queue.length}>
             {queue.map((s, i) => (
-              <QueueItem key={s.id} s={s} rank={i + 1} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined} />
+              <QueueItem key={s.id} s={s} rank={i + 1} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
             ))}
           </RailSection>
           {queue.length === 0 && (
@@ -717,21 +792,21 @@ export function App() {
           )}
           <RailSection title="Agents at work" count={working.length} hint="Live runs that need nothing from you yet">
             {working.map((s) => (
-              <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} />
+              <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
             ))}
           </RailSection>
           <RailSection title="Done for now" count={done.length} defaultOpen={false} hint="Back in the queue when something changes">
             {done.map((s) => (
-              <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} />
+              <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
             ))}
           </RailSection>
           <RailSection title="Quiet tickets" count={quiet.length} defaultOpen={false} hint="Your tickets with nothing going on">
             {quiet.map((s) => (
-              <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} />
+              <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
             ))}
           </RailSection>
           <footer className="rail-foot">
-            <Kbd>J</Kbd> <Kbd>K</Kbd> move · <Kbd>E</Kbd> done for now · <Kbd>R</Kbd> reply · <Kbd>?</Kbd> all keys
+            <Kbd>J</Kbd> <Kbd>K</Kbd> move · <Kbd>E</Kbd> done · <Kbd>R</Kbd> reply · <Kbd>N</Kbd> note · <Kbd>?</Kbd> more
           </footer>
         </nav>
 
@@ -751,6 +826,7 @@ export function App() {
               onSnooze={snoozeAndAdvance}
               onWake={() => snoozed.wake(selected)}
               focusSignal={focusSignal}
+              noteSignal={noteSignal}
             />
           ) : (
             <div className="zero big">Nothing to show.</div>

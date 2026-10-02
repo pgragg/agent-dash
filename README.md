@@ -22,7 +22,8 @@ pnpm build && pnpm start # http://127.0.0.1:7777
 - **Left: the queue.** One entry per ticket (or per ticket-less run or PR), ranked by its most urgent signal (see [Queue ranking](#queue-ranking)). Under it: **Agents at work**, **Done for now**, and **Quiet tickets** (your tickets with nothing going on).
 - **Right: a workspace for the selected entry.** In order: why the entry is in the queue, the drafted [next steps](#next-steps-summaries), each live agent's whole last message with a reply box, the PRs, and the run history.
 - **Done for now** (`E`) hides an entry until one of its signals changes, so the queue works like an inbox. It is saved in the browser's localStorage.
-- **Keyboard**: `J`/`K` move, `E` done for now, `R` reply, `O` open the iTerm tab, `S` draft next steps, `⌘↵` send, `?` help.
+- **Notes**: each ticket's workspace has a private, timestamped notes list (`N`). Notes are saved in SQLite (`notes` table: `ticket`, `created_at`, `body`) and never leave your machine, except that a next-steps draft reads them first and trusts them over older sources. A note newer than the draft marks it **out of date**.
+- **Keyboard**: `J`/`K` move, `E` done for now, `R` reply, `N` note, `O` open the iTerm tab, `S` draft next steps, `⌘↵` send, `?` help.
 - `#/t:FSDK-123` or `#/r:<sessionId>` in the URL selects an entry.
 
 ## Reply to an agent
@@ -108,7 +109,7 @@ Draft PRs score half. Tickets that are On Hold, Blocked, Waiting or Deferred sco
 The **Next steps** card on a ticket's workspace starts a headless pi run (**Draft next steps**, or `S`) that writes a very short summary for the ticket: its state, 1 to 4 next steps with who acts, and its blockers.
 
 1. The server adds an `in_progress` row to SQLite (`~/.agent-dash/agent-dash.db`, table `summaries`) with the ticket and `requested_at`.
-2. It writes `~/.agent-dash/summaries/<id>/context.md` with what it already knows: ticket fields, linked PRs, and a digest of each pi session about the ticket (prompts and replies, no tool output, newest first within a 60k-character budget).
+2. It writes `~/.agent-dash/summaries/<id>/context.md` with what it already knows: your notes on the ticket, ticket fields, linked PRs, and a digest of each pi session about the ticket (prompts and replies, no tool output, newest first within a 60k-character budget).
 3. It starts `pi -p --no-extensions --tools read,bash --session-dir ~/.agent-dash/summary-sessions`. The separate session folder keeps summary runs out of the ticket's run list. The prompt is read-only, and tells the run to read the context, then `jira issue view --comments`, `gh pr view --comments`, and `scripts/slack-search.ts`.
 4. The run saves its summary with `node scripts/save-summary.ts <id> < summary.md`. That sets `status = done` and `generated_at`.
 

@@ -3,7 +3,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { PullRequest, Run, Ticket } from "../../shared/types.ts";
+import type { Note, PullRequest, Run, Ticket } from "../../shared/types.ts";
 import { digestSession } from "../sources/sessions.ts";
 import { isAlive } from "../sources/status.ts";
 import * as db from "./db.ts";
@@ -26,6 +26,7 @@ export interface SummaryInput {
   ticket: Ticket;
   runs: Run[];
   prs: PullRequest[];
+  notes?: Note[];
 }
 
 function prLine(p: PullRequest): string {
@@ -34,13 +35,17 @@ function prLine(p: PullRequest): string {
 }
 
 /** What agent-dash already knows, so the agent spends its time on Jira, PR comments and Slack. */
-export async function buildContext({ ticket, runs, prs }: SummaryInput): Promise<string> {
+export async function buildContext({ ticket, runs, prs, notes = [] }: SummaryInput): Promise<string> {
   const out: string[] = [
     `# ${ticket.key}: ${ticket.summary}`,
     "",
     `- Jira: ${ticket.url}`,
     `- Status: ${ticket.status} · Priority: ${ticket.priority ?? "-"} · Due: ${ticket.dueDate ?? "-"} · Updated: ${ticket.updatedAt || "-"}`,
     `- Assigned to Piper: ${ticket.assignedToMe ? "yes" : "no"}`,
+    "",
+    // Piper's notes come first: they hold decisions and context that no other source has.
+    `## Piper's private notes on ${ticket.key} (oldest first)`,
+    ...(notes.length ? notes.map((n) => `- [${n.createdAt}] ${n.body.replace(/\n/g, "\n  ")}`) : ["- none"]),
     "",
     `## PRs linked to ${ticket.key} (GitHub, updated in the last 14 days)`,
     ...(prs.length ? prs.map(prLine) : ["- none found"]),
@@ -84,9 +89,10 @@ export function buildPrompt(key: string, id: number, workDir: string): string {
 RULES
 - Read-only. Do not write to Jira, GitHub, Slack, or any repo: no comments, transitions, reviews, messages, reactions, commits, or pushes.
 - Spend at most 10 minutes. If a source fails, skip it and note it under "Gaps".
+- Piper's private notes (in the context file) are the most trusted source: when a newer note disagrees with an older source, follow the note. They are private, so never copy them anywhere outside the summary.
 
 STEPS
-1. Read ${contextFile}. agent-dash already put the ticket fields, linked PRs, and digests of the pi sessions about ${key} in it.
+1. Read ${contextFile}. agent-dash already put Piper's private notes, the ticket fields, linked PRs, and digests of the pi sessions about ${key} in it.
 2. Jira body and comments:
    set -a; source ~/pi/secrets/jira/.env.personal; set +a; jira issue view ${key} --comments 20 --plain
 3. For each open PR, and each PR merged in the last 7 days, read CI and review comments:
@@ -166,7 +172,7 @@ export async function requestSummary(input: SummaryInput, opts: { force?: boolea
   const workDir = join(WORK_ROOT, String(rec.id));
   mkdirSync(workDir, { recursive: true });
   mkdirSync(SESSION_DIR, { recursive: true });
-  writeFileSync(join(workDir, "context.md"), await buildContext(input));
+  writeFileSync(join(workDir, "context.md"), await buildContext({ ...input, notes: input.notes ?? db.notesForTicket(key) }));
   const prompt = buildPrompt(key, rec.id, workDir);
   writeFileSync(join(workDir, "prompt.md"), prompt);
 

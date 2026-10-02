@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import * as db from "../server/summaries/db.ts";
-import { buildPrompt, finish } from "../server/summaries/runner.ts";
+import { buildContext, buildPrompt, finish } from "../server/summaries/runner.ts";
 import { digestSession } from "../server/sources/sessions.ts";
-import { header, jsonl, reply, toolCall, toolResult, user } from "./helpers.ts";
+import { header, jsonl, reply, ticket, toolCall, toolResult, user } from "./helpers.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "agent-dash-test-"));
 const dbPath = join(dir, "test.db");
@@ -82,4 +82,24 @@ test("the prompt is read-only and names the save command for this request", () =
   assert.match(p, /save-summary\.ts 42 < \/w\/summary\.md/);
   assert.match(p, /jira issue view FSDK-5/);
   assert.match(p, /slack-search\.ts "FSDK-5"/);
+});
+
+test("notes are saved per ticket with a timestamp, oldest first, and can be deleted", () => {
+  const a = db.addNote("FSDK-7", "first", new Date("2026-10-02T10:00:00Z"));
+  const b = db.addNote("FSDK-7", "second", new Date("2026-10-02T11:00:00Z"));
+  db.addNote("FSDK-8", "other ticket");
+  assert.deepEqual(db.notesForTicket("FSDK-7").map((n) => [n.body, n.createdAt]), [["first", "2026-10-02T10:00:00.000Z"], ["second", "2026-10-02T11:00:00.000Z"]]);
+  assert.equal(db.notesByTicket()["FSDK-8"].length, 1);
+  assert.equal(db.deleteNote(a.id), true);
+  assert.deepEqual(db.notesForTicket("FSDK-7").map((n) => n.id), [b.id]);
+  assert.equal(db.deleteNote(a.id), false);
+});
+
+test("a summary run gets the notes, with their times, ahead of the other sources", async () => {
+  const notes = [{ id: 1, ticket: "FSDK-9", createdAt: "2026-10-02T10:00:00.000Z", body: "Arie said: wait for the cutover.\nThen merge." }];
+  const ctx = await buildContext({ ticket: ticket({ key: "FSDK-9" }), runs: [], prs: [], notes });
+  assert.match(ctx, /private notes on FSDK-9/);
+  assert.match(ctx, /- \[2026-10-02T10:00:00.000Z\] Arie said: wait for the cutover.\n  Then merge./);
+  assert.ok(ctx.indexOf("private notes") < ctx.indexOf("## PRs"));
+  assert.match(buildPrompt("FSDK-9", 1, "/w"), /private notes/);
 });
