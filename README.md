@@ -164,10 +164,11 @@ Each link out of the dash is a sign of a missing view or verb. The dash counts t
 | `copy_resume` | click **Copy resume** |
 | `iterm_focus` | bring an iTerm tab to the front, with the button or `O` |
 
-- One capturing click listener in `web/src/exits.ts` sees every external link (`target="_blank"`), also a middle-click. It reads the view from the URL hash, and the section from the nearest known class (for example `workspace header`, `pr row`, `agent message`, `next steps`). The ticket is the selected ticket, else the key link of the area clicked, else the key in the link.
+- One capturing click listener in `web/src/exits.ts` sees every external link (`target="_blank"`), also a middle-click. It reads the view from the URL hash, and the section from the nearest known class (for example `workspace header`, `pr row`, `agent message`, `next steps`). The ticket is the selected ticket, else the key link of the PR group, action row or workspace clicked, else the key in the link. A PR group with no ticket records no ticket.
 - The page posts each exit to `POST /api/exits`. It needs the `X-Agent-Dash: 1` header, takes at most 2 KB, and refuses unknown kinds.
 - `POST /api/focus` records `iterm_focus` itself after a good focus, so the `O` key counts too. It has no section.
 - `GET /api/exits?days=7` returns the counts by kind and section, most used first.
+- A row keeps the host of the link, never the full URL. Rows are kept until you delete them.
 - `pnpm exits [days]` prints the same ranking from SQLite, also when the server is down:
 
 ```

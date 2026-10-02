@@ -23,7 +23,7 @@ export interface ExitCount {
   count: number;
 }
 
-const JIRA_KEY = /\/browse\/([A-Z][A-Z0-9]+-\d+)/;
+const JIRA_KEY = /^\/browse\/([A-Z][A-Z0-9]+-\d+)/;
 
 /** What kind of exit a link is, from its href alone. */
 export function classifyHref(href: string): { kind: ExitKind; host: string | null; ticket: string | null } {
@@ -70,6 +70,24 @@ export function sectionOf(classChain: string[]): string {
     if (hit) return hit[1];
   }
   return "page";
+}
+
+const KEY = /^[A-Z][A-Z0-9]+-\d+$/;
+const KEY_IN_HREF = /(?:\/browse\/|^#\/t:)([A-Z][A-Z0-9]+-\d+)/;
+const keyIn = (hrefs: string[]) => hrefs.map((h) => h.match(KEY_IN_HREF)?.[1]).find(Boolean) ?? null;
+
+/**
+ * The ticket of the page area clicked: the selected ticket (`#/t:KEY`), else the key link of the
+ * nearest box (PR group, action row), else of the workspace, else the key in the link itself.
+ * A box without a key link means "no ticket", so it never borrows a neighbour's key.
+ */
+export function pickTicket(hash: string, boxHrefs: string[] | null, workspaceHrefs: string[], fromHref: string | null): string | null {
+  let ref = "";
+  try {
+    ref = decodeURIComponent(hash.match(/^#\/t:([^/]+)$/)?.[1] ?? "");
+  } catch {}
+  if (KEY.test(ref)) return ref;
+  return (boxHrefs ? keyIn(boxHrefs) : keyIn(workspaceHrefs)) ?? fromHref;
 }
 
 const cap = (v: unknown, n: number) => (typeof v === "string" && v.trim() ? v.trim().slice(0, n) : null);

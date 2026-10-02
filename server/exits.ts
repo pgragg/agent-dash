@@ -20,6 +20,7 @@ CREATE INDEX IF NOT EXISTS exits_by_at ON exits (at);
 `;
 
 let db: DatabaseSync | null = null;
+let lastWrite = 0;
 
 export function open(path = DB_PATH): DatabaseSync {
   if (db) return db;
@@ -36,9 +37,15 @@ export function recordExit(e: Exit, now = new Date()): void {
     open()
       .prepare("INSERT INTO exits (at, kind, host, view, section, ticket) VALUES (?, ?, ?, ?, ?, ?)")
       .run(now.toISOString(), e.kind, e.host, e.view, e.section, e.ticket);
+    lastWrite = Date.now();
   } catch (err) {
     console.error(`could not record exit: ${(err as Error).message}`);
   }
+}
+
+/** True just after an exit was saved, so the DB watcher can skip a page refresh it does not need. */
+export function wroteRecently(ms = 1000): boolean {
+  return Date.now() - lastWrite < ms;
 }
 
 /** Exits in the last `days` days, by kind and section, most used first. */
@@ -49,5 +56,6 @@ export function exitCounts(days: number, now = new Date()): ExitCount[] {
       `SELECT kind, COALESCE(section, '') AS section, COUNT(*) AS count FROM exits
        WHERE at >= ? GROUP BY kind, COALESCE(section, '') ORDER BY count DESC, kind, section`,
     )
-    .all(since) as unknown as ExitCount[];
+    .all(since)
+    .map((r) => ({ ...r }) as unknown as ExitCount);
 }

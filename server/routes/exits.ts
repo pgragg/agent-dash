@@ -26,24 +26,24 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   if (req.method === "GET") {
     const days = Math.min(365, Math.max(1, Number(url.searchParams.get("days")) || 7));
     json(200, { days, counts: exitCounts(days) });
-    return true;
+  } else if (req.method !== "POST") {
+    res.writeHead(405, { Allow: "GET, POST" }).end();
+  } else if (req.headers["x-agent-dash"] !== "1") {
+    // Same CSRF guard as /api/focus: a custom header forces a preflight that is never answered.
+    res.writeHead(403).end();
+  } else {
+    const raw = await readBody(req);
+    let exit = null;
+    try {
+      exit = raw === null ? null : parseExit(JSON.parse(raw), config.ticketPattern);
+    } catch {}
+    if (raw === null) json(413, { error: "body too large" });
+    // The focus endpoint records iTerm exits itself, so the page cannot count one twice.
+    else if (!exit || exit.kind === "iterm_focus") json(400, { error: "not a valid exit" });
+    else {
+      recordExit(exit);
+      json(201, { ok: true });
+    }
   }
-  if (req.method !== "POST") return json(405, { error: "GET or POST" }), true;
-  // Same CSRF guard as /api/focus: a custom header forces a preflight that is never answered.
-  if (req.headers["x-agent-dash"] !== "1") return res.writeHead(403).end(), true;
-  const raw = await readBody(req);
-  if (raw === null) return json(413, { error: "body too large" }), true;
-  let body: unknown;
-  try {
-    body = JSON.parse(raw);
-  } catch {
-    return json(400, { error: "not JSON" }), true;
-  }
-  const exit = parseExit(body, config.ticketPattern);
-  if (!exit) return json(400, { error: "unknown exit kind" }), true;
-  // The focus endpoint records iTerm exits itself, so the page cannot count one twice.
-  if (exit.kind === "iterm_focus") return json(400, { error: "iterm_focus is recorded by /api/focus" }), true;
-  recordExit(exit);
-  json(201, { ok: true });
   return true;
 }

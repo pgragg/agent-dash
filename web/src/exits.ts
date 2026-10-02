@@ -1,12 +1,10 @@
-import { classifyHref, type Exit, type ExitKind, sectionOf } from "../../shared/exits.ts";
+import { classifyHref, type Exit, type ExitKind, pickTicket, sectionOf } from "../../shared/exits.ts";
 import { parseHash } from "./routes.ts";
 
 /**
  * Counts every link out of the dash, from one capturing listener, so no component needs a hook.
  * "Open in iTerm" is counted on the server instead, because the `O` key reaches it without a click.
  */
-
-const KEY = /^[A-Z][A-Z0-9]+-\d+$/;
 
 function classChain(el: Element): string[] {
   const out: string[] = [];
@@ -16,20 +14,8 @@ function classChain(el: Element): string[] {
   return out;
 }
 
-const KEY_IN_HREF = /(?:\/browse\/|^#\/t:)([A-Z][A-Z0-9]+-\d+)/;
-
-/** The ticket of the page area clicked: the selected ticket, its box's key link, else the link's own key. */
-function ticketFor(el: Element, fromHref: string | null): string | null {
-  const ref = decodeURIComponent(location.hash.match(/^#\/t:([^/]+)$/)?.[1] ?? "");
-  if (KEY.test(ref)) return ref;
-  // A workspace, a PR group, or an action row shows its own ticket as a key link.
-  for (const box of [el.closest(".stack, .action"), el.closest("article")]) {
-    for (const a of box?.querySelectorAll("a.key-link") ?? []) {
-      const key = a.getAttribute("href")?.match(KEY_IN_HREF)?.[1];
-      if (key) return key;
-    }
-  }
-  return fromHref;
+function keyLinks(box: Element | null): string[] {
+  return [...(box?.querySelectorAll("a.key-link") ?? [])].map((a) => a.getAttribute("href") ?? "");
 }
 
 function send(exit: Exit): void {
@@ -38,7 +24,13 @@ function send(exit: Exit): void {
 }
 
 function record(el: Element, kind: ExitKind, host: string | null, ticket: string | null): void {
-  send({ kind, host, view: parseHash(location.hash).view, section: sectionOf(classChain(el)), ticket: ticketFor(el, ticket) });
+  // A lost count must never break the click, so nothing here may throw.
+  try {
+    // Only a PR group or an action row has a ticket of its own; board stacks use the workspace's.
+    const box = el.closest(".action, .stack:has(> .pr-group-head)");
+    const t = pickTicket(location.hash, box && keyLinks(box), keyLinks(el.closest("article")), ticket);
+    send({ kind, host, view: parseHash(location.hash).view, section: sectionOf(classChain(el)), ticket: t });
+  } catch {}
 }
 
 function onClick(e: MouseEvent): void {
@@ -47,13 +39,15 @@ function onClick(e: MouseEvent): void {
   const target = e.target instanceof Element ? e.target : null;
   if (!target) return;
   const link = target.closest<HTMLAnchorElement>("a[href]");
-  if (link && (link.target === "_blank" || e.button === 1 || e.metaKey || e.ctrlKey) && /^https?:/.test(link.href) && link.origin !== location.origin) {
+  // Any link to another origin leaves the dash; in-dash links are same-origin hashes.
+  if (link && /^https?:/.test(link.href) && link.origin !== location.origin) {
     const { kind, host, ticket } = classifyHref(link.href);
     return record(link, kind, host, ticket);
   }
   if (e.type !== "click") return;
   const button = target.closest("button");
-  if (button && (button.dataset.exit === "copy_resume" || button.textContent?.trim() === "Copy resume")) record(button, "copy_resume", "terminal", null);
+  // Matched by label, so App.tsx needs no hook; a renamed label stops this count.
+  if (button?.textContent?.trim() === "Copy resume") record(button, "copy_resume", "terminal", null);
 }
 
 document.addEventListener("click", onClick, true);
