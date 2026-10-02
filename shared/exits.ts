@@ -45,6 +45,13 @@ export function classifyHref(href: string): { kind: ExitKind; host: string | nul
 /** Nearest first: the first ancestor whose classes match names the section. */
 const SECTIONS: [string, string][] = [
   ["pr-row", "pr row"],
+  ["pr-line", "pr row"],
+  ["pr-checks", "pr panel checks"],
+  ["pr-threads", "pr panel review"],
+  ["pr-panel", "pr panel"],
+  ["ticket-comments", "ticket comments"],
+  ["ticket-panel", "ticket section"],
+  ["slack-quotes", "slack quotes"],
   ["pr-group-head", "pr group header"],
   ["agent-message", "agent message"],
   ["h-message", "history message"],

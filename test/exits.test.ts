@@ -26,6 +26,10 @@ test("an href gives the exit kind, host, and the Jira key when it has one", () =
 test("the section is the nearest known class, and 'page' when none is known", () => {
   assert.equal(sectionOf(["key-link", "ws-meta", "ws-head", "workspace"]), "workspace header");
   assert.equal(sectionOf(["", "agent-message clamped", "card agent tone-border-muted", "workspace"]), "agent message");
+  // The ↗ next to an in-dash PR row, and links inside the PR panel and the ticket section.
+  assert.equal(sectionOf(["ext-link pr-ext", "pr-line", "card flush", "workspace"]), "pr row");
+  assert.equal(sectionOf(["ext-link", "pr-check-row", "", "pr-checks", "card", "workspace pr-panel"]), "pr panel checks");
+  assert.equal(sectionOf(["", "", "ticket-comments", "card ticket-panel open", "workspace"]), "ticket comments");
   assert.equal(sectionOf(["pr-row closed", "card flush", "stack"]), "pr row");
   assert.equal(sectionOf(["btn ghost small", "h-row", "h-list"]), "history row");
   assert.equal(sectionOf(["steps", "card next-steps"]), "next steps");
