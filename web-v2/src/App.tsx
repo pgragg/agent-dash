@@ -1,0 +1,763 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { AttentionItem, AttentionKind, Dashboard, PullRequest, Run, TicketGroup, TicketSummaryState } from "../../shared/types.ts";
+import { age, api, dirLabel, dueLabel, elapsed, Markdown, plural, prName, resumeCommand, runTitle, shortDate, useDashboard, useNow } from "./lib.tsx";
+
+/**
+ * agent-dash v2: one question, "what do I work on next?".
+ *
+ * The left rail is a queue: one entry per ticket (or per ticket-less run or PR), ranked by
+ * its most urgent signal. The right side is a workspace for the selected entry, with
+ * everything needed to act on it in place: the drafted next steps, the agent's full last
+ * message with a reply box, the PRs, and the run history. "Done for now" clears an entry
+ * until something about it changes, so the queue works like an inbox.
+ */
+
+// ---- subjects: the things you can select --------------------------------------------
+
+interface Subject {
+  id: string;
+  ticket: TicketGroup | null;
+  /** A run with no ticket. */
+  run: Run | null;
+  /** A PR with no ticket and no run. */
+  prUrl: string | null;
+  /** Most urgent first. */
+  items: AttentionItem[];
+  /** Changes whenever a signal changes, so "done for now" expires on news. */
+  fingerprint: string;
+}
+
+const KIND: Record<AttentionKind, { title: string; tone: "waiting" | "bad" | "warn" | "good" | "muted" }> = {
+  run_error: { title: "Agent hit an error", tone: "bad" },
+  awaiting_input: { title: "Agent is waiting on you", tone: "waiting" },
+  changes_requested: { title: "Changes requested", tone: "bad" },
+  ci_failing: { title: "CI is failing", tone: "bad" },
+  merge_conflict: { title: "Merge conflict", tone: "bad" },
+  ready_to_merge: { title: "Ready to merge", tone: "good" },
+  overdue: { title: "Overdue", tone: "bad" },
+  due_soon: { title: "Due soon", tone: "warn" },
+  stalled: { title: "Stalled", tone: "muted" },
+};
+
+const SHORT: Record<AttentionKind, string> = {
+  run_error: "error",
+  awaiting_input: "waiting",
+  changes_requested: "changes",
+  ci_failing: "CI red",
+  merge_conflict: "conflict",
+  ready_to_merge: "merge",
+  overdue: "overdue",
+  due_soon: "due soon",
+  stalled: "stalled",
+};
+
+function buildSubjects(d: Dashboard): Map<string, Subject> {
+  const out = new Map<string, Subject>();
+  const add = (id: string, init: Omit<Subject, "id" | "items" | "fingerprint">) => {
+    if (!out.has(id)) out.set(id, { id, items: [], fingerprint: "", ...init });
+    return out.get(id)!;
+  };
+  for (const g of [...d.myTickets, ...d.otherTickets]) add(`t:${g.ticket.key}`, { ticket: g, run: null, prUrl: null });
+  for (const r of d.unlinkedRuns) add(`r:${r.sessionId}`, { ticket: null, run: r, prUrl: null });
+  for (const a of d.attention) {
+    const id = a.ticketKey ? `t:${a.ticketKey}` : a.sessionId ? `r:${a.sessionId}` : `p:${a.prUrl}`;
+    const s = out.get(id) ?? add(id, { ticket: null, run: a.run ?? null, prUrl: a.prUrl ?? null });
+    s.items.push(a);
+  }
+  for (const s of out.values()) s.fingerprint = s.items.map((a) => `${a.kind}@${a.updatedAt}`).join("|");
+  return out;
+}
+
+function subjectTitle(s: Subject): string {
+  if (s.ticket) return s.ticket.ticket.summary;
+  if (s.run) return runTitle(s.run);
+  return s.prUrl ? prName(s.prUrl) : s.id;
+}
+
+/** Live agents first (waiting before working), then the newest. */
+function liveRuns(s: Subject): Run[] {
+  const runs = s.ticket ? s.ticket.runs : s.run ? [s.run] : [];
+  const rank = (r: Run) => (r.status === "awaiting_input" ? 0 : r.status === "working" ? 1 : 2);
+  return runs.filter((r) => r.status !== "finished").sort((a, b) => rank(a) - rank(b) || b.lastActivityAt.localeCompare(a.lastActivityAt));
+}
+
+/** The run that "open in iTerm" and the reply box act on. */
+function primaryRun(s: Subject): Run | undefined {
+  return s.items.find((a) => a.run?.status === "awaiting_input")?.run ?? liveRuns(s)[0] ?? s.items.find((a) => a.run)?.run;
+}
+
+// ---- "done for now" -----------------------------------------------------------------
+
+const SNOOZE_KEY = "agent-dash:v2:done-for-now";
+
+function useSnoozed() {
+  const [map, setMap] = useState<Record<string, string>>(() => JSON.parse(localStorage.getItem(SNOOZE_KEY) ?? "{}"));
+  const save = (next: Record<string, string>) => {
+    setMap(next);
+    localStorage.setItem(SNOOZE_KEY, JSON.stringify(next));
+  };
+  return {
+    isSnoozed: (s: Subject) => map[s.id] === s.fingerprint,
+    snooze: (s: Subject) => save({ ...map, [s.id]: s.fingerprint }),
+    wake: (s: Subject) => {
+      const { [s.id]: _gone, ...rest } = map;
+      save(rest);
+    },
+  };
+}
+
+// ---- small pieces -------------------------------------------------------------------
+
+function Dot({ tone, pulse }: { tone: string; pulse?: boolean }) {
+  return <span className={`dot tone-${tone} ${pulse ? "pulse" : ""}`} aria-hidden />;
+}
+
+function Kbd({ children }: { children: string }) {
+  return <kbd>{children}</kbd>;
+}
+
+function CopyButton({ text, label, className = "btn ghost" }: { text: string; label: string; className?: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      className={className}
+      title={text}
+      onClick={async () => {
+        await navigator.clipboard.writeText(text);
+        setDone(true);
+        setTimeout(() => setDone(false), 1400);
+      }}
+    >
+      {done ? "Copied" : label}
+    </button>
+  );
+}
+
+function OpenTab({ run, onError, className = "btn ghost", label = "Open in iTerm", hotkey = false }: { run: Run; onError: (m: string | null) => void; className?: string; label?: string; hotkey?: boolean }) {
+  if (!run.itermSessionId) return <CopyButton text={resumeCommand(run)} label="Copy resume" className={className} />;
+  return (
+    <button className={className} title="Bring this session's iTerm tab to the front" onClick={async () => onError(await api.focusTab(run.sessionId))}>
+      {label} {hotkey && <Kbd>O</Kbd>}
+    </button>
+  );
+}
+
+function statusText(run: Run, now: number): string {
+  const guess = run.statusSource === "heuristic" ? " (guess)" : "";
+  if (run.status === "awaiting_input") return `waiting ${age(run.statusSince, now)}${guess}`;
+  if (run.status === "working") return `working ${age(run.statusSince, now)}${guess}`;
+  return `finished ${age(run.lastActivityAt, now)} ago`;
+}
+
+function runTone(run: Run): string {
+  return run.endedInError ? "bad" : run.status === "awaiting_input" ? "waiting" : run.status === "working" ? "working" : "muted";
+}
+
+// ---- queue (left rail) --------------------------------------------------------------
+
+function QueueItem({ s, selected, onSelect, now, summary, rank }: { s: Subject; selected: boolean; onSelect: () => void; now: number; summary?: TicketSummaryState; rank?: number }) {
+  const top = s.items[0];
+  const run = primaryRun(s);
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (selected) ref.current?.scrollIntoView({ block: "nearest" });
+  }, [selected]);
+  const headline = top ? KIND[top.kind].title : run ? statusText(run, now) : s.ticket?.ticket.status ?? "";
+  const tone = top ? KIND[top.kind].tone : run ? runTone(run) : "muted";
+  const when = top?.kind === "awaiting_input" && run ? age(run.statusSince, now) : age(top?.updatedAt ?? run?.lastActivityAt ?? s.ticket?.ticket.updatedAt, now);
+  const extra = [...new Set(s.items.slice(1).map((a) => a.kind))].filter((k) => k !== top?.kind);
+  return (
+    <button ref={ref} className={`q-item ${selected ? "selected" : ""}`} onClick={onSelect} aria-current={selected}>
+      <span className="q-rank">{rank ?? ""}</span>
+      <span className="q-body">
+        <span className="q-head">
+          <Dot tone={tone} pulse={run?.status === "working"} />
+          <span className={`q-headline tone-text-${tone}`}>{headline}</span>
+          <span className="q-when">{when}</span>
+        </span>
+        <span className="q-title">{subjectTitle(s)}</span>
+        <span className="q-tags">
+          {s.ticket && <span className="q-key">{s.ticket.ticket.key}</span>}
+          {extra.map((k) => (
+            <span key={k} className={`tag tone-${KIND[k].tone}`}>
+              {SHORT[k]}
+            </span>
+          ))}
+          {summary && <span className="tag tone-muted" title="Next steps drafted">✦ next steps</span>}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+function RailSection({ title, count, children, defaultOpen = true, hint }: { title: string; count: number; children: React.ReactNode; defaultOpen?: boolean; hint?: string }) {
+  const [open, setOpen] = useState(defaultOpen);
+  if (count === 0) return null;
+  return (
+    <section className="rail-section">
+      <button className="rail-title" onClick={() => setOpen(!open)} title={hint}>
+        <span className={`chev ${open ? "open" : ""}`}>›</span>
+        {title}
+        <span className="count">{count}</span>
+      </button>
+      {open && <div className="rail-list">{children}</div>}
+    </section>
+  );
+}
+
+// ---- workspace (right side) ---------------------------------------------------------
+
+const STALE_MS = 30 * 60_000;
+
+function NextSteps({ s, state, now, onError }: { s: Subject; state: TicketSummaryState | undefined; now: number; onError: (m: string | null) => void }) {
+  const key = s.ticket!.ticket.key;
+  const [starting, setStarting] = useState(false);
+  const ask = async (force: boolean) => {
+    setStarting(true);
+    onError(await api.summarize(key, force));
+    setStarting(false);
+  };
+  const latest = state?.latest;
+  const shown = latest?.status === "done" ? latest : (state?.lastDone ?? null);
+  const running = latest?.status === "in_progress";
+  const stuck = running && now - Date.parse(latest!.requestedAt) > STALE_MS;
+  // Activity after the summary was written makes it out of date.
+  const lastActivity = [...(s.ticket?.runs.map((r) => r.lastActivityAt) ?? []), ...(s.ticket?.prs.map((p) => p.updatedAt) ?? [])].sort().at(-1);
+  const outdated = shown?.generatedAt && lastActivity && Date.parse(lastActivity) - Date.parse(shown.generatedAt) > 60_000;
+
+  return (
+    <section className="card next-steps">
+      <header className="card-head">
+        <h3>
+          <span className="spark">✦</span> Next steps
+        </h3>
+        {outdated && !running && <span className="tag tone-warn">out of date</span>}
+        <span className="grow" />
+        {shown?.generatedAt && <span className="meta">drafted {age(shown.generatedAt, now)} ago</span>}
+        {shown && !running && (
+          <button className="btn ghost small" onClick={() => ask(false)} disabled={starting}>
+            Redraft <Kbd>S</Kbd>
+          </button>
+        )}
+      </header>
+      {running && (
+        <div className={`drafting ${stuck ? "stuck" : ""}`}>
+          {stuck ? (
+            <>
+              <span>Drafting has run for {elapsed(latest!.requestedAt, now)}. It is probably stuck.</span>
+              <button className="btn small" onClick={() => ask(true)}>
+                Start again
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="shimmer" />
+              <span>
+                Reading Jira, PRs, Slack and agent history… <b>{elapsed(latest!.requestedAt, now)}</b>
+              </span>
+            </>
+          )}
+        </div>
+      )}
+      {latest?.status === "failed" && (
+        <div className="draft-failed" title={latest.error ?? ""}>
+          The last draft failed: {(latest.error ?? "").split("\n")[0].slice(0, 160)}{" "}
+          <button className="btn small" onClick={() => ask(true)}>
+            Retry
+          </button>
+        </div>
+      )}
+      {shown?.summary ? (
+        <Markdown text={shown.summary} />
+      ) : (
+        !running && (
+          <div className="empty-draft">
+            <p>Let an agent read the ticket, its PRs, Slack and the agent history, and draft what to do next.</p>
+            <button className="btn primary" onClick={() => ask(false)} disabled={starting}>
+              {starting ? "Starting…" : "Draft next steps"} <Kbd>S</Kbd>
+            </button>
+          </div>
+        )
+      )}
+    </section>
+  );
+}
+
+function Composer({ run, onError, focusSignal }: { run: Run; onError: (m: string | null) => void; focusSignal: number }) {
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sentAt, setSentAt] = useState<number | null>(null);
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (focusSignal) ref.current?.focus();
+  }, [focusSignal]);
+  const send = async () => {
+    if (!text.trim()) return;
+    setSending(true);
+    const err = await api.reply(run.sessionId, text);
+    setSending(false);
+    onError(err);
+    if (!err) {
+      setText("");
+      setSentAt(Date.now());
+    }
+  };
+  if (!run.canReply) {
+    return (
+      <div className="composer-off">
+        To reply from here, run <code>/reload</code> once in this session. Until then, reply in its tab.
+      </div>
+    );
+  }
+  return (
+    <div className="composer">
+      <textarea
+        ref={ref}
+        rows={3}
+        value={text}
+        placeholder={run.status === "working" ? "Queue a message for when the agent finishes…" : "Reply to the agent…"}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            send();
+          }
+          if (e.key === "Escape") (e.target as HTMLTextAreaElement).blur();
+        }}
+      />
+      <div className="composer-bar">
+        <span className="meta">{sentAt && Date.now() - sentAt < 20_000 ? "Sent. The agent has your message." : `to ${dirLabel(run.cwd)} · ${run.sessionId.slice(-6)}`}</span>
+        <button className="btn primary" onClick={send} disabled={sending || !text.trim()}>
+          {sending ? "Sending…" : run.status === "working" ? "Queue" : "Send"} <Kbd>⌘↵</Kbd>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AgentCard({ run, now, onError, focusSignal, primary }: { run: Run; now: number; onError: (m: string | null) => void; focusSignal: number; primary: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const long = run.lastMessage.length > 900;
+  return (
+    <section className={`card agent tone-border-${runTone(run)}`}>
+      <header className="card-head">
+        <Dot tone={runTone(run)} pulse={run.status === "working"} />
+        <div className="agent-title">
+          <h3 title={run.firstPrompt}>{runTitle(run)}</h3>
+          <span className="meta">
+            {statusText(run, now)} · {dirLabel(run.cwd)} · {plural(run.userMessageCount, "prompt")}
+          </span>
+        </div>
+        <span className="grow" />
+        <OpenTab run={run} onError={onError} hotkey={primary} />
+      </header>
+      {run.lastMessage && (
+        <div className={`agent-message ${long && !expanded ? "clamped" : ""}`}>
+          <Markdown text={run.lastMessage} />
+          {long && (
+            <button className="btn ghost small expand" onClick={() => setExpanded(!expanded)}>
+              {expanded ? "Show less" : "Show the whole message"}
+            </button>
+          )}
+        </div>
+      )}
+      {run.status !== "finished" && <Composer run={run} onError={onError} focusSignal={primary ? focusSignal : 0} />}
+    </section>
+  );
+}
+
+function PrRow({ pr, now }: { pr: PullRequest; now: number }) {
+  const open = pr.state === "open";
+  const review = pr.reviewDecision === "APPROVED" ? ["approved", "good"] : pr.reviewDecision === "CHANGES_REQUESTED" ? ["changes requested", "bad"] : pr.reviewDecision === "REVIEW_REQUIRED" ? ["needs review", "muted"] : null;
+  return (
+    <a className={`pr-row ${open ? "" : "closed"}`} href={pr.url} target="_blank" rel="noreferrer">
+      <span className={`pr-state state-${pr.isDraft && open ? "draft" : pr.state}`}>{pr.isDraft && open ? "draft" : pr.state}</span>
+      <span className="pr-name">{prName(pr.url)}</span>
+      <span className="pr-title">{pr.title}</span>
+      {open && pr.checks !== "none" && <span className={`tag tone-${pr.checks === "success" ? "good" : pr.checks === "failure" ? "bad" : "warn"}`}>CI {pr.checks}</span>}
+      {open && review && <span className={`tag tone-${review[1]}`}>{review[0]}</span>}
+      {open && pr.mergeable === "CONFLICTING" && <span className="tag tone-bad">conflict</span>}
+      <span className="meta">{age(pr.updatedAt, now)}</span>
+    </a>
+  );
+}
+
+function History({ runs, now, onError }: { runs: Run[]; now: number; onError: (m: string | null) => void }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const [all, setAll] = useState(false);
+  const shown = all ? runs : runs.slice(-6);
+  return (
+    <ol className="history">
+      {runs.length > shown.length && (
+        <li>
+          <button className="btn ghost small" onClick={() => setAll(true)}>
+            Show {plural(runs.length - shown.length, "older run")}
+          </button>
+        </li>
+      )}
+      {shown.map((r) => (
+        <li key={r.sessionId} className={open === r.sessionId ? "open" : ""}>
+          <div className="h-row">
+            <Dot tone={runTone(r)} pulse={r.status === "working"} />
+            <button className="h-title" onClick={() => setOpen(open === r.sessionId ? null : r.sessionId)} title={r.firstPrompt}>
+              {runTitle(r)}
+            </button>
+            <span className="meta">
+              {shortDate(r.startedAt)} · {dirLabel(r.cwd)} · {plural(r.userMessageCount, "prompt")}
+              {r.createdPrs.length > 0 && ` · opened ${plural(r.createdPrs.length, "PR")}`}
+            </span>
+            <span className="grow" />
+            <span className="meta">{statusText(r, now)}</span>
+            <OpenTab run={r} onError={onError} className="btn ghost small" label="Open" />
+          </div>
+          {open === r.sessionId && r.lastMessage && (
+            <div className="h-message">
+              <Markdown text={r.lastMessage} />
+            </div>
+          )}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSignal }: {
+  s: Subject;
+  data: Dashboard;
+  now: number;
+  position: string | null;
+  snoozed: boolean;
+  onSnooze: () => void;
+  onWake: () => void;
+  focusSignal: number;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => setError(null), [s.id]);
+  const t = s.ticket?.ticket;
+  const due = t ? dueLabel(t.dueDate) : null;
+  const live = liveRuns(s);
+  const primary = primaryRun(s);
+  // A ticket with no live agent still shows its latest run, so you can read where it stopped.
+  const featured = live.length ? live : primary ? [primary] : s.ticket?.runs.length ? [s.ticket.runs.at(-1)!] : [];
+  const prs = s.ticket?.prs ?? [];
+  const runs = s.ticket?.runs ?? (s.run ? [s.run] : []);
+  const top = s.items[0];
+
+  return (
+    <article className="workspace" key={s.id}>
+      <header className="ws-head">
+        <div className="eyebrow">
+          {top ? (
+            <>
+              <Dot tone={KIND[top.kind].tone} />
+              <span className={`tone-text-${KIND[top.kind].tone}`}>{KIND[top.kind].title}</span>
+            </>
+          ) : (
+            <span>{live.length ? "Agents at work" : "Quiet"}</span>
+          )}
+          {position && <span className="meta">· {position}</span>}
+        </div>
+        <h1>{subjectTitle(s)}</h1>
+        <div className="ws-meta">
+          {t && (
+            <a className="key-link" href={t.url} target="_blank" rel="noreferrer" title="Open in Jira">
+              {t.key} ↗
+            </a>
+          )}
+          {t && <span className={`pill cat-${t.statusCategory}`}>{t.status}</span>}
+          {t?.priority && <span className="meta">{t.priority}</span>}
+          {due && <span className={`tone-text-${due.tone}`}>{due.text}</span>}
+          {s.prUrl && !t && (
+            <a className="key-link" href={s.prUrl} target="_blank" rel="noreferrer">
+              {prName(s.prUrl)} ↗
+            </a>
+          )}
+          <span className="grow" />
+          {s.items.length > 0 &&
+            (snoozed ? (
+              <button className="btn ghost" onClick={onWake}>
+                Back to the queue
+              </button>
+            ) : (
+              <button className="btn" onClick={onSnooze} title="Hide until something about it changes">
+                Done for now <Kbd>E</Kbd>
+              </button>
+            ))}
+        </div>
+        {s.items.length > 0 && (
+          <ul className="why">
+            {s.items.map((a, i) => (
+              <li key={i}>
+                <Dot tone={KIND[a.kind].tone} />
+                <span>{a.reason}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </header>
+
+      {error && (
+        <div className="toast" role="alert">
+          {error}
+          <button className="btn ghost small" onClick={() => setError(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {s.ticket && <NextSteps s={s} state={data.summaries[s.ticket.ticket.key]} now={now} onError={setError} />}
+
+      {featured.length > 0 && (
+        <div className="stack">
+          <h2 className="section-title">{live.length ? (live.length === 1 ? "Agent" : `Agents · ${live.length}`) : "Last run"}</h2>
+          {featured.map((r) => (
+            <AgentCard key={r.sessionId} run={r} now={now} onError={setError} focusSignal={focusSignal} primary={r.sessionId === primary?.sessionId} />
+          ))}
+        </div>
+      )}
+
+      {prs.length > 0 && (
+        <div className="stack">
+          <h2 className="section-title">Pull requests · {prs.length}</h2>
+          <div className="card flush">
+            {[...prs]
+              .sort((a, b) => Number(b.state === "open") - Number(a.state === "open") || b.updatedAt.localeCompare(a.updatedAt))
+              .map((p) => (
+                <PrRow key={p.url} pr={p} now={now} />
+              ))}
+          </div>
+        </div>
+      )}
+
+      {runs.length > 0 && (
+        <div className="stack">
+          <h2 className="section-title">History · {plural(runs.length, "run")}</h2>
+          <div className="card flush">
+            <History runs={runs} now={now} onError={setError} />
+          </div>
+        </div>
+      )}
+
+      {s.ticket && runs.length === 0 && prs.length === 0 && <p className="meta empty-note">No agent has worked on this ticket yet.</p>}
+    </article>
+  );
+}
+
+// ---- help ---------------------------------------------------------------------------
+
+const KEYS: [string, string][] = [
+  ["J / ↓", "Next item"],
+  ["K / ↑", "Previous item"],
+  ["E", "Done for now (comes back when something changes)"],
+  ["R", "Reply to the agent"],
+  ["O", "Open the agent's iTerm tab"],
+  ["S", "Draft next steps"],
+  ["⌘↵", "Send the reply"],
+  ["Esc", "Leave the reply box"],
+  ["?", "Show or hide this help"],
+];
+
+function Help({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="help" onClick={(e) => e.stopPropagation()}>
+        <h3>Keyboard</h3>
+        <dl>
+          {KEYS.map(([k, v]) => (
+            <div key={k}>
+              <dt>
+                <Kbd>{k}</Kbd>
+              </dt>
+              <dd>{v}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </div>
+  );
+}
+
+// ---- page ---------------------------------------------------------------------------
+
+export function App() {
+  const { data, error, loading, refresh } = useDashboard();
+  const now = useNow(1_000);
+  const snoozed = useSnoozed();
+  const [selectedId, setSelectedId] = useState<string | null>(() => decodeURIComponent(location.hash.slice(2)) || null);
+  const [help, setHelp] = useState(false);
+  const [focusSignal, setFocusSignal] = useState(0);
+
+  const subjects = useMemo(() => (data ? buildSubjects(data) : new Map<string, Subject>()), [data]);
+  const all = [...subjects.values()];
+  const ranked = all.filter((s) => s.items.length).sort((a, b) => b.items[0].score - a.items[0].score);
+  const queue = ranked.filter((s) => !snoozed.isSnoozed(s));
+  const done = ranked.filter((s) => snoozed.isSnoozed(s));
+  const working = all.filter((s) => !s.items.length && liveRuns(s).length);
+  const quiet = data ? data.myTickets.map((g) => subjects.get(`t:${g.ticket.key}`)!).filter((s) => !s.items.length && !liveRuns(s).length) : [];
+  const order = [...queue, ...working, ...done, ...quiet];
+
+  const selected = (selectedId && subjects.get(selectedId)) || queue[0] || order[0] || null;
+
+  useEffect(() => {
+    const onHash = () => setSelectedId(decodeURIComponent(location.hash.slice(2)) || null);
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  const select = useCallback((id: string) => {
+    setSelectedId(id);
+    history.replaceState(null, "", `#/${encodeURIComponent(id)}`);
+  }, []);
+
+  const move = useCallback(
+    (delta: number) => {
+      if (!order.length) return;
+      const i = selected ? order.findIndex((s) => s.id === selected.id) : -1;
+      select(order[Math.max(0, Math.min(order.length - 1, i + delta))].id);
+    },
+    [order, selected, select],
+  );
+
+  const snoozeAndAdvance = useCallback(() => {
+    if (!selected || !selected.items.length) return;
+    const i = queue.findIndex((s) => s.id === selected.id);
+    const next = queue[i + 1] ?? queue[i - 1];
+    snoozed.snooze(selected);
+    if (next) select(next.id);
+  }, [selected, queue, snoozed, select]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement;
+      if (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "j" || e.key === "ArrowDown") move(1);
+      else if (e.key === "k" || e.key === "ArrowUp") move(-1);
+      else if (e.key === "e") snoozeAndAdvance();
+      else if (e.key === "?") setHelp((h) => !h);
+      else if (e.key === "Escape") setHelp(false);
+      else if (e.key === "r") setFocusSignal((n) => n + 1);
+      else if (e.key === "o" && selected) {
+        const run = primaryRun(selected);
+        if (run?.itermSessionId) api.focusTab(run.sessionId);
+      } else if (e.key === "s" && selected?.ticket) {
+        const st = data?.summaries[selected.ticket.ticket.key]?.latest;
+        if (st?.status !== "in_progress") api.summarize(selected.ticket.ticket.key, false);
+      } else return;
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [move, snoozeAndAdvance, selected, data]);
+
+  useEffect(() => {
+    const waiting = data?.counts.awaiting_input ?? 0;
+    document.title = queue.length ? `(${queue.length}) agent-dash` : waiting ? `(${waiting}) agent-dash` : "agent-dash";
+  }, [data, queue.length]);
+
+  if (!data) return <main className="loading">{error ? <pre className="error">{error}</pre> : <span className="shimmer wide" />}</main>;
+
+  const waitingRuns = data.counts.awaiting_input;
+  const workingRuns = data.counts.working;
+  const position = selected && queue.includes(selected) ? `${queue.indexOf(selected) + 1} of ${queue.length} in the queue` : null;
+  const sources = Object.entries(data.sources);
+  const down = sources.filter(([, h]) => !h.ok);
+
+  return (
+    <div className="app">
+      <header className="topbar">
+        <div className="brand">
+          agent-dash <span className="ver">v2</span>
+        </div>
+        <div className="headline">
+          {queue.length ? (
+            <>
+              <b>{plural(queue.length, "thing")}</b> need you
+            </>
+          ) : (
+            <b>Nothing needs you</b>
+          )}
+          <span className="sep">·</span>
+          <span>
+            <Dot tone="waiting" /> {waitingRuns} waiting
+          </span>
+          <span>
+            <Dot tone="working" pulse={workingRuns > 0} /> {workingRuns} working
+          </span>
+        </div>
+        <span className="grow" />
+        <span className={`sources ${down.length ? "bad" : ""}`} title={sources.map(([n, h]) => `${n}: ${h.ok ? "ok" : h.error}`).join("\n")}>
+          {down.length ? `${down.map(([n]) => n).join(", ")} down` : "Jira · GitHub · pi"}
+          <Dot tone={down.length ? "bad" : "good"} />
+        </span>
+        <span className="meta">updated {age(data.generatedAt, now)} ago</span>
+        <button className="btn ghost" onClick={refresh} disabled={loading}>
+          {loading ? "Refreshing…" : "Refresh"}
+        </button>
+        <button className="btn ghost" onClick={() => setHelp(true)} title="Keyboard shortcuts">
+          <Kbd>?</Kbd>
+        </button>
+      </header>
+
+      <div className="columns">
+        <nav className="rail">
+          <RailSection title="Up next" count={queue.length}>
+            {queue.map((s, i) => (
+              <QueueItem key={s.id} s={s} rank={i + 1} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined} />
+            ))}
+          </RailSection>
+          {queue.length === 0 && (
+            <div className="zero">
+              <div className="zero-mark">✓</div>
+              <p>
+                <b>Queue clear.</b>
+                <br />
+                {workingRuns ? `${plural(workingRuns, "agent")} still working.` : "No agent is working."}
+              </p>
+            </div>
+          )}
+          <RailSection title="Agents at work" count={working.length} hint="Live runs that need nothing from you yet">
+            {working.map((s) => (
+              <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} />
+            ))}
+          </RailSection>
+          <RailSection title="Done for now" count={done.length} defaultOpen={false} hint="Back in the queue when something changes">
+            {done.map((s) => (
+              <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} />
+            ))}
+          </RailSection>
+          <RailSection title="Quiet tickets" count={quiet.length} defaultOpen={false} hint="Your tickets with nothing going on">
+            {quiet.map((s) => (
+              <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} />
+            ))}
+          </RailSection>
+          <footer className="rail-foot">
+            <Kbd>J</Kbd> <Kbd>K</Kbd> move · <Kbd>E</Kbd> done for now · <Kbd>R</Kbd> reply · <Kbd>?</Kbd> all keys
+          </footer>
+        </nav>
+
+        <main className="main">
+          {!data.extensionInstalled && (
+            <p className="banner">
+              Run <code>pnpm install-extension</code> to get exact statuses and replies from here.
+            </p>
+          )}
+          {selected ? (
+            <Workspace
+              s={selected}
+              data={data}
+              now={now}
+              position={position}
+              snoozed={snoozed.isSnoozed(selected)}
+              onSnooze={snoozeAndAdvance}
+              onWake={() => snoozed.wake(selected)}
+              focusSignal={focusSignal}
+            />
+          ) : (
+            <div className="zero big">Nothing to show.</div>
+          )}
+        </main>
+      </div>
+      {help && <Help onClose={() => setHelp(false)} />}
+    </div>
+  );
+}

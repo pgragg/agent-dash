@@ -10,6 +10,8 @@ export interface ParsedSession {
   name: string | null;
   firstPrompt: string;
   lastReply: string;
+  /** The whole latest reply, up to LAST_MESSAGE_MAX characters (the end is kept). */
+  lastMessage: string;
   askedQuestion: boolean;
   startedAt: string;
   lastActivityAt: string;
@@ -37,6 +39,7 @@ const WEIGHT = { name: 5, user: 3, toolCall: 1, assistant: 1 } as const;
  */
 const CAP: Partial<Record<keyof typeof WEIGHT, number>> = { assistant: 1 };
 const MAX_TICKETS = 3;
+const LAST_MESSAGE_MAX = 6_000;
 
 interface ContentPart {
   type?: string;
@@ -164,6 +167,7 @@ export function parseSession(raw: string, sessionFile: string, mtime: Date, tick
     name,
     firstPrompt,
     lastReply: oneLine(replyLines.at(-1) ?? "", 240),
+    lastMessage: lastReplyText.length > LAST_MESSAGE_MAX ? `…${lastReplyText.slice(-LAST_MESSAGE_MAX)}` : lastReplyText.trim(),
     askedQuestion: replyLines.slice(-3).some((l) => l.endsWith("?")),
     startedAt: header.timestamp ?? mtime.toISOString(),
     lastActivityAt: mtime.toISOString(),

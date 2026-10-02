@@ -7,6 +7,8 @@ export interface ReportedStatus {
   sessionId: string;
   pid: number;
   itermSessionId?: string | null;
+  /** The extension watches ~/.agent-dash/inbox/<sessionId>/ for replies typed in the dash. */
+  inbox?: boolean;
   state: "working" | "awaiting_input" | "closed";
   since: string;
 }

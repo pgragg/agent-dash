@@ -9,7 +9,7 @@ It reads your pi session logs, your Jira tickets, and your GitHub PRs, and it sh
 2. **My tickets**: your open Jira tickets. Under each ticket are its agent runs, oldest first, and its PRs.
 3. **Other tickets with recent runs**, and **runs with no ticket**, folded away at the bottom.
 
-The dashboard is read-only. It never writes to Jira, GitHub, or a pi session.
+The dashboard never writes to Jira or GitHub. The only thing it sends anywhere is a reply that you type to one of your own pi sessions (v2, below).
 
 ## Run it
 
@@ -19,7 +19,22 @@ pnpm install-extension   # once: exact run status (see below)
 pnpm build && pnpm start # http://127.0.0.1:7777
 ```
 
-`pnpm dev` runs the server with `--watch` and Vite on http://127.0.0.1:7778.
+`pnpm dev` runs the server with `--watch` and Vite on http://127.0.0.1:7779.
+
+### v2: the queue (http://127.0.0.1:7778)
+
+```bash
+pnpm build && pnpm start:v2   # second instance, same data, serves web-v2/
+```
+
+v2 is a redesign around one question, "what do I work on next?". You can act on the answer without leaving the page.
+
+- **Left: the queue.** One entry per ticket (or per ticket-less run or PR), ranked by its most urgent signal. Under it: agents at work, "done for now", and quiet tickets.
+- **Right: a workspace for the selected entry.** It shows why the entry is in the queue, the drafted next steps, each live agent's whole last message with a **reply box**, the PRs, and the run history.
+- **Done for now** (`E`) hides an entry until one of its signals changes, so the queue works like an inbox. It is saved in the browser's localStorage.
+- **Keyboard**: `J`/`K` move, `E` done for now, `R` reply, `O` open the iTerm tab, `S` draft next steps, `⌘↵` send, `?` help.
+
+**Replies.** `POST /api/reply?session=<id>` writes the text to `~/.agent-dash/inbox/<sessionId>/<n>.txt`. The status extension in that session watches the folder, and sends each file to the agent as your message with `pi.sendUserMessage`. While the agent works, the message waits until the agent finishes. The server takes a reply only for a live interactive session whose status file says `inbox: true`. A session that started before the extension changed needs `/reload` once. `pnpm dev:v2` runs v2 with Vite on :7780.
 
 The server listens on `127.0.0.1` only, because the page shows prompts and replies from every session.
 

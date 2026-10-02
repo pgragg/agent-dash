@@ -13,6 +13,8 @@ export interface Run {
   firstPrompt: string;
   /** Last non-empty line of the latest assistant reply. */
   lastReply: string;
+  /** The whole latest reply (markdown), cut from the start when very long. */
+  lastMessage: string;
   startedAt: string;
   lastActivityAt: string;
   model: string | null;
@@ -33,6 +35,8 @@ export interface Run {
   userMessageCount: number;
   /** The iTerm2 tab that runs this session. Set only while the session is live. */
   itermSessionId: string | null;
+  /** The live session runs a status extension with a reply inbox, so the dash can send it a message. */
+  canReply: boolean;
 }
 
 export type CheckState = "success" | "failure" | "pending" | "none";

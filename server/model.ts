@@ -31,6 +31,7 @@ export function toRuns(sessions: ParsedSession[], reported: Map<string, Reported
         name: s.name,
         firstPrompt: s.firstPrompt,
         lastReply: s.lastReply,
+        lastMessage: s.lastMessage,
         startedAt: s.startedAt,
         lastActivityAt: s.lastActivityAt,
         model: s.model,
@@ -44,6 +45,7 @@ export function toRuns(sessions: ParsedSession[], reported: Map<string, Reported
         mentionedPrs: s.mentionedPrs,
         userMessageCount: s.userMessageCount,
         itermSessionId: r && status !== "finished" ? (r.itermSessionId ?? null) : null,
+        canReply: Boolean(r?.inbox) && status !== "finished",
       } satisfies Run;
     });
 }

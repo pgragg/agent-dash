@@ -31,6 +31,7 @@ export function run(over: Partial<Run> = {}): Run {
     name: "A run",
     firstPrompt: "do it",
     lastReply: "",
+    lastMessage: "",
     startedAt: minutesAgo(120),
     lastActivityAt: minutesAgo(5),
     model: null,
@@ -43,6 +44,7 @@ export function run(over: Partial<Run> = {}): Run {
     createdPrs: [],
     mentionedPrs: [],
     userMessageCount: 1,
+    canReply: false,
     itermSessionId: null,
     ...over,
   };

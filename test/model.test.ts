@@ -13,6 +13,7 @@ function session(over: Partial<ParsedSession>): ParsedSession {
     name: null,
     firstPrompt: "p",
     lastReply: "",
+    lastMessage: "",
     askedQuestion: false,
     startedAt: minutesAgo(100),
     lastActivityAt: minutesAgo(90),
