@@ -15,6 +15,11 @@ export function stripHandoff(text: string): string {
   return text.replace(HANDOFF_BLOCK, (_m, key: string) => HANDOFF_START(key));
 }
 
+/** The first message of an agent started from one drafted next step. */
+export function stepMessage(key: string, step: string): string {
+  return `Do this next step on ${key}. It comes from the drafted next steps in the context, which can be out of date: check it against the newer sources there before you act.\n\n${step}`;
+}
+
 export interface HandoffInput {
   group: TicketGroup;
   notes: Note[];

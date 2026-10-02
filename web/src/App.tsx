@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AttentionItem, AttentionKind, Dashboard, HistoryRun, Note, PullRequest, Run, ThreadStatusChange, TicketGroup, TicketSummaryState, Turn } from "../../shared/types.ts";
+import { splitSummary } from "../../shared/nextSteps.ts";
+import type { AttentionItem, AttentionKind, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState, Turn } from "../../shared/types.ts";
 import { filterHistory, groupByDay } from "./history.ts";
 import { countPrs, groupOpenPrs } from "./prs.ts";
-import { age, api, dirLabel, dueLabel, elapsed, Markdown, type NotifyState, plural, prName, resumeCommand, runTitle, shortDate, stamp, useDashboard, useNow, useWaitNotifications } from "./lib.tsx";
+import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, resumeCommand, runTitle, shortDate, stamp, useDashboard, useNow, useWaitNotifications } from "./lib.tsx";
 
 /**
  * agent-dash answers one question: "what do I work on next?".
@@ -248,7 +249,42 @@ function RailSection({ title, count, children, defaultOpen = true, hint }: { tit
 
 const STALE_MS = 30 * 60_000;
 
-function NextSteps({ s, state, notes, now, onError }: { s: Subject; state: TicketSummaryState | undefined; notes: Note[]; now: number; onError: (m: string | null) => void }) {
+/** One drafted step, with a button that starts a pi agent on it, with the same context as "Start a new agent". */
+function StepRow({ ticket, step, cwd, onError }: { ticket: string; step: NextStep; cwd: string; onError: (m: string | null) => void }) {
+  const [state, setState] = useState<"idle" | "starting" | "started">("idle");
+  const start = async () => {
+    setState("starting");
+    const err = await api.startStep(ticket, step.id, cwd);
+    onError(err);
+    setState(err ? "idle" : "started");
+  };
+  return (
+    <li className="step">
+      <span className="step-body">{inline(step.body)}</span>
+      <button className="btn ghost small" onClick={start} disabled={state !== "idle" || !cwd.trim()} title={`Start a pi agent in ${cwd} on this step, with this page as context`}>
+        {state === "starting" ? "Starting…" : state === "started" ? "Started ✓" : "Start agent"}
+      </button>
+    </li>
+  );
+}
+
+function SummaryBody({ ticket, summary, cwd, onError }: { ticket: string; summary: TicketSummary; cwd: string; onError: (m: string | null) => void }) {
+  if (!summary.steps.length) return <Markdown text={summary.summary ?? ""} />;
+  const parts = splitSummary(summary.summary ?? "");
+  return (
+    <>
+      <Markdown text={parts.before} />
+      <ol className="steps">
+        {summary.steps.map((st) => (
+          <StepRow key={st.id} ticket={ticket} step={st} cwd={cwd} onError={onError} />
+        ))}
+      </ol>
+      {parts.after && <Markdown text={parts.after} />}
+    </>
+  );
+}
+
+function NextSteps({ s, state, notes, now, cwd, onError }: { s: Subject; state: TicketSummaryState | undefined; notes: Note[]; now: number; cwd: string; onError: (m: string | null) => void }) {
   const key = s.ticket!.ticket.key;
   const [starting, setStarting] = useState(false);
   const ask = async (force: boolean) => {
@@ -307,7 +343,7 @@ function NextSteps({ s, state, notes, now, onError }: { s: Subject; state: Ticke
         </div>
       )}
       {shown?.summary ? (
-        <Markdown text={shown.summary} />
+        <SummaryBody ticket={key} summary={shown} cwd={cwd} onError={onError} />
       ) : (
         !running && (
           <div className="empty-draft">
@@ -397,11 +433,10 @@ function workFolders(s: Subject): string[] {
   return [...new Set([...runs.map((r) => r.cwd.replace(/^\/Users\/[^/]+/, "~")).filter(Boolean), "~"])];
 }
 
-function StartAgent({ s, onError, focusSignal }: { s: Subject; onError: (m: string | null) => void; focusSignal: number }) {
+function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd: string; setCwd: (cwd: string) => void; onError: (m: string | null) => void; focusSignal: number }) {
   const key = s.ticket!.ticket.key;
   const folders = workFolders(s);
   const [message, setMessage] = useState("");
-  const [cwd, setCwd] = useState(folders[0]);
   const [starting, setStarting] = useState(false);
   const [started, setStarted] = useState<number | null>(null);
   const [context, setContext] = useState<string | null>(null);
@@ -700,6 +735,9 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
 }) {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => setError(null), [s.id]);
+  // Shared by "Start a new agent" and the next steps' buttons, so both start in the same folder.
+  const [cwd, setCwd] = useState(() => workFolders(s)[0]);
+  useEffect(() => setCwd(workFolders(s)[0]), [s.id]);
   const t = s.ticket?.ticket;
   const due = t && t.statusCategory !== "done" ? dueLabel(t.dueDate) : null;
   const live = liveRuns(s);
@@ -786,7 +824,9 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
         </div>
       )}
 
-      {s.ticket && <NextSteps s={s} state={data.summaries[s.ticket.ticket.key]} notes={data.notes[s.ticket.ticket.key] ?? []} now={now} onError={setError} />}
+      {s.ticket && <NextSteps s={s} state={data.summaries[s.ticket.ticket.key]} notes={data.notes[s.ticket.ticket.key] ?? []} now={now} cwd={cwd} onError={setError} />}
+
+      {s.ticket && <StartAgent key={s.id} s={s} cwd={cwd} setCwd={setCwd} onError={setError} focusSignal={agentSignal} />}
 
       {s.ticket && <Notes ticket={s.ticket.ticket.key} notes={data.notes[s.ticket.ticket.key] ?? []} now={now} onError={setError} focusSignal={noteSignal} />}
 
@@ -798,8 +838,6 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
           ))}
         </div>
       )}
-
-      {s.ticket && <StartAgent key={s.id} s={s} onError={setError} focusSignal={agentSignal} />}
 
       {prs.length > 0 && (
         <div className="stack">

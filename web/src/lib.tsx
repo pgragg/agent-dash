@@ -186,6 +186,8 @@ export const api = {
   addNote: (ticket: string, body: string) => post(`/api/notes?ticket=${encodeURIComponent(ticket)}`, { body }),
   deleteNote: (id: number) => post(`/api/notes?id=${id}`, undefined, "DELETE"),
   startAgent: (ticket: string, message: string, cwd: string) => post(`/api/agents?ticket=${encodeURIComponent(ticket)}`, { message, cwd }),
+  /** The server writes the first message from the stored step. */
+  startStep: (ticket: string, step: number, cwd: string) => post(`/api/agents?ticket=${encodeURIComponent(ticket)}`, { step, cwd }),
   agentContext: async (ticket: string): Promise<string> => {
     const res = await fetch(`/api/agents/context?ticket=${encodeURIComponent(ticket)}`, { headers: { "X-Agent-Dash": "1" } });
     return res.ok ? res.text() : `Could not build the context (${res.status}).`;
@@ -215,7 +217,7 @@ function linkLabel(url: string): string {
   return jira ? jira[1] : url.replace(/^https?:\/\//, "");
 }
 
-function inline(text: string): ReactNode[] {
+export function inline(text: string): ReactNode[] {
   const out: ReactNode[] = [];
   let last = 0;
   for (const m of text.matchAll(INLINE)) {

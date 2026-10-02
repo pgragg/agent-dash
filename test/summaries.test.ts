@@ -124,3 +124,21 @@ test("a summary run sees resolved threads by name and reason only, not their his
   assert.doesNotMatch(ctx, /OLD PLAN/);
   assert.match(ctx, /pi sessions about FSDK-11 \(0,/);
 });
+
+test("saving a summary stores each next step as its own row", () => {
+  const rec = db.createRequest("FSDK-9");
+  db.markDone(rec.id, "**State:** x\n\n**Next steps:**\n1. Piper: decide.\n2. An agent: fix it.\n\n**Blockers:** none.");
+  const steps = db.get(rec.id)!.steps;
+  assert.deepEqual(
+    steps.map((s) => [s.position, s.body, s.ticket, s.summaryId]),
+    [
+      [1, "Piper: decide.", "FSDK-9", rec.id],
+      [2, "An agent: fix it.", "FSDK-9", rec.id],
+    ],
+  );
+  assert.deepEqual(db.getStep(steps[1].id), steps[1]);
+  assert.equal(db.summariesByTicket().get("FSDK-9")!.lastDone!.steps.length, 2);
+  // A late save neither changes the summary nor adds steps.
+  db.markDone(rec.id, "**Next steps:**\n1. late");
+  assert.equal(db.get(rec.id)!.steps.length, 2);
+});

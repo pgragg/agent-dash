@@ -2,7 +2,8 @@ import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { Note, ThreadStatus, ThreadStatusChange, TicketSummary } from "../../shared/types.ts";
+import { splitSummary } from "../../shared/nextSteps.ts";
+import type { NextStep, Note, ThreadStatus, ThreadStatusChange, TicketSummary } from "../../shared/types.ts";
 
 export const DB_PATH = process.env.AGENT_DASH_DB ?? join(homedir(), ".agent-dash/agent-dash.db");
 
@@ -19,6 +20,16 @@ CREATE TABLE IF NOT EXISTS summaries (
   work_dir     TEXT
 );
 CREATE INDEX IF NOT EXISTS summaries_by_ticket ON summaries (ticket, id DESC);
+
+-- One row per numbered step of a finished summary, written when the summary is saved.
+CREATE TABLE IF NOT EXISTS next_steps (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  summary_id INTEGER NOT NULL REFERENCES summaries (id),
+  ticket     TEXT NOT NULL,
+  position   INTEGER NOT NULL,
+  body       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS next_steps_by_summary ON next_steps (summary_id, position);
 
 CREATE TABLE IF NOT EXISTS notes (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,6 +77,7 @@ function toRecord(r: Row): SummaryRecord {
     generatedAt: r.generated_at,
     summary: r.summary,
     error: r.error,
+    steps: r.status === "done" ? stepsFor(r.id) : [],
     pid: r.pid,
     workDir: r.work_dir,
   };
@@ -80,7 +92,27 @@ export function open(path = DB_PATH): DatabaseSync {
   // WAL lets the server read while a summary run writes from its own process.
   db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
   db.exec(SCHEMA);
+  // Summaries saved before steps were stored get their rows once.
+  for (const r of db.prepare("SELECT id, ticket, summary FROM summaries WHERE status = 'done' AND id NOT IN (SELECT summary_id FROM next_steps)").all() as unknown as Row[]) {
+    insertSteps(r.id, r.ticket, r.summary ?? "");
+  }
   return db;
+}
+
+const STEP_COLUMNS = "id, summary_id AS summaryId, ticket, position, body";
+
+function insertSteps(id: number, ticket: string, summary: string): void {
+  const insert = open().prepare("INSERT INTO next_steps (summary_id, ticket, position, body) VALUES (?, ?, ?, ?)");
+  splitSummary(summary).steps.forEach((body, i) => insert.run(id, ticket, i + 1, body));
+}
+
+export function stepsFor(summaryId: number): NextStep[] {
+  return (open().prepare(`SELECT ${STEP_COLUMNS} FROM next_steps WHERE summary_id = ? ORDER BY position`).all(summaryId) as unknown as NextStep[]).map((s) => ({ ...s }));
+}
+
+export function getStep(id: number): NextStep | null {
+  const row = open().prepare(`SELECT ${STEP_COLUMNS} FROM next_steps WHERE id = ?`).get(id) as unknown as NextStep | undefined;
+  return row ? { ...row } : null;
 }
 
 export function createRequest(ticket: string, now = new Date()): SummaryRecord {
@@ -96,10 +128,19 @@ export function setProcess(id: number, pid: number, workDir: string): void {
 
 /** Only an in-progress row changes, so a late write cannot overwrite a newer outcome. */
 export function markDone(id: number, summary: string, now = new Date()): boolean {
-  const res = open()
-    .prepare("UPDATE summaries SET status = 'done', summary = ?, generated_at = ?, error = NULL WHERE id = ? AND status = 'in_progress'")
-    .run(summary, now.toISOString(), id);
-  return res.changes > 0;
+  const d = open();
+  d.exec("BEGIN IMMEDIATE");
+  try {
+    const row = d
+      .prepare("UPDATE summaries SET status = 'done', summary = ?, generated_at = ?, error = NULL WHERE id = ? AND status = 'in_progress' RETURNING ticket")
+      .get(summary, now.toISOString(), id) as { ticket: string } | undefined;
+    if (row) insertSteps(id, row.ticket, summary);
+    d.exec("COMMIT");
+    return !!row;
+  } catch (err) {
+    d.exec("ROLLBACK");
+    throw err;
+  }
 }
 
 export function markFailed(id: number, error: string): boolean {

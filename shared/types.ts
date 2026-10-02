@@ -123,6 +123,18 @@ export interface TicketSummary {
   generatedAt: string | null;
   summary: string | null;
   error: string | null;
+  /** The summary's numbered next steps, in order. Empty until it is done. */
+  steps: NextStep[];
+}
+
+/** One step of a drafted next-steps summary. The page can start an agent on it. */
+export interface NextStep {
+  id: number;
+  summaryId: number;
+  ticket: string;
+  /** 1-based order in the summary. */
+  position: number;
+  body: string;
 }
 
 /** The newest request (any status), and the newest finished summary to show meanwhile. */

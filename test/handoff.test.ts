@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildHandoff, HANDOFF_END, HANDOFF_START } from "../server/handoff.ts";
+import { buildHandoff, HANDOFF_END, HANDOFF_START, stepMessage } from "../server/handoff.ts";
 import { parseSession } from "../server/sources/sessions.ts";
 import type { TicketGroup } from "../shared/types.ts";
 import { header, jsonl, NOW, pr, reply, run, ticket, user } from "./helpers.ts";
@@ -19,7 +19,7 @@ test("the handoff carries notes, drafted next steps with their date, PRs, live m
   const ctx = buildHandoff({
     group: group(),
     notes: [{ id: 1, ticket: "FSDK-5", createdAt: "2026-10-02T10:00:00.000Z", body: "Arie reviews on Monday" }],
-    summary: { latest: { id: 2, ticket: "FSDK-5", status: "done", requestedAt: "2026-10-02T10:30:00.000Z", generatedAt: "2026-10-02T10:32:00.000Z", summary: "**State:** in review", error: null }, lastDone: null },
+    summary: { latest: { id: 2, ticket: "FSDK-5", status: "done", requestedAt: "2026-10-02T10:30:00.000Z", generatedAt: "2026-10-02T10:32:00.000Z", summary: "**State:** in review", error: null, steps: [] }, lastDone: null },
     now: new Date(NOW),
   });
   assert.ok(ctx.startsWith(HANDOFF_START("FSDK-5")) && ctx.endsWith(HANDOFF_END));
@@ -42,4 +42,10 @@ test("a run started from a handoff links to its ticket, not to the tickets the c
   assert.deepEqual(s.tickets, ["FSDK-5"]);
   assert.deepEqual(s.mentionedPrs, []);
   assert.equal(s.firstPrompt, "[agent-dash context for FSDK-5] Ping the reviewer");
+});
+
+test("an agent started on a step gets the step after an instruction to check it first", () => {
+  const msg = stepMessage("FSDK-5", "Piper: ping Arie for review.");
+  assert.match(msg, /^Do this next step on FSDK-5\./);
+  assert.ok(msg.endsWith("\n\nPiper: ping Arie for review."));
 });
