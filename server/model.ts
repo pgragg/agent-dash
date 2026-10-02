@@ -42,6 +42,7 @@ export function toRuns(sessions: ParsedSession[], reported: Map<string, Reported
         createdPrs: s.createdPrs,
         mentionedPrs: s.mentionedPrs,
         userMessageCount: s.userMessageCount,
+        itermSessionId: r && status !== "finished" ? (r.itermSessionId ?? null) : null,
       } satisfies Run;
     });
 }

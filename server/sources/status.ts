@@ -6,6 +6,7 @@ import type { RunStatus } from "../../shared/types.ts";
 export interface ReportedStatus {
   sessionId: string;
   pid: number;
+  itermSessionId?: string | null;
   state: "working" | "awaiting_input" | "closed";
   since: string;
 }

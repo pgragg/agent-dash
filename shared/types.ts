@@ -31,6 +31,8 @@ export interface Run {
   /** Every PR URL that this run named. Used to link a run to a ticket through its PR. */
   mentionedPrs: string[];
   userMessageCount: number;
+  /** The iTerm2 tab that runs this session. Set only while the session is live. */
+  itermSessionId: string | null;
 }
 
 export type CheckState = "success" | "failure" | "pending" | "none";

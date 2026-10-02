@@ -17,6 +17,9 @@ type State = "working" | "awaiting_input" | "closed";
 
 const DIR = process.env.AGENT_DASH_STATUS_DIR ?? join(homedir(), ".agent-dash/status");
 
+/** iTerm2 sets ITERM_SESSION_ID to "w0t3p0:<uuid>"; the uuid lets the dashboard focus this tab. */
+const ITERM_SESSION = process.env.ITERM_SESSION_ID?.split(":")[1] ?? null;
+
 function write(ctx: ExtensionContext, state: State): void {
   const sessionId = ctx.sessionManager.getSessionId();
   if (!sessionId) return;
@@ -26,6 +29,7 @@ function write(ctx: ExtensionContext, state: State): void {
     sessionFile: ctx.sessionManager.getSessionFile() ?? null,
     cwd: ctx.cwd,
     pid: process.pid,
+    itermSessionId: ITERM_SESSION,
     state,
     since: new Date().toISOString(),
   };

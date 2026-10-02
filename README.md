@@ -64,6 +64,16 @@ PRs link to tickets by the key in their title or branch. Then two rules cross th
 
 The extension writes its status file on `agent_settled`, not on `agent_end`, because pi can still retry or run queued messages after `agent_end`.
 
+## Jump to a run's iTerm tab
+
+A live run shows **open tab**. A finished run shows **copy resume**, which copies `cd <cwd> && pi --session <id>`.
+
+- The extension records the iTerm2 session uuid from `ITERM_SESSION_ID`.
+- `POST /api/focus?session=<id>` reads the uuid from the status file, never from the request. Then it runs an AppleScript that selects the window, tab and pane, and activates iTerm2.
+- The endpoint needs an `X-Agent-Dash: 1` header. That forces a CORS preflight, which the server never answers, so another web page cannot call it.
+- **macOS permission:** the app that started the server needs Automation access to iTerm2. If `dash` started it in iTerm, turn on **System Settings → Privacy & Security → Automation → iTerm → iTerm2**. Without it the button says so, and offers the resume command.
+- Runs that started before the extension was installed have no tab id until you type `/reload` in them.
+
 ## Focus ranking
 
 Higher scores come first. The rules are in `server/attention.ts`.

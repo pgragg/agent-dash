@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { extname, join, normalize } from "node:path";
 import type { PullRequest, SourceHealth, Ticket } from "../shared/types.ts";
 import { config } from "./config.ts";
+import { focusItermSession } from "./iterm.ts";
 import { buildDashboard, otherTicketKeys } from "./model.ts";
 import { fetchMyPrs } from "./sources/github.ts";
 import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
@@ -140,6 +141,17 @@ const server = createServer(async (req, res) => {
     if (url.pathname === "/api/dashboard") {
       const body = JSON.stringify(await dashboard(url.searchParams.has("refresh")));
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(body);
+    } else if (url.pathname === "/api/focus" && req.method === "POST") {
+      // A custom header forces a CORS preflight, which this server never answers,
+      // so another web page cannot make the browser call this endpoint.
+      if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
+      const sessionId = url.searchParams.get("session") ?? "";
+      // Look the tab up from the status file; never take a tab id from the request.
+      const tab = (await readReportedStatuses(config.statusDir)).get(sessionId)?.itermSessionId;
+      if (!tab) return void res.writeHead(404, { "Content-Type": "application/json" }).end(JSON.stringify({ result: "missing" }));
+      const out = await focusItermSession(tab);
+      const code = out.result === "ok" ? 200 : out.result === "missing" ? 404 : 500;
+      res.writeHead(code, { "Content-Type": "application/json" }).end(JSON.stringify(out));
     } else if (url.pathname === "/api/events") {
       res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store", Connection: "keep-alive" });
       res.write("retry: 3000\n\n");

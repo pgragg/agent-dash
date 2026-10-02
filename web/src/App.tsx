@@ -97,6 +97,34 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   );
 }
 
+const FOCUS_ERRORS: Record<string, string> = {
+  missing: "tab not found — copy the resume command instead",
+  not_authorized: "allow it: System Settings → Privacy & Security → Automation → iTerm → iTerm2",
+};
+
+function OpenTabButton({ run }: { run: Run }) {
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <>
+      <button
+        className="link-button open-tab"
+        title="Bring this session's iTerm tab to the front"
+        onClick={async () => {
+          setError(null);
+          const res = await fetch(`/api/focus?session=${encodeURIComponent(run.sessionId)}`, { method: "POST", headers: { "X-Agent-Dash": "1" } });
+          if (res.ok) return;
+          const body = await res.json().catch(() => ({}));
+          setError(FOCUS_ERRORS[body.result] ?? body.detail ?? `failed (${res.status})`);
+        }}
+      >
+        open tab
+      </button>
+      {error && <span className="focus-error">{error}</span>}
+      {error && <CopyButton text={resumeCommand(run)} label="copy resume" />}
+    </>
+  );
+}
+
 function PrChip({ pr }: { pr: PullRequest }) {
   const review = pr.reviewDecision === "APPROVED" ? "approved" : pr.reviewDecision === "CHANGES_REQUESTED" ? "changes requested" : null;
   return (
@@ -140,7 +168,7 @@ function RunRow({ run }: { run: Run }) {
             ))}
           </details>
         )}
-        <CopyButton text={resumeCommand(run)} label="copy resume" />
+        {run.itermSessionId ? <OpenTabButton run={run} /> : <CopyButton text={resumeCommand(run)} label="copy resume" />}
       </div>
       {run.status === "awaiting_input" && run.lastReply && <div className={`run-reply ${run.askedQuestion ? "question" : ""}`}>{run.lastReply}</div>}
     </li>

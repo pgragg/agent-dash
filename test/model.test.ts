@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildDashboard } from "../server/model.ts";
 import type { ParsedSession } from "../server/sources/sessions.ts";
+import type { ReportedStatus } from "../server/sources/status.ts";
 import { NOW, minutesAgo, pr, ticket } from "./helpers.ts";
 
 function session(over: Partial<ParsedSession>): ParsedSession {
@@ -79,4 +80,24 @@ test("a ticket named only by runs becomes an 'other' group with a stub when Jira
   const d = build([session({ tickets: ["EFSUP-1"] })]);
   assert.equal(d.otherTickets[0].ticket.key, "EFSUP-1");
   assert.equal(d.otherTickets[0].ticket.summary, "(not found in Jira)");
+});
+
+test("only a live run with a reported iTerm tab offers 'open tab'", () => {
+  const live = { sessionId: "live", pid: 1, state: "awaiting_input" as const, since: minutesAgo(1), itermSessionId: "UUID-1" };
+  const dead = { ...live, sessionId: "dead", state: "closed" as const };
+  const d = buildDashboard({
+    sessions: [session({ sessionId: "live" }), session({ sessionId: "dead" })],
+    reported: new Map<string, ReportedStatus>([["live", live], ["dead", dead]]),
+    myTickets: [],
+    otherTickets: [],
+    prs: [],
+    now: NOW,
+    recentDays: 14,
+    sources: { jira: ok, github: ok, sessions: ok },
+    extensionInstalled: true,
+    isAlive: () => true,
+    jiraServer: "https://jira",
+  });
+  const tab = Object.fromEntries(d.unlinkedRuns.map((r) => [r.sessionId, r.itermSessionId]));
+  assert.deepEqual(tab, { live: "UUID-1", dead: null });
 });

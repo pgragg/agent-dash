@@ -100,3 +100,5 @@ button { font: inherit; border: 1px solid var(--line); background: var(--card); 
 .flash { animation: flash 1.6s ease-out; }
 .created-prs summary { cursor: pointer; text-decoration: underline; }
 .created-prs[open] { display: flex; flex-wrap: wrap; gap: 8px; }
+.open-tab { color: var(--working); font-weight: 500; }
+.focus-error { color: var(--bad); }
