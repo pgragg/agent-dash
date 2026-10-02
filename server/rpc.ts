@@ -51,8 +51,8 @@ export async function readLogTail(file: string, bytes = TAIL_BYTES): Promise<str
     const { size } = await fh.stat();
     const start = Math.max(0, size - bytes);
     const buf = Buffer.alloc(size - start);
-    await fh.read(buf, 0, buf.length, start);
-    const text = buf.toString("utf8");
+    const { bytesRead } = await fh.read(buf, 0, buf.length, start);
+    const text = buf.subarray(0, bytesRead).toString("utf8");
     // The first line of a tail read is partial.
     return start > 0 ? text.slice(text.indexOf("\n") + 1) : text;
   } finally {

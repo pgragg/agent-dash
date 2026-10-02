@@ -29,6 +29,8 @@ test("the tool summary is one short line, without file contents or secrets", () 
   assert.equal(ext.summarizeTool("write", { path: "src/a.ts", content: "secret body" }), "src/a.ts");
   assert.equal(ext.summarizeTool("bash", { command: 'curl -H "Authorization: Bearer abc.def" https://x?token=s3cr3t&a=1' }), 'curl -H "Authorization: *** ***" https://x?token=***&a=1');
   assert.equal(ext.summarizeTool("bash", { command: "GITHUB_TOKEN=ghp_123 gh api --password hunter2" }), "GITHUB_TOKEN=*** gh api --password ***");
+  assert.equal(ext.summarizeTool("bash", { command: "AWS_ACCESS_KEY_ID=AKIA1 GH_PAT=x git push https://me:pw@gh.io --path=a" }), "AWS_ACCESS_KEY_ID=*** GH_PAT=*** git push https://***:***@gh.io --path=a");
+  assert.equal(ext.summarizeTool("edit", { file_path: "a/b.ts" }), "a/b.ts");
   assert.equal(ext.summarizeTool("my_tool", { anything: 1 }), "");
 });
 
@@ -38,7 +40,14 @@ test("the extension reports the running tool, takes Stop and Steer, and reports 
   let idle = true;
   let aborted = 0;
   let answer: (v: boolean) => void = () => {};
-  const ui = { confirm: (_t: string, _m: string) => new Promise<boolean>((r) => (answer = r)) };
+  // Like pi's own dialogs: an abort of opts.signal closes the dialog with the default answer.
+  const ui = {
+    confirm: (_t: string, _m: string, opts?: { signal?: AbortSignal }) =>
+      new Promise<boolean>((r) => {
+        answer = r;
+        opts?.signal?.addEventListener("abort", () => r(false));
+      }),
+  };
   const ctx = {
     sessionManager: { getSessionId: () => "sess-1", getSessionFile: () => "/f.jsonl" },
     cwd: "/repo",
@@ -64,9 +73,10 @@ test("the extension reports the running tool, takes Stop and Steer, and reports 
   assert.equal(status().activity.tool, "bash");
   assert.equal(status().state, "working");
 
-  writeFileSync(join(inbox, "1.steer"), "look at the tests first");
-  writeFileSync(join(inbox, "2.txt"), "then summarize");
-  writeFileSync(join(inbox, "3.abort"), "");
+  // Real names are <ms>-<pid>.<suffix>, so they arrive in the order they were sent.
+  writeFileSync(join(inbox, "1790000000001-9.steer"), "look at the tests first");
+  writeFileSync(join(inbox, "1790000000002-9.txt"), "then summarize");
+  writeFileSync(join(inbox, "1790000000003-9.abort"), "");
   await until(() => aborted === 1 && sent.length === 2);
   assert.deepEqual(sent, [
     ["look at the tests first", { deliverAs: "steer" }],
@@ -83,6 +93,12 @@ test("the extension reports the running tool, takes Stop and Steer, and reports 
   assert.deepEqual({ ...status().dialog, since: undefined }, { method: "confirm", title: "Allow rm?", message: "It deletes build/", since: undefined });
   answer(true);
   assert.equal(await pending, true);
+  assert.equal(status().dialog, null);
+
+  // Stop also dismisses an open dialog, so a run blocked on one can still be stopped.
+  const blocked = (ctx.ui as typeof ui).confirm("Allow push?", "");
+  writeFileSync(join(inbox, "1790000000004-9.abort"), "");
+  assert.equal(await blocked, false);
   assert.equal(status().dialog, null);
   await fire("session_shutdown");
 });
@@ -125,6 +141,7 @@ test("the activity line reads like 'running `pnpm test` · 40s'", () => {
   assert.deepEqual(activityParts({ tool: "bash", summary: "pnpm test", since: new Date(NOW - 40_000).toISOString() }, NOW), { verb: "running", code: "pnpm test", elapsed: "40s" });
   assert.equal(activityParts({ tool: "read", summary: "a.ts", since: new Date(NOW - 125_000).toISOString() }, NOW).elapsed, "2m 5s");
   assert.equal(activityParts({ tool: "web_search", summary: "", since: new Date(NOW).toISOString() }, NOW).verb, "using web_search");
+  assert.equal(activityParts({ tool: "bash", summary: "x", since: "not a date" }, NOW).elapsed, "");
 });
 
 const req = (id: string, method = "confirm", extra: object = {}) => JSON.stringify({ type: "extension_ui_request", id, method, title: "T", ...extra });

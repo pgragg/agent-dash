@@ -3,6 +3,7 @@ import type { RunActivity } from "./types.ts";
 const VERBS: Record<string, string> = { bash: "running", read: "reading", edit: "editing", write: "writing", grep: "searching", find: "finding", ls: "listing" };
 
 function seconds(ms: number): string {
+  if (!Number.isFinite(ms)) return "";
   const s = Math.max(0, Math.round(ms / 1000));
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);

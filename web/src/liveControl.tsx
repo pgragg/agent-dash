@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { activityParts } from "../../shared/activity.ts";
 import type { HistoryRun, Run, RunDialog } from "../../shared/types.ts";
-import { age, dirLabel, post } from "./lib.tsx";
+import { age, api, dirLabel, post } from "./lib.tsx";
 
 /**
  * Live control of a running agent from the page: what it does now, Stop, Steer, and the
@@ -11,7 +11,6 @@ import { age, dirLabel, post } from "./lib.tsx";
 const q = (sessionId: string) => `session=${encodeURIComponent(sessionId)}`;
 
 const controlApi = {
-  reply: (sessionId: string, text: string, steer: boolean) => post(`/api/reply?${q(sessionId)}`, { text, steer }),
   stop: (sessionId: string) => post(`/api/stop?${q(sessionId)}`),
   answer: (sessionId: string, answer: { value: string } | { confirmed: boolean } | { cancelled: true }) => post(`/api/dialog?${q(sessionId)}`, answer),
 };
@@ -41,8 +40,9 @@ function DialogCard({ run, dialog, now, onError }: { run: Run; dialog: RunDialog
     setSending(true);
     const err = await controlApi.answer(run.sessionId, a);
     onError(err);
-    // On success the dialog closes in the status file, and this card goes away.
+    // On success the dialog closes in the status file and this card goes away; if not, allow a retry.
     if (err) setSending(false);
+    else setTimeout(() => setSending(false), 5_000);
   };
   return (
     <div className="dialog-card">
@@ -99,11 +99,13 @@ export function Composer({ run, onError, focusSignal }: { run: HistoryRun; onErr
   }, [focusSignal]);
   const working = run.status === "working";
   const controls = working && Boolean(run.canControl);
+  // An open dialog makes the run wait for you, but Stop is still the way out of it.
+  const stoppable = Boolean(run.canControl) && (working || Boolean(run.dialog));
   const steering = controls && steer;
   const send = async () => {
     if (!text.trim()) return;
     setSending(true);
-    const err = await controlApi.reply(run.sessionId, text, steering);
+    const err = await api.reply(run.sessionId, text, steering);
     setSending(false);
     onError(err);
     if (!err) {
@@ -147,7 +149,7 @@ export function Composer({ run, onError, focusSignal }: { run: HistoryRun; onErr
               </button>
             </span>
           )}
-          {controls && (
+          {stoppable && (
             <button className="btn small" onClick={async () => onError(await controlApi.stop(run.sessionId))} title="Stop the current agent run, as Esc does">
               Stop
             </button>

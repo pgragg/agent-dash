@@ -14,7 +14,7 @@ import * as liveControl from "./routes/liveControl.ts";
 import { fetchMyPrs } from "./sources/github.ts";
 import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
 import { SessionIndex, transcriptTurns } from "./sources/sessions.ts";
-import { isAlive, readReportedStatuses, takesControls } from "./sources/status.ts";
+import { isAlive, readReportedStatuses } from "./sources/status.ts";
 import * as summaryDb from "./summaries/db.ts";
 import { reconcile, requestSummary } from "./summaries/runner.ts";
 
@@ -265,20 +265,6 @@ const server = createServer(async (req, res) => {
       const change = summaryDb.setThreadStatus(ticket, session, status, reason?.trim() || null);
       broadcast();
       json(201, change);
-    } else if (url.pathname === "/api/reply" && req.method === "POST") {
-      if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
-      const sessionId = url.searchParams.get("session") ?? "";
-      const status = (await readReportedStatuses(config.statusDir)).get(sessionId);
-      // Deliver only to a live session whose extension watches the inbox; otherwise the text would sit unread.
-      if (!status?.inbox || status.state === "closed" || !isAlive(status.pid)) {
-        return void res.writeHead(409, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "this session cannot take replies; open its tab" }));
-      }
-      const { text, steer } = JSON.parse((await readBody(req, 64_000)) || "{}") as { text?: string; steer?: boolean };
-      if (!text?.trim()) return void res.writeHead(400, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "empty reply" }));
-      // An older extension reads *.txt only, and would never see a *.steer file.
-      if (steer && !takesControls(status)) return void res.writeHead(409, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "type /reload in the session to steer from here" }));
-      liveControl.writeInbox(sessionId, steer ? "steer" : "txt", text.trim());
-      res.writeHead(202, { "Content-Type": "application/json" }).end(JSON.stringify({ ok: true }));
     } else if (url.pathname === "/api/focus" && req.method === "POST") {
       // A custom header forces a CORS preflight, which this server never answers,
       // so another web page cannot make the browser call this endpoint.

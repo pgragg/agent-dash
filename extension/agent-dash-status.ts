@@ -73,8 +73,9 @@ export function summarizeTool(toolName: string, args: unknown): string {
   else if (toolName === "grep" || toolName === "find") text = str(a.pattern);
   text = text
     .replace(/\b(bearer|basic)\s+[\w.~+/=-]+/gi, "$1 ***")
-    .replace(/((?:token|secret|password|passwd|api[_-]?key|auth)[\w-]*["']?\s*[=:]\s*["']?)[^\s"'&]+/gi, "$1***")
-    .replace(/(--?(?:token|password|secret|api-key)[= ])\S+/gi, "$1***");
+    .replace(/((?:token|secret|password|passwd|credential|key|auth|(?<![a-z])pat(?![a-z]))[\w-]*["']?\s*[=:]\s*["']?)[^\s"'&]+/gi, "$1***")
+    .replace(/(--?(?:token|password|secret|api-key)[= ])\S+/gi, "$1***")
+    .replace(/(\w+:\/\/)[^/\s:@]+:[^/\s@]+@/g, "$1***:***@");
   return cut(text, 80);
 }
 
@@ -86,6 +87,8 @@ export default function (pi: ExtensionAPI) {
   // Parallel tools can overlap; the newest one that still runs is the one to show.
   const running = new Map<string, Activity>();
   const dialogs: Dialog[] = [];
+  // Stop from the dash dismisses open dialogs too; an extension rarely passes its own signal.
+  const dismiss = new Map<Dialog, AbortController>();
   let lastWrite = 0;
   let timer: NodeJS.Timeout | null = null;
 
@@ -149,33 +152,45 @@ export default function (pi: ExtensionAPI) {
       const ui = ctx.ui as unknown as Record<string | symbol, unknown>;
       // A /reload loads this file again; the new copy replaces the hook and keeps one wrapper.
       const firstTime = !ui[HOOK];
-      ui[HOOK] = (open: boolean, d: Dialog) => {
+      ui[HOOK] = (open: boolean, d: Dialog, stop: AbortController) => {
         const i = dialogs.lastIndexOf(d);
-        if (open) dialogs.push(d);
-        // A dialog that opened before a /reload belongs to the old copy's list.
-        else if (i >= 0) dialogs.splice(i, 1);
+        if (open) {
+          dialogs.push(d);
+          dismiss.set(d, stop);
+        } else if (i >= 0) {
+          // A dialog that opened before a /reload belongs to the old copy's list.
+          dialogs.splice(i, 1);
+          dismiss.delete(d);
+        }
         write();
       };
       if (!firstTime) return;
       for (const method of ["select", "confirm", "input", "editor"] as const) {
         const original = ui[method];
         if (typeof original !== "function") continue;
-        ui[method] = async function (this: unknown, title: string, second?: unknown, ...rest: unknown[]) {
+        ui[method] = async function (this: unknown, ...args: unknown[]) {
+          const [title, second] = args;
           const d: Dialog = { method, title: cut(String(title ?? ""), 200), since: new Date().toISOString() };
           if (method === "select" && Array.isArray(second)) d.options = second.slice(0, 30).map((o) => cut(String(o), 200));
           if (method === "confirm" && typeof second === "string") d.message = cut(second, 1000);
           if (method === "input" && typeof second === "string") d.placeholder = cut(second, 200);
           if (method === "editor" && typeof second === "string") d.prefill = second.slice(0, 4000);
+          // select, confirm and input take { signal } third; pi closes the dialog when it fires.
+          const stop = new AbortController();
+          if (method !== "editor") {
+            const opts = (args[2] ?? {}) as { signal?: AbortSignal };
+            args[2] = { ...opts, signal: opts.signal ? AbortSignal.any([opts.signal, stop.signal]) : stop.signal };
+          }
           const hook = (open: boolean) => {
             try {
-              (ui[HOOK] as (open: boolean, d: Dialog) => void)(open, d);
+              (ui[HOOK] as (open: boolean, d: Dialog, stop: AbortController) => void)(open, d, stop);
             } catch {
               // The dialog itself must still open and close.
             }
           };
           hook(true);
           try {
-            return await (original as (...a: unknown[]) => Promise<unknown>).call(this, title, second, ...rest);
+            return await (original as (...a: unknown[]) => Promise<unknown>).apply(this, args);
           } finally {
             hook(false);
           }
@@ -196,12 +211,13 @@ export default function (pi: ExtensionAPI) {
     for (const f of files) {
       let text = "";
       try {
-        text = readFileSync(join(dir, f), "utf8").trim();
+        if (!f.endsWith(".abort")) text = readFileSync(join(dir, f), "utf8").trim();
         unlinkSync(join(dir, f));
       } catch {
         continue; // Another watcher event already took it.
       }
       if (f.endsWith(".abort")) {
+        for (const stop of dismiss.values()) stop.abort();
         if (current && !current.isIdle()) current.abort();
         continue;
       }
@@ -257,6 +273,7 @@ export default function (pi: ExtensionAPI) {
     watcher?.close();
     watcher = null;
     dialogs.length = 0;
+    dismiss.clear();
     setState(ctx, "closed");
   });
 }
