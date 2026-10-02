@@ -1,447 +1,579 @@
-import { useCallback, useEffect, useState } from "react";
-import type { AttentionItem, Dashboard, PullRequest, Run, SourceHealth, TicketGroup, TicketSummaryState } from "../../shared/types.ts";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { AttentionItem, AttentionKind, Dashboard, PullRequest, Run, TicketGroup, TicketSummaryState } from "../../shared/types.ts";
+import { age, api, dirLabel, dueLabel, elapsed, Markdown, plural, prName, resumeCommand, runTitle, shortDate, useDashboard, useNow } from "./lib.tsx";
 
-const MIN = 60_000;
-const HOUR = 60 * MIN;
-const DAY = 24 * HOUR;
-const RUNS_SHOWN = 5;
+/**
+ * agent-dash answers one question: "what do I work on next?".
+ *
+ * The left rail is a queue: one entry per ticket (or per ticket-less run or PR), ranked by
+ * its most urgent signal. The right side is a workspace for the selected entry, with
+ * everything needed to act on it in place: the drafted next steps, the agent's full last
+ * message with a reply box, the PRs, and the run history. "Done for now" clears an entry
+ * until something about it changes, so the queue works like an inbox.
+ */
 
-function ago(iso: string): string {
-  const ms = Date.now() - Date.parse(iso);
-  if (ms < MIN) return "just now";
-  if (ms < HOUR) return `${Math.round(ms / MIN)}m ago`;
-  if (ms < DAY) return `${Math.round(ms / HOUR)}h ago`;
-  return `${Math.round(ms / DAY)}d ago`;
+// ---- subjects: the things you can select --------------------------------------------
+
+interface Subject {
+  id: string;
+  ticket: TicketGroup | null;
+  /** A run with no ticket. */
+  run: Run | null;
+  /** A PR with no ticket and no run. */
+  prUrl: string | null;
+  /** Most urgent first. */
+  items: AttentionItem[];
+  /** Changes whenever a signal changes, so "done for now" expires on news. */
+  fingerprint: string;
 }
 
-/** "45s ago", "12m ago", "3h ago", "4d ago", "2w ago". */
-function sinceLabel(iso: string, now: number): string {
-  const ms = now - Date.parse(iso);
-  if (!Number.isFinite(ms)) return "";
-  const s = Math.max(0, Math.round(ms / 1000));
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86_400) return `${Math.floor(s / 3600)}h ago`;
-  if (s < 14 * 86_400) return `${Math.floor(s / 86_400)}d ago`;
-  return `${Math.floor(s / (7 * 86_400))}w ago`;
-}
-
-/** Re-render on a timer, so relative times stay true between data updates. */
-function useNow(intervalMs: number): number {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(id);
-  }, [intervalMs]);
-  return now;
-}
-
-function when(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-}
-
-function prName(url: string): string {
-  const m = url.match(/github\.com\/[^/]+\/([^/]+)\/pull\/(\d+)/);
-  return m ? `${m[1]}#${m[2]}` : url;
-}
-
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? "" : "s"}`;
-}
-
-/** The project folder name, or ~ for a session started in the home folder. */
-function dirLabel(cwd: string): string {
-  if (/^\/Users\/[^/]+\/?$/.test(cwd)) return "~";
-  return cwd.split("/").filter(Boolean).pop() ?? cwd;
-}
-
-function resumeCommand(run: Run): string {
-  return `cd '${run.cwd.replace(/'/g, "'\\''")}' && pi --session ${run.sessionId}`;
-}
-
-function useDashboard() {
-  const [data, setData] = useState<Dashboard | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const load = useCallback(async (refresh = false) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/dashboard${refresh ? "?refresh" : ""}`);
-      if (!res.ok) throw new Error(await res.text());
-      setData(await res.json());
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-    const events = new EventSource("/api/events");
-    events.addEventListener("change", () => load());
-    return () => events.close();
-  }, [load]);
-
-  return { data, error, loading, refresh: () => load(true) };
-}
-
-// ---- small pieces -------------------------------------------------------------------
-
-const STATUS_LABEL: Record<Run["status"], string> = { working: "working", awaiting_input: "awaiting input", finished: "finished" };
-
-function StatusPill({ run }: { run: Run }) {
-  const guess = run.statusSource === "heuristic" && run.status !== "finished";
-  return (
-    <span className={`pill status-${run.status}`} title={guess ? "Guessed from the session log" : undefined}>
-      {STATUS_LABEL[run.status]}
-      {guess ? "?" : ""}
-    </span>
-  );
-}
-
-function CopyButton({ text, label }: { text: string; label: string }) {
-  const [done, setDone] = useState(false);
-  return (
-    <button
-      className="link-button"
-      title={text}
-      onClick={async () => {
-        await navigator.clipboard.writeText(text);
-        setDone(true);
-        setTimeout(() => setDone(false), 1500);
-      }}
-    >
-      {done ? "copied" : label}
-    </button>
-  );
-}
-
-const FOCUS_ERRORS: Record<string, string> = {
-  missing: "tab not found — copy the resume command instead",
-  not_authorized: "allow it: System Settings → Privacy & Security → Automation → iTerm → iTerm2",
+const KIND: Record<AttentionKind, { title: string; tone: "waiting" | "bad" | "warn" | "good" | "muted" }> = {
+  run_error: { title: "Agent hit an error", tone: "bad" },
+  awaiting_input: { title: "Agent is waiting on you", tone: "waiting" },
+  changes_requested: { title: "Changes requested", tone: "bad" },
+  ci_failing: { title: "CI is failing", tone: "bad" },
+  merge_conflict: { title: "Merge conflict", tone: "bad" },
+  ready_to_merge: { title: "Ready to merge", tone: "good" },
+  overdue: { title: "Overdue", tone: "bad" },
+  due_soon: { title: "Due soon", tone: "warn" },
+  stalled: { title: "Stalled", tone: "muted" },
 };
 
-/** Ask the server to bring the run's iTerm tab to the front. Returns an error message, or null. */
-async function focusTab(run: Run): Promise<string | null> {
-  const res = await fetch(`/api/focus?session=${encodeURIComponent(run.sessionId)}`, { method: "POST", headers: { "X-Agent-Dash": "1" } });
-  if (res.ok) return null;
-  const body = await res.json().catch(() => ({}));
-  return FOCUS_ERRORS[body.result] ?? body.detail ?? `failed (${res.status})`;
-}
-
-/** "open tab" for a live run; "copy resume" for a finished one, or when the tab cannot be found. */
-function TabOrResume({ run, onError }: { run: Run; onError: (message: string | null) => void }) {
-  const [failed, setFailed] = useState(false);
-  if (!run.itermSessionId || failed) return <CopyButton text={resumeCommand(run)} label="copy resume" />;
-  return (
-    <button
-      className="link-button open-tab"
-      title="Bring this session's iTerm tab to the front"
-      onClick={async () => {
-        const error = await focusTab(run);
-        onError(error);
-        if (error) setFailed(true);
-      }}
-    >
-      open tab
-    </button>
-  );
-}
-
-function PrChip({ pr }: { pr: PullRequest }) {
-  const review = pr.reviewDecision === "APPROVED" ? "approved" : pr.reviewDecision === "CHANGES_REQUESTED" ? "changes requested" : null;
-  return (
-    <a className={`pr pr-${pr.state}`} href={pr.url} target="_blank" rel="noreferrer" title={pr.title}>
-      <span className="pr-name">{prName(pr.url)}</span>
-      <span className="pr-state">{pr.isDraft && pr.state === "open" ? "draft" : pr.state}</span>
-      {pr.state === "open" && pr.checks !== "none" && <span className={`ci ci-${pr.checks}`}>CI {pr.checks}</span>}
-      {pr.state === "open" && review && <span className={`review review-${pr.reviewDecision}`}>{review}</span>}
-      {pr.state === "open" && pr.mergeable === "CONFLICTING" && <span className="ci ci-failure">conflict</span>}
-    </a>
-  );
-}
-
-function RunRow({ run }: { run: Run }) {
-  const [tabError, setTabError] = useState<string | null>(null);
-  return (
-    <li className={`run run-${run.status}`} id={`run-${run.sessionId}`}>
-      <div className="run-head">
-        <StatusPill run={run} />
-        <span className="run-title" title={run.firstPrompt}>
-          {run.name ?? run.firstPrompt}
-        </span>
-      </div>
-      <div className="run-meta">
-        <span title={run.startedAt}>started {when(run.startedAt)}</span>
-        <span title={run.lastActivityAt}>active {ago(run.lastActivityAt)}</span>
-        <span title={run.cwd}>{dirLabel(run.cwd)}</span>
-        <span>{plural(run.userMessageCount, "prompt")}</span>
-        {run.createdPrs.length <= 2 ? (
-          run.createdPrs.map((url) => (
-            <a key={url} href={url} target="_blank" rel="noreferrer">
-              opened {prName(url)}
-            </a>
-          ))
-        ) : (
-          <details className="created-prs">
-            <summary>opened {run.createdPrs.length} PRs</summary>
-            {run.createdPrs.map((url) => (
-              <a key={url} href={url} target="_blank" rel="noreferrer">
-                {prName(url)}
-              </a>
-            ))}
-          </details>
-        )}
-        <TabOrResume run={run} onError={setTabError} />
-        {tabError && <span className="focus-error">{tabError}</span>}
-      </div>
-      {run.status === "awaiting_input" && run.lastReply && <div className={`run-reply ${run.askedQuestion ? "question" : ""}`}>{run.lastReply}</div>}
-    </li>
-  );
-}
-
-function Runs({ runs }: { runs: Run[] }) {
-  const [all, setAll] = useState(false);
-  useEffect(() => {
-    const unfold = () => {
-      if (runs.some((r) => location.hash === `#run-${r.sessionId}`)) setAll(true);
-    };
-    window.addEventListener("hashchange", unfold);
-    return () => window.removeEventListener("hashchange", unfold);
-  }, [runs]);
-  if (runs.length === 0) return <div className="muted small">No agent runs yet.</div>;
-  // Live runs always show; only old finished runs fold away.
-  const visible = all ? runs : runs.filter((r, i) => i >= runs.length - RUNS_SHOWN || r.status !== "finished");
-  const hidden = runs.length - visible.length;
-  return (
-    <>
-      {hidden > 0 && (
-        <button className="link-button small" onClick={() => setAll(true)}>
-          show {plural(hidden, "older run")}
-        </button>
-      )}
-      <ol className="runs">
-        {visible.map((r) => (
-          <RunRow key={r.sessionId} run={r} />
-        ))}
-      </ol>
-    </>
-  );
-}
-
-function TicketCard({ group, attention }: { group: TicketGroup; attention: AttentionItem[] }) {
-  const { ticket, runs, prs } = group;
-  const today = new Date().toISOString().slice(0, 10);
-  const overdue = ticket.dueDate && ticket.dueDate < today && ticket.statusCategory !== "done";
-  const openPrs = prs.filter((p) => p.state === "open");
-  const closedPrs = prs.filter((p) => p.state !== "open");
-  return (
-    <section className={`ticket ${attention.length ? "needs-you" : ""}`} id={`ticket-${ticket.key}`}>
-      <header className="ticket-head">
-        <a className="ticket-key" href={ticket.url} target="_blank" rel="noreferrer">
-          {ticket.key}
-        </a>
-        <span className="ticket-summary">{ticket.summary}</span>
-        <span className={`pill cat-${ticket.statusCategory}`}>{ticket.status}</span>
-        {ticket.priority && <span className="muted small">{ticket.priority}</span>}
-        {ticket.dueDate && <span className={`small ${overdue ? "overdue" : "muted"}`}>due {ticket.dueDate}</span>}
-      </header>
-      {attention.length > 0 && (
-        <ul className="ticket-attention">
-          {attention.map((a, i) => (
-            <li key={i}>{a.reason}</li>
-          ))}
-        </ul>
-      )}
-      {prs.length > 0 && (
-        <div className="prs">
-          {openPrs.map((p) => (
-            <PrChip key={p.url} pr={p} />
-          ))}
-          {closedPrs.length > 0 && (
-            <details className="closed-prs">
-              <summary className="small muted">{closedPrs.length} merged / closed</summary>
-              {closedPrs.map((p) => (
-                <PrChip key={p.url} pr={p} />
-              ))}
-            </details>
-          )}
-        </div>
-      )}
-      <Runs runs={runs} />
-    </section>
-  );
-}
-
-const KIND_LABEL: Record<AttentionItem["kind"], string> = {
-  awaiting_input: "waiting",
+const SHORT: Record<AttentionKind, string> = {
   run_error: "error",
+  awaiting_input: "waiting",
   changes_requested: "changes",
   ci_failing: "CI red",
   merge_conflict: "conflict",
   ready_to_merge: "merge",
   overdue: "overdue",
-  due_soon: "due",
+  due_soon: "due soon",
   stalled: "stalled",
 };
 
-// ---- next-steps summaries ------------------------------------------------------------
-
-/** Same limit as the server: after this, a request counts as stuck. */
-const SUMMARY_STALE_MS = 30 * 60_000;
-
-async function requestSummary(ticket: string, force: boolean): Promise<string | null> {
-  const res = await fetch(`/api/summaries?ticket=${encodeURIComponent(ticket)}${force ? "&force" : ""}`, { method: "POST", headers: { "X-Agent-Dash": "1" } });
-  if (res.ok) return null;
-  const body = await res.json().catch(() => ({}));
-  return body.error ?? `failed (${res.status})`;
+function buildSubjects(d: Dashboard): Map<string, Subject> {
+  const out = new Map<string, Subject>();
+  const add = (id: string, init: Omit<Subject, "id" | "items" | "fingerprint">) => {
+    if (!out.has(id)) out.set(id, { id, items: [], fingerprint: "", ...init });
+    return out.get(id)!;
+  };
+  for (const g of [...d.myTickets, ...d.otherTickets]) add(`t:${g.ticket.key}`, { ticket: g, run: null, prUrl: null });
+  for (const r of d.unlinkedRuns) add(`r:${r.sessionId}`, { ticket: null, run: r, prUrl: null });
+  for (const a of d.attention) {
+    const id = a.ticketKey ? `t:${a.ticketKey}` : a.sessionId ? `r:${a.sessionId}` : `p:${a.prUrl}`;
+    const s = out.get(id) ?? add(id, { ticket: null, run: a.run ?? null, prUrl: a.prUrl ?? null });
+    s.items.push(a);
+  }
+  for (const s of out.values()) s.fingerprint = s.items.map((a) => `${a.kind}@${a.updatedAt}`).join("|");
+  return out;
 }
 
-/** Just enough markdown for a summary: **bold**, and line breaks kept. */
-function SummaryText({ text }: { text: string }) {
+function subjectTitle(s: Subject): string {
+  if (s.ticket) return s.ticket.ticket.summary;
+  if (s.run) return runTitle(s.run);
+  return s.prUrl ? prName(s.prUrl) : s.id;
+}
+
+/** Live agents first (waiting before working), then the newest. */
+function liveRuns(s: Subject): Run[] {
+  const runs = s.ticket ? s.ticket.runs : s.run ? [s.run] : [];
+  const rank = (r: Run) => (r.status === "awaiting_input" ? 0 : r.status === "working" ? 1 : 2);
+  return runs.filter((r) => r.status !== "finished").sort((a, b) => rank(a) - rank(b) || b.lastActivityAt.localeCompare(a.lastActivityAt));
+}
+
+/** The run that "open in iTerm" and the reply box act on. */
+function primaryRun(s: Subject): Run | undefined {
+  return s.items.find((a) => a.run?.status === "awaiting_input")?.run ?? liveRuns(s)[0] ?? s.items.find((a) => a.run)?.run;
+}
+
+// ---- "done for now" -----------------------------------------------------------------
+
+const SNOOZE_KEY = "agent-dash:done-for-now";
+
+function useSnoozed() {
+  const [map, setMap] = useState<Record<string, string>>(() => JSON.parse(localStorage.getItem(SNOOZE_KEY) ?? "{}"));
+  const save = (next: Record<string, string>) => {
+    setMap(next);
+    localStorage.setItem(SNOOZE_KEY, JSON.stringify(next));
+  };
+  return {
+    isSnoozed: (s: Subject) => map[s.id] === s.fingerprint,
+    snooze: (s: Subject) => save({ ...map, [s.id]: s.fingerprint }),
+    wake: (s: Subject) => {
+      const { [s.id]: _gone, ...rest } = map;
+      save(rest);
+    },
+  };
+}
+
+// ---- small pieces -------------------------------------------------------------------
+
+function Dot({ tone, pulse }: { tone: string; pulse?: boolean }) {
+  return <span className={`dot tone-${tone} ${pulse ? "pulse" : ""}`} aria-hidden />;
+}
+
+function Kbd({ children }: { children: string }) {
+  return <kbd>{children}</kbd>;
+}
+
+function CopyButton({ text, label, className = "btn ghost" }: { text: string; label: string; className?: string }) {
+  const [done, setDone] = useState(false);
   return (
-    <div className="summary-text">
-      {text.split("\n").map((line, i) => (
-        <div key={i}>{line.split(/(\*\*[^*]+\*\*)/g).map((part, j) => (part.startsWith("**") && part.endsWith("**") ? <strong key={j}>{part.slice(2, -2)}</strong> : part))}</div>
-      ))}
-    </div>
+    <button
+      className={className}
+      title={text}
+      onClick={async () => {
+        await navigator.clipboard.writeText(text);
+        setDone(true);
+        setTimeout(() => setDone(false), 1400);
+      }}
+    >
+      {done ? "Copied" : label}
+    </button>
   );
 }
 
-type SummaryView = "none" | "running" | "stuck" | "failed" | "done";
-
-function summaryView(state: TicketSummaryState | undefined, now: number): SummaryView {
-  if (!state) return "none";
-  const { latest } = state;
-  if (latest.status === "in_progress") return now - Date.parse(latest.requestedAt) > SUMMARY_STALE_MS ? "stuck" : "running";
-  if (latest.status === "failed") return state.lastDone ? "done" : "failed";
-  return "done";
-}
-
-function SummaryCell({ ticket, state, now, open, onToggle, onError }: {
-  ticket: string;
-  state: TicketSummaryState | undefined;
-  now: number;
-  open: boolean;
-  onToggle: () => void;
-  onError: (message: string | null) => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const ask = async (force: boolean) => {
-    setBusy(true);
-    onError(await requestSummary(ticket, force));
-    setBusy(false);
-  };
-  const view = summaryView(state, now);
-  if (busy) return <span className="muted">starting…</span>;
-  if (view === "none") return <button className="link-button" title="Start a pi run that writes next steps for this ticket" onClick={() => ask(false)}>summarize</button>;
-  if (view === "running") return <button className="link-button summarizing" onClick={onToggle} title="A pi run is writing the summary">summarizing {sinceLabel(state!.latest.requestedAt, now).replace(" ago", "")}…</button>;
-  if (view === "stuck") return <button className="link-button stuck" title="Running for more than 30 minutes" onClick={() => ask(true)}>stuck · re-request</button>;
-  if (view === "failed") return <button className="link-button stuck" title={state!.latest.error ?? ""} onClick={() => ask(true)}>failed · retry</button>;
-  return <button className="link-button" onClick={onToggle}>summary {open ? "▾" : "▸"}</button>;
-}
-
-function SummaryPanel({ ticket, state, now, onError }: { ticket: string; state: TicketSummaryState; now: number; onError: (message: string | null) => void }) {
-  const { latest, lastDone } = state;
-  const shown = latest.status === "done" ? latest : lastDone;
-  const view = summaryView(state, now);
+function OpenTab({ run, onError, className = "btn ghost", label = "Open in iTerm", hotkey = false }: { run: Run; onError: (m: string | null) => void; className?: string; label?: string; hotkey?: boolean }) {
+  if (!run.itermSessionId) return <CopyButton text={resumeCommand(run)} label="Copy resume" className={className} />;
   return (
-    <div className="summary-panel">
-      {shown?.summary ? <SummaryText text={shown.summary} /> : <div className="muted">No summary yet.</div>}
-      <div className="summary-meta">
-        {shown && (
-          <>
-            <span title={shown.requestedAt}>requested {sinceLabel(shown.requestedAt, now)}</span>
-            {shown.generatedAt && <span title={shown.generatedAt}>generated {sinceLabel(shown.generatedAt, now)}</span>}
-          </>
-        )}
-        {view === "running" && <span className="summarizing">a new summary is in progress ({sinceLabel(latest.requestedAt, now).replace(" ago", "")})</span>}
-        {latest.status === "failed" && <span className="stuck" title={latest.error ?? ""}>the last request failed</span>}
-        {(view === "done" || view === "stuck") && (
-          <button className="link-button" onClick={async () => onError(await requestSummary(ticket, view === "stuck"))}>
-            re-request
+    <button className={className} title="Bring this session's iTerm tab to the front" onClick={async () => onError(await api.focusTab(run.sessionId))}>
+      {label} {hotkey && <Kbd>O</Kbd>}
+    </button>
+  );
+}
+
+function statusText(run: Run, now: number): string {
+  const guess = run.statusSource === "heuristic" ? " (guess)" : "";
+  if (run.status === "awaiting_input") return `waiting ${age(run.statusSince, now)}${guess}`;
+  if (run.status === "working") return `working ${age(run.statusSince, now)}${guess}`;
+  return `finished ${age(run.lastActivityAt, now)} ago`;
+}
+
+function runTone(run: Run): string {
+  return run.endedInError ? "bad" : run.status === "awaiting_input" ? "waiting" : run.status === "working" ? "working" : "muted";
+}
+
+// ---- queue (left rail) --------------------------------------------------------------
+
+function QueueItem({ s, selected, onSelect, now, summary, rank }: { s: Subject; selected: boolean; onSelect: () => void; now: number; summary?: TicketSummaryState; rank?: number }) {
+  const top = s.items[0];
+  const run = primaryRun(s);
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (selected) ref.current?.scrollIntoView({ block: "nearest" });
+  }, [selected]);
+  const headline = top ? KIND[top.kind].title : run ? statusText(run, now) : s.ticket?.ticket.status ?? "";
+  const tone = top ? KIND[top.kind].tone : run ? runTone(run) : "muted";
+  const when = top?.kind === "awaiting_input" && run ? age(run.statusSince, now) : age(top?.updatedAt ?? run?.lastActivityAt ?? s.ticket?.ticket.updatedAt, now);
+  const extra = [...new Set(s.items.slice(1).map((a) => a.kind))].filter((k) => k !== top?.kind);
+  return (
+    <button ref={ref} className={`q-item ${selected ? "selected" : ""}`} onClick={onSelect} aria-current={selected}>
+      <span className="q-rank">{rank ?? ""}</span>
+      <span className="q-body">
+        <span className="q-head">
+          <Dot tone={tone} pulse={run?.status === "working"} />
+          <span className={`q-headline tone-text-${tone}`}>{headline}</span>
+          <span className="q-when">{when}</span>
+        </span>
+        <span className="q-title">{subjectTitle(s)}</span>
+        <span className="q-tags">
+          {s.ticket && <span className="q-key">{s.ticket.ticket.key}</span>}
+          {extra.map((k) => (
+            <span key={k} className={`tag tone-${KIND[k].tone}`}>
+              {SHORT[k]}
+            </span>
+          ))}
+          {summary && <span className="tag tone-muted" title="Next steps drafted">✦ next steps</span>}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+function RailSection({ title, count, children, defaultOpen = true, hint }: { title: string; count: number; children: React.ReactNode; defaultOpen?: boolean; hint?: string }) {
+  const [open, setOpen] = useState(defaultOpen);
+  if (count === 0) return null;
+  return (
+    <section className="rail-section">
+      <button className="rail-title" onClick={() => setOpen(!open)} title={hint}>
+        <span className={`chev ${open ? "open" : ""}`}>›</span>
+        {title}
+        <span className="count">{count}</span>
+      </button>
+      {open && <div className="rail-list">{children}</div>}
+    </section>
+  );
+}
+
+// ---- workspace (right side) ---------------------------------------------------------
+
+const STALE_MS = 30 * 60_000;
+
+function NextSteps({ s, state, now, onError }: { s: Subject; state: TicketSummaryState | undefined; now: number; onError: (m: string | null) => void }) {
+  const key = s.ticket!.ticket.key;
+  const [starting, setStarting] = useState(false);
+  const ask = async (force: boolean) => {
+    setStarting(true);
+    onError(await api.summarize(key, force));
+    setStarting(false);
+  };
+  const latest = state?.latest;
+  const shown = latest?.status === "done" ? latest : (state?.lastDone ?? null);
+  const running = latest?.status === "in_progress";
+  const stuck = running && now - Date.parse(latest!.requestedAt) > STALE_MS;
+  // Activity after the summary was written makes it out of date.
+  const lastActivity = [...(s.ticket?.runs.map((r) => r.lastActivityAt) ?? []), ...(s.ticket?.prs.map((p) => p.updatedAt) ?? [])].sort().at(-1);
+  const outdated = shown?.generatedAt && lastActivity && Date.parse(lastActivity) - Date.parse(shown.generatedAt) > 60_000;
+
+  return (
+    <section className="card next-steps">
+      <header className="card-head">
+        <h3>
+          <span className="spark">✦</span> Next steps
+        </h3>
+        {outdated && !running && <span className="tag tone-warn">out of date</span>}
+        <span className="grow" />
+        {shown?.generatedAt && <span className="meta">drafted {age(shown.generatedAt, now)} ago</span>}
+        {shown && !running && (
+          <button className="btn ghost small" onClick={() => ask(false)} disabled={starting}>
+            Redraft <Kbd>S</Kbd>
           </button>
         )}
+      </header>
+      {running && (
+        <div className={`drafting ${stuck ? "stuck" : ""}`}>
+          {stuck ? (
+            <>
+              <span>Drafting has run for {elapsed(latest!.requestedAt, now)}. It is probably stuck.</span>
+              <button className="btn small" onClick={() => ask(true)}>
+                Start again
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="shimmer" />
+              <span>
+                Reading Jira, PRs, Slack and agent history… <b>{elapsed(latest!.requestedAt, now)}</b>
+              </span>
+            </>
+          )}
+        </div>
+      )}
+      {latest?.status === "failed" && (
+        <div className="draft-failed" title={latest.error ?? ""}>
+          The last draft failed: {(latest.error ?? "").split("\n")[0].slice(0, 160)}{" "}
+          <button className="btn small" onClick={() => ask(true)}>
+            Retry
+          </button>
+        </div>
+      )}
+      {shown?.summary ? (
+        <Markdown text={shown.summary} />
+      ) : (
+        !running && (
+          <div className="empty-draft">
+            <p>Let an agent read the ticket, its PRs, Slack and the agent history, and draft what to do next.</p>
+            <button className="btn primary" onClick={() => ask(false)} disabled={starting}>
+              {starting ? "Starting…" : "Draft next steps"} <Kbd>S</Kbd>
+            </button>
+          </div>
+        )
+      )}
+    </section>
+  );
+}
+
+function Composer({ run, onError, focusSignal }: { run: Run; onError: (m: string | null) => void; focusSignal: number }) {
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sentAt, setSentAt] = useState<number | null>(null);
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (focusSignal) ref.current?.focus();
+  }, [focusSignal]);
+  const send = async () => {
+    if (!text.trim()) return;
+    setSending(true);
+    const err = await api.reply(run.sessionId, text);
+    setSending(false);
+    onError(err);
+    if (!err) {
+      setText("");
+      setSentAt(Date.now());
+    }
+  };
+  if (!run.canReply) {
+    return (
+      <div className="composer-off">
+        To reply from here, run <code>/reload</code> once in this session. Until then, reply in its tab.
+      </div>
+    );
+  }
+  return (
+    <div className="composer">
+      <textarea
+        ref={ref}
+        rows={3}
+        value={text}
+        placeholder={run.status === "working" ? "Queue a message for when the agent finishes…" : "Reply to the agent…"}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            send();
+          }
+          if (e.key === "Escape") (e.target as HTMLTextAreaElement).blur();
+        }}
+      />
+      <div className="composer-bar">
+        <span className="meta">{sentAt && Date.now() - sentAt < 20_000 ? "Sent. The agent has your message." : `to ${dirLabel(run.cwd)} · ${run.sessionId.slice(-6)}`}</span>
+        <button className="btn primary" onClick={send} disabled={sending || !text.trim()}>
+          {sending ? "Sending…" : run.status === "working" ? "Queue" : "Send"} <Kbd>⌘↵</Kbd>
+        </button>
       </div>
     </div>
   );
 }
 
-function FocusRow({ item, now, summary }: { item: AttentionItem; now: number; summary: TicketSummaryState | undefined }) {
-  const [tabError, setTabError] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
+function AgentCard({ run, now, onError, focusSignal, primary }: { run: Run; now: number; onError: (m: string | null) => void; focusSignal: number; primary: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const long = run.lastMessage.length > 900;
   return (
-    <li className={`focus-item kind-${item.kind}`}>
-      <span className="focus-kind">{KIND_LABEL[item.kind]}</span>
-      <span className="focus-reason">{item.reason}</span>
-      <span className="focus-cell focus-updated" title={item.updatedAt ? new Date(item.updatedAt).toLocaleString() : undefined}>
-        {item.updatedAt && sinceLabel(item.updatedAt, now)}
-      </span>
-      {/* One cell per link, empty when there is none, so each link type lines up in a column. */}
-      <span className="focus-cell">
-        {item.ticketKey && (
-          <a href={item.ticketUrl ?? undefined} target="_blank" rel="noreferrer" title="Open in Jira">
-            {item.ticketKey}
-          </a>
-        )}
-      </span>
-      <span className="focus-cell">
-        {item.prUrl && (
-          <a href={item.prUrl} target="_blank" rel="noreferrer">
-            PR
-          </a>
-        )}
-      </span>
-      <span className="focus-cell">{item.sessionId && <a href={`#run-${item.sessionId}`}>run</a>}</span>
-      <span className="focus-cell">{item.run && <TabOrResume run={item.run} onError={setTabError} />}</span>
-      <span className="focus-cell">
-        {item.ticketKey && <SummaryCell ticket={item.ticketKey} state={summary} now={now} open={open} onToggle={() => setOpen(!open)} onError={setTabError} />}
-      </span>
-      {tabError && <span className="focus-error focus-row-error">{tabError}</span>}
-      {open && item.ticketKey && summary && <SummaryPanel ticket={item.ticketKey} state={summary} now={now} onError={setTabError} />}
-    </li>
-  );
-}
-
-function FocusNext({ items, summaries }: { items: AttentionItem[]; summaries: Dashboard["summaries"] }) {
-  const [all, setAll] = useState(false);
-  const now = useNow(10_000);
-  if (items.length === 0) return <p className="muted">Nothing needs you. The agents are working or done.</p>;
-  const shown = all ? items : items.slice(0, 10);
-  return (
-    <>
-      <ol className="focus">
-        <li className="focus-item focus-header" aria-hidden>
-          <span />
-          <span />
-          <span className="focus-cell">updated</span>
-          <span className="focus-cell">ticket</span>
-          <span className="focus-cell">PR</span>
-          <span className="focus-cell">run</span>
-          <span className="focus-cell">jump</span>
-          <span className="focus-cell">next steps</span>
-        </li>
-        {shown.map((a, i) => (
-          <FocusRow key={`${a.kind}-${a.sessionId ?? a.prUrl ?? a.ticketKey}-${i}`} item={a} now={now} summary={a.ticketKey ? summaries[a.ticketKey] : undefined} />
-        ))}
-      </ol>
-      {items.length > shown.length && (
-        <button className="link-button small" onClick={() => setAll(true)}>
-          show {items.length - shown.length} more
-        </button>
+    <section className={`card agent tone-border-${runTone(run)}`}>
+      <header className="card-head">
+        <Dot tone={runTone(run)} pulse={run.status === "working"} />
+        <div className="agent-title">
+          <h3 title={run.firstPrompt}>{runTitle(run)}</h3>
+          <span className="meta">
+            {statusText(run, now)} · {dirLabel(run.cwd)} · {plural(run.userMessageCount, "prompt")}
+          </span>
+        </div>
+        <span className="grow" />
+        <OpenTab run={run} onError={onError} hotkey={primary} />
+      </header>
+      {run.lastMessage && (
+        <div className={`agent-message ${long && !expanded ? "clamped" : ""}`}>
+          <Markdown text={run.lastMessage} />
+          {long && (
+            <button className="btn ghost small expand" onClick={() => setExpanded(!expanded)}>
+              {expanded ? "Show less" : "Show the whole message"}
+            </button>
+          )}
+        </div>
       )}
-    </>
+      {run.status !== "finished" && <Composer run={run} onError={onError} focusSignal={primary ? focusSignal : 0} />}
+    </section>
   );
 }
 
-function Health({ name, h }: { name: string; h: SourceHealth }) {
+function PrRow({ pr, now }: { pr: PullRequest; now: number }) {
+  const open = pr.state === "open";
+  const review = pr.reviewDecision === "APPROVED" ? ["approved", "good"] : pr.reviewDecision === "CHANGES_REQUESTED" ? ["changes requested", "bad"] : pr.reviewDecision === "REVIEW_REQUIRED" ? ["needs review", "muted"] : null;
   return (
-    <span className={`health ${h.ok ? "ok" : "bad"}`} title={h.ok ? `fetched ${h.fetchedAt ?? ""}` : h.error}>
-      {name}
-    </span>
+    <a className={`pr-row ${open ? "" : "closed"}`} href={pr.url} target="_blank" rel="noreferrer">
+      <span className={`pr-state state-${pr.isDraft && open ? "draft" : pr.state}`}>{pr.isDraft && open ? "draft" : pr.state}</span>
+      <span className="pr-name">{prName(pr.url)}</span>
+      <span className="pr-title">{pr.title}</span>
+      {open && pr.checks !== "none" && <span className={`tag tone-${pr.checks === "success" ? "good" : pr.checks === "failure" ? "bad" : "warn"}`}>CI {pr.checks}</span>}
+      {open && review && <span className={`tag tone-${review[1]}`}>{review[0]}</span>}
+      {open && pr.mergeable === "CONFLICTING" && <span className="tag tone-bad">conflict</span>}
+      <span className="meta">{age(pr.updatedAt, now)}</span>
+    </a>
+  );
+}
+
+function History({ runs, now, onError }: { runs: Run[]; now: number; onError: (m: string | null) => void }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const [all, setAll] = useState(false);
+  const shown = all ? runs : runs.slice(-6);
+  return (
+    <ol className="history">
+      {runs.length > shown.length && (
+        <li>
+          <button className="btn ghost small" onClick={() => setAll(true)}>
+            Show {plural(runs.length - shown.length, "older run")}
+          </button>
+        </li>
+      )}
+      {shown.map((r) => (
+        <li key={r.sessionId} className={open === r.sessionId ? "open" : ""}>
+          <div className="h-row">
+            <Dot tone={runTone(r)} pulse={r.status === "working"} />
+            <button className="h-title" onClick={() => setOpen(open === r.sessionId ? null : r.sessionId)} title={r.firstPrompt}>
+              {runTitle(r)}
+            </button>
+            <span className="meta">
+              {shortDate(r.startedAt)} · {dirLabel(r.cwd)} · {plural(r.userMessageCount, "prompt")}
+              {r.createdPrs.length > 0 && ` · opened ${plural(r.createdPrs.length, "PR")}`}
+            </span>
+            <span className="grow" />
+            <span className="meta">{statusText(r, now)}</span>
+            <OpenTab run={r} onError={onError} className="btn ghost small" label="Open" />
+          </div>
+          {open === r.sessionId && r.lastMessage && (
+            <div className="h-message">
+              <Markdown text={r.lastMessage} />
+            </div>
+          )}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSignal }: {
+  s: Subject;
+  data: Dashboard;
+  now: number;
+  position: string | null;
+  snoozed: boolean;
+  onSnooze: () => void;
+  onWake: () => void;
+  focusSignal: number;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => setError(null), [s.id]);
+  const t = s.ticket?.ticket;
+  const due = t ? dueLabel(t.dueDate) : null;
+  const live = liveRuns(s);
+  const primary = primaryRun(s);
+  // A ticket with no live agent still shows its latest run, so you can read where it stopped.
+  const featured = live.length ? live : primary ? [primary] : s.ticket?.runs.length ? [s.ticket.runs.at(-1)!] : [];
+  const prs = s.ticket?.prs ?? [];
+  const runs = s.ticket?.runs ?? (s.run ? [s.run] : []);
+  const top = s.items[0];
+
+  return (
+    <article className="workspace" key={s.id}>
+      <header className="ws-head">
+        <div className="eyebrow">
+          {top ? (
+            <>
+              <Dot tone={KIND[top.kind].tone} />
+              <span className={`tone-text-${KIND[top.kind].tone}`}>{KIND[top.kind].title}</span>
+            </>
+          ) : (
+            <span>{live.length ? "Agents at work" : "Quiet"}</span>
+          )}
+          {position && <span className="meta">· {position}</span>}
+        </div>
+        <h1>{subjectTitle(s)}</h1>
+        <div className="ws-meta">
+          {t && (
+            <a className="key-link" href={t.url} target="_blank" rel="noreferrer" title="Open in Jira">
+              {t.key} ↗
+            </a>
+          )}
+          {t && <span className={`pill cat-${t.statusCategory}`}>{t.status}</span>}
+          {t?.priority && <span className="meta">{t.priority}</span>}
+          {due && <span className={`tone-text-${due.tone}`}>{due.text}</span>}
+          {s.prUrl && !t && (
+            <a className="key-link" href={s.prUrl} target="_blank" rel="noreferrer">
+              {prName(s.prUrl)} ↗
+            </a>
+          )}
+          <span className="grow" />
+          {s.items.length > 0 &&
+            (snoozed ? (
+              <button className="btn ghost" onClick={onWake}>
+                Back to the queue
+              </button>
+            ) : (
+              <button className="btn" onClick={onSnooze} title="Hide until something about it changes">
+                Done for now <Kbd>E</Kbd>
+              </button>
+            ))}
+        </div>
+        {s.items.length > 0 && (
+          <ul className="why">
+            {s.items.map((a, i) => (
+              <li key={i}>
+                <Dot tone={KIND[a.kind].tone} />
+                <span>{a.reason}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </header>
+
+      {error && (
+        <div className="toast" role="alert">
+          {error}
+          <button className="btn ghost small" onClick={() => setError(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {s.ticket && <NextSteps s={s} state={data.summaries[s.ticket.ticket.key]} now={now} onError={setError} />}
+
+      {featured.length > 0 && (
+        <div className="stack">
+          <h2 className="section-title">{live.length ? (live.length === 1 ? "Agent" : `Agents · ${live.length}`) : "Last run"}</h2>
+          {featured.map((r) => (
+            <AgentCard key={r.sessionId} run={r} now={now} onError={setError} focusSignal={focusSignal} primary={r.sessionId === primary?.sessionId} />
+          ))}
+        </div>
+      )}
+
+      {prs.length > 0 && (
+        <div className="stack">
+          <h2 className="section-title">Pull requests · {prs.length}</h2>
+          <div className="card flush">
+            {[...prs]
+              .sort((a, b) => Number(b.state === "open") - Number(a.state === "open") || b.updatedAt.localeCompare(a.updatedAt))
+              .map((p) => (
+                <PrRow key={p.url} pr={p} now={now} />
+              ))}
+          </div>
+        </div>
+      )}
+
+      {runs.length > 0 && (
+        <div className="stack">
+          <h2 className="section-title">History · {plural(runs.length, "run")}</h2>
+          <div className="card flush">
+            <History runs={runs} now={now} onError={setError} />
+          </div>
+        </div>
+      )}
+
+      {s.ticket && runs.length === 0 && prs.length === 0 && <p className="meta empty-note">No agent has worked on this ticket yet.</p>}
+    </article>
+  );
+}
+
+// ---- help ---------------------------------------------------------------------------
+
+const KEYS: [string, string][] = [
+  ["J / ↓", "Next item"],
+  ["K / ↑", "Previous item"],
+  ["E", "Done for now (comes back when something changes)"],
+  ["R", "Reply to the agent"],
+  ["O", "Open the agent's iTerm tab"],
+  ["S", "Draft next steps"],
+  ["⌘↵", "Send the reply"],
+  ["Esc", "Leave the reply box"],
+  ["?", "Show or hide this help"],
+];
+
+function Help({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="help" onClick={(e) => e.stopPropagation()}>
+        <h3>Keyboard</h3>
+        <dl>
+          {KEYS.map(([k, v]) => (
+            <div key={k}>
+              <dt>
+                <Kbd>{k}</Kbd>
+              </dt>
+              <dd>{v}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </div>
   );
 }
 
@@ -449,101 +581,183 @@ function Health({ name, h }: { name: string; h: SourceHealth }) {
 
 export function App() {
   const { data, error, loading, refresh } = useDashboard();
+  const now = useNow(1_000);
+  const snoozed = useSnoozed();
+  const [selectedId, setSelectedId] = useState<string | null>(() => decodeURIComponent(location.hash.slice(2)) || null);
+  const [help, setHelp] = useState(false);
+  const [focusSignal, setFocusSignal] = useState(0);
 
-  // A focus link can point into a collapsed section, so open it before scrolling.
+  const subjects = useMemo(() => (data ? buildSubjects(data) : new Map<string, Subject>()), [data]);
+  const all = [...subjects.values()];
+  const ranked = all.filter((s) => s.items.length).sort((a, b) => b.items[0].score - a.items[0].score);
+  const queue = ranked.filter((s) => !snoozed.isSnoozed(s));
+  const done = ranked.filter((s) => snoozed.isSnoozed(s));
+  const working = all.filter((s) => !s.items.length && liveRuns(s).length);
+  const quiet = data ? data.myTickets.map((g) => subjects.get(`t:${g.ticket.key}`)!).filter((s) => !s.items.length && !liveRuns(s).length) : [];
+  const order = [...queue, ...working, ...done, ...quiet];
+
+  const selected = (selectedId && subjects.get(selectedId)) || queue[0] || order[0] || null;
+
   useEffect(() => {
-    // Wait a frame, so a Runs list that unfolds on the same hashchange has rendered the target.
-    const reveal = () => requestAnimationFrame(() => {
-      const el = document.getElementById(decodeURIComponent(location.hash.slice(1)));
-      if (!el) return;
-      for (let d = el.closest("details"); d; d = d.parentElement?.closest("details") ?? null) d.open = true;
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      el.classList.remove("flash");
-      void el.offsetWidth;
-      el.classList.add("flash");
-    });
-    window.addEventListener("hashchange", reveal);
-    return () => window.removeEventListener("hashchange", reveal);
+    const onHash = () => setSelectedId(decodeURIComponent(location.hash.slice(2)) || null);
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
   }, []);
+
+  const select = useCallback((id: string) => {
+    setSelectedId(id);
+    history.replaceState(null, "", `#/${encodeURIComponent(id)}`);
+  }, []);
+
+  const move = useCallback(
+    (delta: number) => {
+      if (!order.length) return;
+      const i = selected ? order.findIndex((s) => s.id === selected.id) : -1;
+      select(order[Math.max(0, Math.min(order.length - 1, i + delta))].id);
+    },
+    [order, selected, select],
+  );
+
+  const snoozeAndAdvance = useCallback(() => {
+    if (!selected || !selected.items.length) return;
+    const i = queue.findIndex((s) => s.id === selected.id);
+    const next = queue[i + 1] ?? queue[i - 1];
+    snoozed.snooze(selected);
+    if (next) select(next.id);
+  }, [selected, queue, snoozed, select]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement;
+      if (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "j" || e.key === "ArrowDown") move(1);
+      else if (e.key === "k" || e.key === "ArrowUp") move(-1);
+      else if (e.key === "e") snoozeAndAdvance();
+      else if (e.key === "?") setHelp((h) => !h);
+      else if (e.key === "Escape") setHelp(false);
+      else if (e.key === "r") setFocusSignal((n) => n + 1);
+      else if (e.key === "o" && selected) {
+        const run = primaryRun(selected);
+        if (run?.itermSessionId) api.focusTab(run.sessionId);
+      } else if (e.key === "s" && selected?.ticket) {
+        const st = data?.summaries[selected.ticket.ticket.key]?.latest;
+        if (st?.status !== "in_progress") api.summarize(selected.ticket.ticket.key, false);
+      } else return;
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [move, snoozeAndAdvance, selected, data]);
 
   useEffect(() => {
     const waiting = data?.counts.awaiting_input ?? 0;
-    document.title = waiting ? `(${waiting}) agent-dash` : "agent-dash";
-  }, [data]);
+    document.title = queue.length ? `(${queue.length}) agent-dash` : waiting ? `(${waiting}) agent-dash` : "agent-dash";
+  }, [data, queue.length]);
 
-  if (!data) return <main className="page">{error ? <pre className="error">{error}</pre> : <p className="muted">Loading…</p>}</main>;
+  if (!data) return <main className="loading">{error ? <pre className="error">{error}</pre> : <span className="shimmer wide" />}</main>;
 
-  const byTicket = new Map<string, AttentionItem[]>();
-  for (const a of data.attention) if (a.ticketKey) byTicket.set(a.ticketKey, [...(byTicket.get(a.ticketKey) ?? []), a]);
-  const active = data.myTickets.filter((g) => g.runs.length || g.prs.length || byTicket.has(g.ticket.key));
-  const quiet = data.myTickets.filter((g) => !active.includes(g));
+  const waitingRuns = data.counts.awaiting_input;
+  const workingRuns = data.counts.working;
+  const position = selected && queue.includes(selected) ? `${queue.indexOf(selected) + 1} of ${queue.length} in the queue` : null;
+  const sources = Object.entries(data.sources);
+  const down = sources.filter(([, h]) => !h.ok);
 
   return (
-    <main className="page">
-      <header className="top">
-        <h1>agent-dash</h1>
-        <span className="pill status-working">{data.counts.working} working</span>
-        <span className="pill status-awaiting_input">{data.counts.awaiting_input} awaiting input</span>
-        <span className="pill status-finished">{data.counts.finished} finished</span>
-        <span className="spacer" />
-        <Health name="Jira" h={data.sources.jira} />
-        <Health name="GitHub" h={data.sources.github} />
-        <Health name="pi logs" h={data.sources.sessions} />
-        <span className="muted small">updated {ago(data.generatedAt)}</span>
-        <button onClick={refresh} disabled={loading}>
-          {loading ? "…" : "refresh"}
+    <div className="app">
+      <header className="topbar">
+        <div className="brand">
+          agent-dash
+        </div>
+        <div className="headline">
+          {queue.length ? (
+            <>
+              <b>{plural(queue.length, "thing")}</b> need you
+            </>
+          ) : (
+            <b>Nothing needs you</b>
+          )}
+          <span className="sep">·</span>
+          <span>
+            <Dot tone="waiting" /> {waitingRuns} waiting
+          </span>
+          <span>
+            <Dot tone="working" pulse={workingRuns > 0} /> {workingRuns} working
+          </span>
+        </div>
+        <span className="grow" />
+        <span className={`sources ${down.length ? "bad" : ""}`} title={sources.map(([n, h]) => `${n}: ${h.ok ? "ok" : h.error}`).join("\n")}>
+          {down.length ? `${down.map(([n]) => n).join(", ")} down` : "Jira · GitHub · pi"}
+          <Dot tone={down.length ? "bad" : "good"} />
+        </span>
+        <span className="meta">updated {age(data.generatedAt, now)} ago</span>
+        <button className="btn ghost" onClick={refresh} disabled={loading}>
+          {loading ? "Refreshing…" : "Refresh"}
+        </button>
+        <button className="btn ghost" onClick={() => setHelp(true)} title="Keyboard shortcuts">
+          <Kbd>?</Kbd>
         </button>
       </header>
-      {error && <pre className="error">{error}</pre>}
-      {!data.extensionInstalled && (
-        <p className="banner">
-          Statuses marked <b>?</b> are guesses from the session log. Run <code>pnpm install-extension</code>, then restart your pi sessions, to get exact statuses.
-        </p>
-      )}
 
-      <h2>Focus next</h2>
-      <FocusNext items={data.attention} summaries={data.summaries} />
+      <div className="columns">
+        <nav className="rail">
+          <RailSection title="Up next" count={queue.length}>
+            {queue.map((s, i) => (
+              <QueueItem key={s.id} s={s} rank={i + 1} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined} />
+            ))}
+          </RailSection>
+          {queue.length === 0 && (
+            <div className="zero">
+              <div className="zero-mark">✓</div>
+              <p>
+                <b>Queue clear.</b>
+                <br />
+                {workingRuns ? `${plural(workingRuns, "agent")} still working.` : "No agent is working."}
+              </p>
+            </div>
+          )}
+          <RailSection title="Agents at work" count={working.length} hint="Live runs that need nothing from you yet">
+            {working.map((s) => (
+              <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} />
+            ))}
+          </RailSection>
+          <RailSection title="Done for now" count={done.length} defaultOpen={false} hint="Back in the queue when something changes">
+            {done.map((s) => (
+              <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} />
+            ))}
+          </RailSection>
+          <RailSection title="Quiet tickets" count={quiet.length} defaultOpen={false} hint="Your tickets with nothing going on">
+            {quiet.map((s) => (
+              <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} />
+            ))}
+          </RailSection>
+          <footer className="rail-foot">
+            <Kbd>J</Kbd> <Kbd>K</Kbd> move · <Kbd>E</Kbd> done for now · <Kbd>R</Kbd> reply · <Kbd>?</Kbd> all keys
+          </footer>
+        </nav>
 
-      <h2>
-        My tickets <span className="muted">({data.myTickets.length})</span>
-      </h2>
-      {active.map((g) => (
-        <TicketCard key={g.ticket.key} group={g} attention={byTicket.get(g.ticket.key) ?? []} />
-      ))}
-      {quiet.length > 0 && (
-        <p className="quiet">
-          <span className="muted">No agent activity: </span>
-          {quiet.map((g) => (
-            <a key={g.ticket.key} href={g.ticket.url} target="_blank" rel="noreferrer" title={`${g.ticket.summary} (${g.ticket.status})`}>
-              {g.ticket.key}
-            </a>
-          ))}
-        </p>
-      )}
-
-      <details className="section">
-        <summary>
-          <h2>
-            Other tickets with recent runs <span className="muted">({data.otherTickets.length})</span>
-          </h2>
-        </summary>
-        {data.otherTickets.map((g) => (
-          <TicketCard key={g.ticket.key} group={g} attention={[]} />
-        ))}
-      </details>
-
-      <details className="section">
-        <summary>
-          <h2>
-            Runs with no ticket <span className="muted">({data.unlinkedRuns.length})</span>
-          </h2>
-        </summary>
-        <ol className="runs">
-          {data.unlinkedRuns.map((r) => (
-            <RunRow key={r.sessionId} run={r} />
-          ))}
-        </ol>
-      </details>
-    </main>
+        <main className="main">
+          {!data.extensionInstalled && (
+            <p className="banner">
+              Run <code>pnpm install-extension</code> to get exact statuses and replies from here.
+            </p>
+          )}
+          {selected ? (
+            <Workspace
+              s={selected}
+              data={data}
+              now={now}
+              position={position}
+              snoozed={snoozed.isSnoozed(selected)}
+              onSnooze={snoozeAndAdvance}
+              onWake={() => snoozed.wake(selected)}
+              focusSignal={focusSignal}
+            />
+          ) : (
+            <div className="zero big">Nothing to show.</div>
+          )}
+        </main>
+      </div>
+      {help && <Help onClose={() => setHelp(false)} />}
+    </div>
   );
 }

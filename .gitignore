@@ -3,4 +3,3 @@ web/dist/
 .env*
 *.log
 .DS_Store
-web-v2/dist

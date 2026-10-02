@@ -14,7 +14,7 @@ import { isAlive, readReportedStatuses } from "./sources/status.ts";
 import * as summaryDb from "./summaries/db.ts";
 import { reconcile, requestSummary } from "./summaries/runner.ts";
 
-const WEB_DIST = config.webDist;
+const WEB_DIST = new URL("../web/dist/", import.meta.url).pathname;
 const EXTENSION_PATH = join(homedir(), ".pi/agent/extensions/agent-dash-status.ts");
 
 /**

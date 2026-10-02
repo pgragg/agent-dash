@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   build: { outDir: "dist", emptyOutDir: true },
   server: {
-    port: 7779,
+    port: 7778,
     proxy: { "/api": "http://127.0.0.1:7777" },
   },
 });

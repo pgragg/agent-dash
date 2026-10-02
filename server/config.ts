@@ -11,8 +11,6 @@ export const config = {
   statusDir: env.AGENT_DASH_STATUS_DIR ?? join(home, ".agent-dash/status"),
   /** Replies typed in the dash go here, one folder per session; the extension delivers them. */
   inboxDir: env.AGENT_DASH_INBOX_DIR ?? join(home, ".agent-dash/inbox"),
-  /** Built web app to serve. The redesign runs as a second instance with web-v2/dist. */
-  webDist: env.AGENT_DASH_WEB_DIST ?? new URL("../web/dist/", import.meta.url).pathname,
   jira: {
     server: env.JIRA_SERVER ?? "https://postmanlabs.atlassian.net",
     login: env.JIRA_LOGIN ?? "piper.gragg@postman.com",

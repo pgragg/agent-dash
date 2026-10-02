@@ -3,38 +3,33 @@
 A local dashboard for one person who oversees many coding agents at the same time.
 It answers one question: **what do I look at next?**
 
-It reads your pi session logs, your Jira tickets, and your GitHub PRs, and it shows:
+It reads your pi session logs, your Jira tickets, and your GitHub PRs. You can act on the answer without leaving the page.
 
-1. **Focus next**: a ranked list of the things that wait for you. Each row says why it is there.
-2. **My tickets**: your open Jira tickets. Under each ticket are its agent runs, oldest first, and its PRs.
-3. **Other tickets with recent runs**, and **runs with no ticket**, folded away at the bottom.
-
-The dashboard never writes to Jira or GitHub. The only thing it sends anywhere is a reply that you type to one of your own pi sessions (v2, below).
+The dashboard never writes to Jira or GitHub. The only thing it sends anywhere is a reply that you type to one of your own pi sessions.
 
 ## Run it
 
 ```bash
 pnpm install
-pnpm install-extension   # once: exact run status (see below)
+pnpm install-extension   # once: exact run status and replies (see below)
 pnpm build && pnpm start # http://127.0.0.1:7777
 ```
 
-`pnpm dev` runs the server with `--watch` and Vite on http://127.0.0.1:7779.
+`dash` (in `~/.zshrc`) does the same, and opens Chrome. `pnpm dev` runs the server with `--watch` and Vite on http://127.0.0.1:7778.
 
-### v2: the queue (http://127.0.0.1:7778)
+## The page
 
-```bash
-pnpm build && pnpm start:v2   # second instance, same data, serves web-v2/
-```
-
-v2 is a redesign around one question, "what do I work on next?". You can act on the answer without leaving the page.
-
-- **Left: the queue.** One entry per ticket (or per ticket-less run or PR), ranked by its most urgent signal. Under it: agents at work, "done for now", and quiet tickets.
-- **Right: a workspace for the selected entry.** It shows why the entry is in the queue, the drafted next steps, each live agent's whole last message with a **reply box**, the PRs, and the run history.
+- **Left: the queue.** One entry per ticket (or per ticket-less run or PR), ranked by its most urgent signal (see [Queue ranking](#queue-ranking)). Under it: **Agents at work**, **Done for now**, and **Quiet tickets** (your tickets with nothing going on).
+- **Right: a workspace for the selected entry.** In order: why the entry is in the queue, the drafted [next steps](#next-steps-summaries), each live agent's whole last message with a reply box, the PRs, and the run history.
 - **Done for now** (`E`) hides an entry until one of its signals changes, so the queue works like an inbox. It is saved in the browser's localStorage.
 - **Keyboard**: `J`/`K` move, `E` done for now, `R` reply, `O` open the iTerm tab, `S` draft next steps, `⌘↵` send, `?` help.
+- `#/t:FSDK-123` or `#/r:<sessionId>` in the URL selects an entry.
 
-**Replies.** `POST /api/reply?session=<id>` writes the text to `~/.agent-dash/inbox/<sessionId>/<n>.txt`. The status extension in that session watches the folder, and sends each file to the agent as your message with `pi.sendUserMessage`. While the agent works, the message waits until the agent finishes. The server takes a reply only for a live interactive session whose status file says `inbox: true`. A session that started before the extension changed needs `/reload` once. `pnpm dev:v2` runs v2 with Vite on :7780.
+## Reply to an agent
+
+`POST /api/reply?session=<id>` writes the text to `~/.agent-dash/inbox/<sessionId>/<n>.txt`. The status extension in that session watches the folder, and sends each file to the agent as your message with `pi.sendUserMessage`. While the agent works, the message waits until the agent finishes.
+
+The server takes a reply only for a live interactive session whose status file says `inbox: true`. A `pi -p` run does not watch an inbox. A session that started before the extension changed needs `/reload` once; until then, its card says so.
 
 The server listens on `127.0.0.1` only, because the page shows prompts and replies from every session.
 
@@ -81,7 +76,7 @@ The extension writes its status file on `agent_settled`, not on `agent_end`, bec
 
 ## Jump to a run's iTerm tab
 
-A live run shows **open tab**. A finished run shows **copy resume**, which copies `cd <cwd> && pi --session <id>`.
+A live run shows **Open in iTerm** (`O` for the selected entry's main run). A finished run shows **Copy resume**, which copies `cd <cwd> && pi --session <id>`.
 
 - The extension records the iTerm2 session uuid from `ITERM_SESSION_ID`.
 - `POST /api/focus?session=<id>` reads the uuid from the status file, never from the request. Then it runs an AppleScript that selects the window, tab and pane, and activates iTerm2.
@@ -89,9 +84,9 @@ A live run shows **open tab**. A finished run shows **copy resume**, which copie
 - **macOS permission:** the app that started the server needs Automation access to iTerm2. If `dash` started it in iTerm, turn on **System Settings → Privacy & Security → Automation → iTerm → iTerm2**. Without it the button says so, and offers the resume command.
 - Runs that started before the extension was installed have no tab id until you type `/reload` in them.
 
-## Focus ranking
+## Queue ranking
 
-Higher scores come first. The rules are in `server/attention.ts`.
+Higher scores come first. An entry ranks by its highest-scoring item. The rules are in `server/attention.ts`.
 
 | Item | Score |
 |---|---|
@@ -110,20 +105,20 @@ Draft PRs score half. Tickets that are On Hold, Blocked, Waiting or Deferred sco
 
 ## Next-steps summaries
 
-Each Focus row with a ticket has a **next steps** link. **summarize** starts a headless pi run that writes a very short summary for the ticket: its state, 1 to 4 next steps with who acts, and its blockers.
+The **Next steps** card on a ticket's workspace starts a headless pi run (**Draft next steps**, or `S`) that writes a very short summary for the ticket: its state, 1 to 4 next steps with who acts, and its blockers.
 
 1. The server adds an `in_progress` row to SQLite (`~/.agent-dash/agent-dash.db`, table `summaries`) with the ticket and `requested_at`.
 2. It writes `~/.agent-dash/summaries/<id>/context.md` with what it already knows: ticket fields, linked PRs, and a digest of each pi session about the ticket (prompts and replies, no tool output, newest first within a 60k-character budget).
 3. It starts `pi -p --no-extensions --tools read,bash --session-dir ~/.agent-dash/summary-sessions`. The separate session folder keeps summary runs out of the ticket's run list. The prompt is read-only, and tells the run to read the context, then `jira issue view --comments`, `gh pr view --comments`, and `scripts/slack-search.ts`.
 4. The run saves its summary with `node scripts/save-summary.ts <id> < summary.md`. That sets `status = done` and `generated_at`.
 
-| State on the page | Meaning |
+| State of the card | Meaning |
 |---|---|
-| summarize | No summary yet |
-| summarizing 2m… | A run is in progress. The last finished summary stays readable meanwhile. |
-| summary ▸ | Expands the summary, with when it was requested and generated, and a re-request link |
-| stuck · re-request | In progress for more than 30 minutes. Re-request stops the old run and starts a new one. |
-| failed · retry | The run ended without a summary. Hover for the error. |
+| Draft next steps | No summary yet |
+| Reading Jira, PRs, Slack… 1m 12s | A run is in progress. The last finished summary stays readable meanwhile. |
+| drafted 12m ago · Redraft | The summary. **out of date** shows when a run or PR changed after it was written. |
+| probably stuck · Start again | In progress for more than 30 minutes. Start again stops the old run and starts a new one. |
+| The last draft failed · Retry | The run ended without a summary. |
 
 If a run exits without saving, the server takes its last reply (pi -p prints it) as the summary. If there is no reply, it marks the row failed. The server also stops a run after 30 minutes. Runs are detached and write to log files, so a server restart does not stop them. On the next page load, the server checks rows whose pid is gone.
 
@@ -133,7 +128,7 @@ Optional: `AGENT_DASH_SUMMARY_MODEL` and `AGENT_DASH_SUMMARY_THINKING` choose th
 
 ## Configuration
 
-Environment variables, all optional: `AGENT_DASH_PORT`, `AGENT_DASH_SESSIONS_DIR`, `AGENT_DASH_STATUS_DIR`, `AGENT_DASH_PROJECTS` (default `FSDK|EFSUP`), `AGENT_DASH_EXCLUDE_PROJECTS` (default `FSM`), `AGENT_DASH_RECENT_DAYS` (default 14), `JIRA_SERVER`, `JIRA_LOGIN`, `JIRA_API_TOKEN`.
+Environment variables, all optional: `AGENT_DASH_PORT`, `AGENT_DASH_SESSIONS_DIR`, `AGENT_DASH_STATUS_DIR`, `AGENT_DASH_INBOX_DIR`, `AGENT_DASH_PROJECTS` (default `FSDK|EFSUP`), `AGENT_DASH_EXCLUDE_PROJECTS` (default `FSM`), `AGENT_DASH_RECENT_DAYS` (default 14), `JIRA_SERVER`, `JIRA_LOGIN`, `JIRA_API_TOKEN`.
 
 ## Develop
 

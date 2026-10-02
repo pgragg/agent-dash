@@ -10,12 +10,10 @@
   "scripts": {
     "start": "node server/index.ts",
     "dev": "concurrently -k -n server,web \"node --watch server/index.ts\" \"vite\"",
-    "build": "vite build && vite build -c vite.v2.config.ts",
+    "build": "vite build",
     "typecheck": "tsc --noEmit",
     "test": "node --test 'test/**/*.test.ts'",
-    "install-extension": "node scripts/install-extension.ts",
-    "start:v2": "AGENT_DASH_PORT=7778 AGENT_DASH_WEB_DIST=web-v2/dist/ node server/index.ts",
-    "dev:v2": "concurrently -k -n server,web \"AGENT_DASH_PORT=7778 node --watch server/index.ts\" \"vite -c vite.v2.config.ts\""
+    "install-extension": "node scripts/install-extension.ts"
   },
   "dependencies": {
     "react": "^19.1.0",
