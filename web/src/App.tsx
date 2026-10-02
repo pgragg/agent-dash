@@ -380,6 +380,86 @@ function Notes({ ticket, notes, now, onError, focusSignal }: { ticket: string; n
   );
 }
 
+/** Folders the ticket's agents worked in, newest first, then the home folder. */
+function workFolders(s: Subject): string[] {
+  const runs = [...relevantRuns(s)].sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
+  // Home paths show as ~ (the server expands it), so the same folder is not offered twice.
+  return [...new Set([...runs.map((r) => r.cwd.replace(/^\/Users\/[^/]+/, "~")).filter(Boolean), "~"])];
+}
+
+function StartAgent({ s, onError, focusSignal }: { s: Subject; onError: (m: string | null) => void; focusSignal: number }) {
+  const key = s.ticket!.ticket.key;
+  const folders = workFolders(s);
+  const [message, setMessage] = useState("");
+  const [cwd, setCwd] = useState(folders[0]);
+  const [starting, setStarting] = useState(false);
+  const [started, setStarted] = useState<number | null>(null);
+  const [context, setContext] = useState<string | null>(null);
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (focusSignal) ref.current?.focus();
+  }, [focusSignal]);
+  const start = async () => {
+    if (!message.trim()) return;
+    setStarting(true);
+    const err = await api.startAgent(key, message, cwd);
+    setStarting(false);
+    onError(err);
+    if (!err) {
+      setMessage("");
+      setStarted(Date.now());
+    }
+  };
+  return (
+    <section className="card start-agent">
+      <header className="card-head">
+        <h3>Start a new agent</h3>
+        <span className="meta">opens pi in a new iTerm tab, with this page as context</span>
+      </header>
+      <div className="composer">
+        <textarea
+          ref={ref}
+          rows={3}
+          value={message}
+          placeholder={`First message for the new agent on ${key}…`}
+          onChange={(e) => setMessage(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              start();
+            }
+            if (e.key === "Escape") (e.target as HTMLTextAreaElement).blur();
+          }}
+        />
+        <div className="composer-bar">
+          <label className="folder">
+            <span className="meta">in</span>
+            <input list={`folders-${key}`} value={cwd} onChange={(e) => setCwd(e.target.value)} spellCheck={false} />
+            <datalist id={`folders-${key}`}>
+              {folders.map((f) => (
+                <option key={f} value={f} />
+              ))}
+            </datalist>
+          </label>
+          <button className="btn primary" onClick={start} disabled={starting || !message.trim() || !cwd.trim()}>
+            {starting ? "Starting…" : "Start agent"} <Kbd>⌘↵</Kbd>
+          </button>
+        </div>
+      </div>
+      {started && Date.now() - started < 30_000 && <p className="meta started">Started in a new iTerm tab. It shows under Agents once it is running.</p>}
+      <details
+        className="context-preview"
+        onToggle={async (e) => {
+          if ((e.target as HTMLDetailsElement).open) setContext(await api.agentContext(key));
+        }}
+      >
+        <summary>What the agent gets: notes, next steps, PRs, the latest message from each relevant agent, and the run history</summary>
+        {context === null ? <span className="shimmer" /> : <pre>{context}</pre>}
+      </details>
+    </section>
+  );
+}
+
 function Composer({ run, onError, focusSignal }: { run: Run; onError: (m: string | null) => void; focusSignal: number }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -596,7 +676,7 @@ function History({ runs: allRuns, now, onError, ticket, threads = {} }: { runs: 
   );
 }
 
-function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSignal, noteSignal }: {
+function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSignal, noteSignal, agentSignal }: {
   s: Subject;
   data: Dashboard;
   now: number;
@@ -606,6 +686,7 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
   onWake: () => void;
   focusSignal: number;
   noteSignal: number;
+  agentSignal: number;
 }) {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => setError(null), [s.id]);
@@ -700,6 +781,8 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
         </div>
       )}
 
+      {s.ticket && <StartAgent key={s.id} s={s} onError={setError} focusSignal={agentSignal} />}
+
       {prs.length > 0 && (
         <div className="stack">
           <h2 className="section-title">Pull requests · {prs.length}</h2>
@@ -737,6 +820,7 @@ const KEYS: [string, string][] = [
   ["O", "Open the agent's iTerm tab"],
   ["S", "Draft next steps"],
   ["N", "Add a note"],
+  ["A", "Start a new agent with this ticket's context"],
   ["⌘↵", "Send the reply"],
   ["Esc", "Leave the reply box"],
   ["?", "Show or hide this help"],
@@ -772,6 +856,7 @@ export function App() {
   const [help, setHelp] = useState(false);
   const [focusSignal, setFocusSignal] = useState(0);
   const [noteSignal, setNoteSignal] = useState(0);
+  const [agentSignal, setAgentSignal] = useState(0);
 
   const subjects = useMemo(() => (data ? buildSubjects(data) : new Map<string, Subject>()), [data]);
   const all = [...subjects.values()];
@@ -825,6 +910,7 @@ export function App() {
       else if (e.key === "Escape") setHelp(false);
       else if (e.key === "r") setFocusSignal((n) => n + 1);
       else if (e.key === "n" && selected?.ticket) setNoteSignal((n) => n + 1);
+      else if (e.key === "a" && selected?.ticket) setAgentSignal((n) => n + 1);
       else if (e.key === "o" && selected) {
         const run = primaryRun(selected);
         if (run?.itermSessionId) api.focusTab(run.sessionId);
@@ -946,6 +1032,7 @@ export function App() {
               onWake={() => snoozed.wake(selected)}
               focusSignal={focusSignal}
               noteSignal={noteSignal}
+              agentSignal={agentSignal}
             />
           ) : (
             <div className="zero big">Nothing to show.</div>

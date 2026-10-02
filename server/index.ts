@@ -1,11 +1,12 @@
-import { existsSync, mkdirSync, renameSync, watch, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, statSync, watch, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, normalize } from "node:path";
 import type { Dashboard, PullRequest, SourceHealth, Ticket } from "../shared/types.ts";
 import { config } from "./config.ts";
-import { focusItermSession } from "./iterm.ts";
+import { buildHandoff } from "./handoff.ts";
+import { focusItermSession, piCommand, runInNewItermTab } from "./iterm.ts";
 import { buildDashboard, otherTicketKeys } from "./model.ts";
 import { fetchMyPrs } from "./sources/github.ts";
 import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
@@ -196,6 +197,34 @@ const server = createServer(async (req, res) => {
       const note = summaryDb.addNote(ticket, body.trim());
       broadcast();
       json(201, note);
+    } else if (url.pathname === "/api/agents/context" || (url.pathname === "/api/agents" && req.method === "POST")) {
+      // A new pi agent that starts with the ticket's context. The context route is a preview.
+      if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
+      const json = (code: number, body: unknown) => void res.writeHead(code, { "Content-Type": "application/json" }).end(JSON.stringify(body));
+      const key = url.searchParams.get("ticket") ?? "";
+      const d = await dashboard(false);
+      const group = [...d.myTickets, ...d.otherTickets].find((g) => g.ticket.key === key);
+      if (!group) return json(404, { error: `unknown ticket ${key}` });
+      const context = buildHandoff({ group, notes: d.notes[key] ?? [], summary: d.summaries[key], now: new Date() });
+      if (url.pathname === "/api/agents/context") return void res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8" }).end(context);
+
+      const { message, cwd = homedir() } = JSON.parse((await readBody(req, 64_000)) || "{}") as { message?: string; cwd?: string };
+      if (!message?.trim()) return json(400, { error: "write the first message" });
+      const dir = cwd.replace(/^~(?=\/|$)/, homedir());
+      if (!dir.startsWith("/") || !existsSync(dir) || !statSync(dir).isDirectory()) return json(400, { error: `not a folder: ${cwd}` });
+
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const base = join(config.handoffDir, `${key}-${stamp}`);
+      mkdirSync(config.handoffDir, { recursive: true });
+      writeFileSync(`${base}.md`, context);
+      // A leading "-" would read as a pi option; the space keeps it a message.
+      writeFileSync(`${base}.txt`, message.trim().startsWith("-") ? ` ${message.trim()}` : message.trim());
+      // The name carries the key, so the new run links to the ticket at once.
+      const name = `${key}: ${message.trim().split("\n")[0].slice(0, 60)}`;
+      const command = piCommand(dir, name, `${base}.md`, `${base}.txt`);
+      const out = await runInNewItermTab(command);
+      if (out.result !== "ok") return json(500, { error: out.result === "not_authorized" ? "Allow it in System Settings → Privacy & Security → Automation → iTerm2." : (out.detail ?? "could not open iTerm") });
+      json(201, { ok: true, contextFile: `${base}.md` });
     } else if (url.pathname === "/api/threads" && req.method === "POST") {
       if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
       const json = (code: number, body: unknown) => void res.writeHead(code, { "Content-Type": "application/json" }).end(JSON.stringify(body));

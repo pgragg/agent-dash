@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { RunStatus } from "../../shared/types.ts";
+import { stripHandoff } from "../handoff.ts";
 
 /** Everything the log says about one pi session. Status is decided later, in status.ts. */
 export interface ParsedSession {
@@ -126,7 +127,8 @@ export function parseSession(raw: string, sessionFile: string, mtime: Date, tick
     else if (entry.type === "message") {
       const msg = entry.message ?? {};
       if (msg.role === "user") {
-        const text = textOf(msg.content);
+        // A dash handoff lists other tickets and PRs as background; count only the ticket it is for.
+        const text = stripHandoff(textOf(msg.content));
         userMessageCount += 1;
         if (!firstPrompt) firstPrompt = oneLine(text, 400);
         score(text, "user");
@@ -198,7 +200,7 @@ export function digestSession(raw: string, maxChars: number): string {
     if (entry.type !== "message") continue;
     const role = entry.message?.role;
     if (role !== "user" && role !== "assistant") continue;
-    const text = textOf(entry.message.content).trim();
+    const text = stripHandoff(textOf(entry.message.content)).trim();
     if (text) turns.push(`${role === "user" ? "USER" : "AGENT"} (${entry.timestamp ?? "?"}): ${text}`);
   }
   let out = turns.join("\n\n");

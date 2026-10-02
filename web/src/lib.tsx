@@ -130,6 +130,11 @@ export const api = {
   reply: (sessionId: string, text: string) => post(`/api/reply?session=${encodeURIComponent(sessionId)}`, { text }),
   addNote: (ticket: string, body: string) => post(`/api/notes?ticket=${encodeURIComponent(ticket)}`, { body }),
   deleteNote: (id: number) => post(`/api/notes?id=${id}`, undefined, "DELETE"),
+  startAgent: (ticket: string, message: string, cwd: string) => post(`/api/agents?ticket=${encodeURIComponent(ticket)}`, { message, cwd }),
+  agentContext: async (ticket: string): Promise<string> => {
+    const res = await fetch(`/api/agents/context?ticket=${encodeURIComponent(ticket)}`, { headers: { "X-Agent-Dash": "1" } });
+    return res.ok ? res.text() : `Could not build the context (${res.status}).`;
+  },
   setThread: (ticket: string, sessionId: string, status: "resolved" | "relevant", reason?: string) =>
     post(`/api/threads?ticket=${encodeURIComponent(ticket)}&session=${encodeURIComponent(sessionId)}`, { status, reason }),
 };

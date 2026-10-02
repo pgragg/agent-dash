@@ -11,6 +11,8 @@ export const config = {
   statusDir: env.AGENT_DASH_STATUS_DIR ?? join(home, ".agent-dash/status"),
   /** Replies typed in the dash go here, one folder per session; the extension delivers them. */
   inboxDir: env.AGENT_DASH_INBOX_DIR ?? join(home, ".agent-dash/inbox"),
+  /** Context files for agents started from the dash, kept so you can see what each one got. */
+  handoffDir: join(home, ".agent-dash/handoffs"),
   jira: {
     server: env.JIRA_SERVER ?? "https://postmanlabs.atlassian.net",
     login: env.JIRA_LOGIN ?? "piper.gragg@postman.com",
