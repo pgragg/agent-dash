@@ -1,0 +1,139 @@
+import type { Dashboard, PullRequest, Run, RunStatus, Ticket, TicketGroup } from "../shared/types.ts";
+import { rankAttention } from "./attention.ts";
+import { heuristicStatus, type ParsedSession } from "./sources/sessions.ts";
+import { resolveReported, type ReportedStatus } from "./sources/status.ts";
+
+export interface ModelInput {
+  sessions: ParsedSession[];
+  reported: Map<string, ReportedStatus>;
+  myTickets: Ticket[];
+  otherTickets: Ticket[];
+  prs: PullRequest[];
+  now: number;
+  recentDays: number;
+  sources: Dashboard["sources"];
+  extensionInstalled: boolean;
+  isAlive?: (pid: number) => boolean;
+  jiraServer: string;
+}
+
+export function toRuns(sessions: ParsedSession[], reported: Map<string, ReportedStatus>, now: number, isAlive?: (pid: number) => boolean): Run[] {
+  return sessions
+    .filter((s) => s.userMessageCount > 0) // A tab that was opened and never used.
+    .map((s) => {
+      const r = reported.get(s.sessionId);
+      const { status, since } = r ? resolveReported(r, isAlive) : heuristicStatus(s, now);
+      return {
+        sessionId: s.sessionId,
+        sessionFile: s.sessionFile,
+        cwd: s.cwd,
+        name: s.name,
+        firstPrompt: s.firstPrompt,
+        lastReply: s.lastReply,
+        startedAt: s.startedAt,
+        lastActivityAt: s.lastActivityAt,
+        model: s.model,
+        status,
+        statusSource: r ? "extension" : "heuristic",
+        statusSince: since,
+        askedQuestion: s.askedQuestion,
+        endedInError: !s.midRun && s.lastStopReason === "error",
+        tickets: [...s.tickets],
+        createdPrs: s.createdPrs,
+        mentionedPrs: s.mentionedPrs,
+        userMessageCount: s.userMessageCount,
+      } satisfies Run;
+    });
+}
+
+/**
+ * A PR title carries the ticket key more reliably than the chat does, so a run that opened
+ * a PR inherits its tickets, and a PR with no key inherits the tickets of the run that opened it.
+ */
+export function crossLink(runs: Run[], prs: PullRequest[]): void {
+  const byUrl = new Map(prs.map((p) => [p.url, p]));
+  for (const run of runs) {
+    for (const url of run.createdPrs) {
+      const pr = byUrl.get(url);
+      if (!pr) continue;
+      for (const key of pr.tickets) if (!run.tickets.includes(key)) run.tickets.push(key);
+      // Only the run's main ticket: a run that names several tickets opened this PR for one.
+      if (pr.tickets.length === 0 && run.tickets[0]) pr.tickets.push(run.tickets[0]);
+    }
+  }
+}
+
+export function isRecent(iso: string, now: number, days: number): boolean {
+  return now - Date.parse(iso) <= days * 86_400_000;
+}
+
+/** Ticket keys worth a Jira lookup: named by a recent run or PR, but not on my open list. */
+export function otherTicketKeys(sessions: ParsedSession[], prs: PullRequest[], myKeys: Set<string>, now: number, days: number): string[] {
+  const keys = new Set<string>();
+  for (const s of sessions) if (s.userMessageCount > 0 && isRecent(s.lastActivityAt, now, days)) s.tickets.forEach((k) => keys.add(k));
+  for (const p of prs) if (isRecent(p.updatedAt, now, days)) p.tickets.forEach((k) => keys.add(k));
+  return [...keys].filter((k) => !myKeys.has(k)).sort();
+}
+
+function group(ticket: Ticket, runs: Run[], prs: PullRequest[]): TicketGroup {
+  return {
+    ticket,
+    runs: runs.filter((r) => r.tickets.includes(ticket.key)).sort((a, b) => a.startedAt.localeCompare(b.startedAt)),
+    prs: prs.filter((p) => p.tickets.includes(ticket.key)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+  };
+}
+
+function stubTicket(key: string, server: string): Ticket {
+  return { key, url: `${server}/browse/${key}`, summary: "(not found in Jira)", status: "?", statusCategory: "new", priority: null, dueDate: null, updatedAt: "", assignedToMe: false };
+}
+
+const CATEGORY_ORDER: Record<Ticket["statusCategory"], number> = { indeterminate: 0, new: 1, done: 2 };
+
+export function buildDashboard(input: ModelInput): Dashboard {
+  const { now, recentDays } = input;
+  const runs = toRuns(input.sessions, input.reported, now, input.isAlive);
+  const prs = input.prs.map((p) => ({ ...p, tickets: [...p.tickets] }));
+  crossLink(runs, prs);
+
+  const recentRuns = runs.filter((r) => r.status !== "finished" || isRecent(r.lastActivityAt, now, recentDays));
+  const attention = rankAttention(recentRuns, prs, input.myTickets, now);
+
+  // Tickets with the most urgent item come first, so the list reads in the same order as the queue.
+  const topScore = new Map<string, number>();
+  for (const a of attention) if (a.ticketKey && !topScore.has(a.ticketKey)) topScore.set(a.ticketKey, a.score);
+  const lastRunAt = (g: TicketGroup) => g.runs.at(-1)?.lastActivityAt ?? "";
+
+  const myKeys = new Set(input.myTickets.map((t) => t.key));
+  const myTickets = input.myTickets
+    .map((t) => group(t, runs, prs))
+    .sort(
+      (a, b) =>
+        (topScore.get(b.ticket.key) ?? 0) - (topScore.get(a.ticket.key) ?? 0) ||
+        CATEGORY_ORDER[a.ticket.statusCategory] - CATEGORY_ORDER[b.ticket.statusCategory] ||
+        lastRunAt(b).localeCompare(lastRunAt(a)),
+    );
+
+  const known = new Map(input.otherTickets.map((t) => [t.key, t]));
+  const otherKeys = new Set([...recentRuns.flatMap((r) => r.tickets), ...prs.filter((p) => isRecent(p.updatedAt, now, recentDays)).flatMap((p) => p.tickets)]);
+  const otherTickets = [...otherKeys]
+    .filter((k) => !myKeys.has(k))
+    .map((k) => group(known.get(k) ?? stubTicket(k, input.jiraServer), runs, prs))
+    .sort((a, b) => lastRunAt(b).localeCompare(lastRunAt(a)));
+
+  const unlinkedRuns = recentRuns.filter((r) => r.tickets.length === 0).sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
+
+  const counts: Record<RunStatus, number> = { working: 0, awaiting_input: 0, finished: 0 };
+  for (const r of recentRuns) counts[r.status] += 1;
+
+  return {
+    generatedAt: new Date(now).toISOString(),
+    attention,
+    myTickets,
+    otherTickets,
+    unlinkedRuns,
+    counts,
+    sources: input.sources,
+    extensionInstalled: input.extensionInstalled,
+  };
+}
+

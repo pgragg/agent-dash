@@ -1,0 +1,159 @@
+import { existsSync, mkdirSync, watch } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { createServer, type ServerResponse } from "node:http";
+import { homedir } from "node:os";
+import { extname, join, normalize } from "node:path";
+import type { PullRequest, SourceHealth, Ticket } from "../shared/types.ts";
+import { config } from "./config.ts";
+import { buildDashboard, otherTicketKeys } from "./model.ts";
+import { fetchMyPrs } from "./sources/github.ts";
+import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
+import { SessionIndex } from "./sources/sessions.ts";
+import { readReportedStatuses } from "./sources/status.ts";
+
+const WEB_DIST = new URL("../web/dist/", import.meta.url).pathname;
+const EXTENSION_PATH = join(homedir(), ".pi/agent/extensions/agent-dash-status.ts");
+
+/**
+ * Keeps the last good answer when a refresh fails, and reports the failure next to it.
+ * After the first fetch, a stale value is returned at once and refreshed in the background,
+ * because GitHub can take 10 s and the page reloads on every log write.
+ */
+class Cached<T> {
+  value: T;
+  health: SourceHealth = { ok: false, error: "not fetched yet" };
+  private at = 0;
+  private inflight: Promise<void> | null = null;
+  private readonly load: () => Promise<T>;
+
+  constructor(initial: T, load: () => Promise<T>) {
+    this.value = initial;
+    this.load = load;
+  }
+
+  async get(force = false): Promise<T> {
+    if (force || Date.now() - this.at > config.remoteTtlMs) {
+      const first = this.at === 0;
+      this.inflight ??= this.load()
+        .then((v) => {
+          this.value = v;
+          this.health = { ok: true, fetchedAt: new Date().toISOString() };
+        })
+        .catch((err: Error) => {
+          this.health = { ok: false, error: err.message, fetchedAt: this.health.fetchedAt };
+        })
+        .finally(() => {
+          this.at = Date.now();
+          this.inflight = null;
+          if (!first) broadcast();
+        });
+      if (first || force) await this.inflight;
+    }
+    return this.value;
+  }
+}
+
+const sessions = new SessionIndex(config.sessionsDir, config.ticketPattern);
+const myTickets = new Cached<Ticket[]>([], fetchMyTickets);
+const prs = new Cached<PullRequest[]>([], () => fetchMyPrs(config.recentDays, config.ticketPattern));
+const others = new Map<string, Ticket>();
+let othersHealth: SourceHealth = { ok: true };
+
+async function dashboard(force: boolean) {
+  const now = Date.now();
+  let sessionsHealth: SourceHealth = { ok: true, fetchedAt: new Date(now).toISOString() };
+  const [parsed, reported, mine, pulls] = await Promise.all([
+    sessions.scan().catch((err: Error) => {
+      sessionsHealth = { ok: false, error: err.message };
+      return [];
+    }),
+    readReportedStatuses(config.statusDir),
+    myTickets.get(force),
+    prs.get(force),
+  ]);
+
+  // Tickets outside my open list are looked up once and kept; their summaries rarely change.
+  const missing = otherTicketKeys(parsed, pulls, new Set(mine.map((t) => t.key)), now, config.recentDays).filter((k) => force || !others.has(k));
+  if (missing.length) {
+    try {
+      for (const t of await fetchTickets(missing)) others.set(t.key, t);
+      othersHealth = { ok: true };
+    } catch (err) {
+      othersHealth = { ok: false, error: (err as Error).message };
+    }
+  }
+
+  const jira = !myTickets.health.ok ? myTickets.health : othersHealth.ok ? myTickets.health : othersHealth;
+  return buildDashboard({
+    sessions: parsed,
+    reported,
+    myTickets: mine,
+    otherTickets: [...others.values()],
+    prs: pulls,
+    now,
+    recentDays: config.recentDays,
+    sources: { jira, github: prs.health, sessions: sessionsHealth },
+    extensionInstalled: existsSync(EXTENSION_PATH),
+    jiraServer: config.jira.server,
+  });
+}
+
+// ---- live updates -------------------------------------------------------------------
+
+const clients = new Set<ServerResponse>();
+let pending: NodeJS.Timeout | null = null;
+
+function broadcast(): void {
+  if (pending) return;
+  // pi writes a log line per message; one refresh per burst is enough.
+  pending = setTimeout(() => {
+    pending = null;
+    for (const res of clients) res.write("event: change\ndata: {}\n\n");
+  }, 750);
+}
+
+mkdirSync(config.statusDir, { recursive: true });
+watch(config.sessionsDir, { recursive: true }, broadcast);
+watch(config.statusDir, broadcast);
+// Time alone changes a status: a pid dies, or a wait crosses a threshold.
+setInterval(broadcast, 30_000).unref();
+
+// ---- http ---------------------------------------------------------------------------
+
+const TYPES: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json" };
+
+async function serveStatic(path: string, res: ServerResponse): Promise<void> {
+  const rel = normalize(path === "/" ? "/index.html" : path).replace(/^(\.\.[/\\])+/, "");
+  try {
+    const body = await readFile(join(WEB_DIST, rel));
+    res.writeHead(200, { "Content-Type": TYPES[extname(rel)] ?? "application/octet-stream" }).end(body);
+  } catch {
+    const index = await readFile(join(WEB_DIST, "index.html")).catch(() => null);
+    if (index) res.writeHead(200, { "Content-Type": "text/html" }).end(index);
+    else res.writeHead(404).end("web/dist is missing. Run `pnpm build`, or use `pnpm dev`.");
+  }
+}
+
+const server = createServer(async (req, res) => {
+  const url = new URL(req.url ?? "/", "http://localhost");
+  try {
+    if (url.pathname === "/api/dashboard") {
+      const body = JSON.stringify(await dashboard(url.searchParams.has("refresh")));
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(body);
+    } else if (url.pathname === "/api/events") {
+      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store", Connection: "keep-alive" });
+      res.write("retry: 3000\n\n");
+      clients.add(res);
+      req.on("close", () => clients.delete(res));
+    } else {
+      await serveStatic(url.pathname, res);
+    }
+  } catch (err) {
+    res.writeHead(500, { "Content-Type": "text/plain" }).end((err as Error).stack);
+  }
+});
+
+// Loopback only: the page shows prompts and replies from every session.
+server.listen(config.port, "127.0.0.1", () => {
+  console.log(`agent-dash on http://127.0.0.1:${config.port}`);
+});

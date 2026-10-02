@@ -1,0 +1,215 @@
+import { readdir, readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
+import type { RunStatus } from "../../shared/types.ts";
+
+/** Everything the log says about one pi session. Status is decided later, in status.ts. */
+export interface ParsedSession {
+  sessionId: string;
+  sessionFile: string;
+  cwd: string;
+  name: string | null;
+  firstPrompt: string;
+  lastReply: string;
+  askedQuestion: boolean;
+  startedAt: string;
+  lastActivityAt: string;
+  model: string | null;
+  /** How the latest assistant message ended. null while a tool call is pending or before any reply. */
+  lastStopReason: string | null;
+  /** The last message is not a finished assistant turn, so the agent was mid-run when the log stopped. */
+  midRun: boolean;
+  tickets: string[];
+  createdPrs: string[];
+  mentionedPrs: string[];
+  userMessageCount: number;
+}
+
+const PR_URL = /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/g;
+
+/**
+ * Ticket weights by where the key appears. The user's own words and the session name say
+ * what the run is about. Tool results are ignored: one `board` call lists every open ticket.
+ */
+const WEIGHT = { name: 5, user: 3, toolCall: 1, assistant: 1 } as const;
+const MAX_TICKETS = 3;
+
+interface ContentPart {
+  type?: string;
+  text?: string;
+  name?: string;
+  id?: string;
+  arguments?: unknown;
+}
+
+function textOf(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return (content as ContentPart[])
+    .filter((p) => p?.type === "text" && typeof p.text === "string")
+    .map((p) => p.text)
+    .join("\n");
+}
+
+function oneLine(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+function nonEmptyLines(text: string): string[] {
+  return text
+    .split("\n")
+    .map((l) => l.replace(/[*_`#>|]/g, "").trim())
+    .filter(Boolean);
+}
+
+export function extractTickets(text: string, pattern: RegExp): string[] {
+  return [...new Set((text.match(new RegExp(pattern.source, "gi")) ?? []).map((k) => k.toUpperCase()))];
+}
+
+/** Keep the strongest keys. A key mentioned once in passing does not link the run. */
+export function pickTickets(scores: Map<string, number>): string[] {
+  const ranked = [...scores.entries()].sort((a, b) => b[1] - a[1]);
+  const top = ranked[0]?.[1] ?? 0;
+  return ranked
+    .filter(([, score]) => score >= WEIGHT.user && score >= top / 3)
+    .slice(0, MAX_TICKETS)
+    .map(([key]) => key);
+}
+
+export function parseSession(raw: string, sessionFile: string, mtime: Date, ticketPattern: RegExp): ParsedSession | null {
+  let header: { id?: string; cwd?: string; timestamp?: string } | null = null;
+  let name: string | null = null;
+  let firstPrompt = "";
+  let lastReplyText = "";
+  let model: string | null = null;
+  let lastStopReason: string | null = null;
+  let midRun = false;
+  let userMessageCount = 0;
+  const scores = new Map<string, number>();
+  const created = new Set<string>();
+  const mentioned = new Set<string>();
+  const prCreateCalls = new Set<string>();
+
+  const score = (text: string, weight: number) => {
+    for (const key of extractTickets(text, ticketPattern)) scores.set(key, (scores.get(key) ?? 0) + weight);
+  };
+  const mention = (text: string) => {
+    for (const url of text.match(PR_URL) ?? []) mentioned.add(url);
+  };
+
+  for (const line of raw.split("\n")) {
+    if (!line) continue;
+    let entry: any;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue; // A line that pi is still writing.
+    }
+    if (entry.type === "session") header = entry;
+    else if (entry.type === "session_info") name = entry.name ?? null;
+    else if (entry.type === "model_change") model = entry.modelId ?? model;
+    else if (entry.type === "message") {
+      const msg = entry.message ?? {};
+      if (msg.role === "user") {
+        const text = textOf(msg.content);
+        userMessageCount += 1;
+        if (!firstPrompt) firstPrompt = oneLine(text, 400);
+        score(text, WEIGHT.user);
+        mention(text);
+        midRun = true;
+      } else if (msg.role === "assistant") {
+        model = msg.model ?? model;
+        const text = textOf(msg.content);
+        if (text.trim()) lastReplyText = text;
+        score(text, WEIGHT.assistant);
+        mention(text);
+        for (const part of (msg.content ?? []) as ContentPart[]) {
+          if (part?.type !== "toolCall") continue;
+          const args = JSON.stringify(part.arguments ?? {});
+          score(args, WEIGHT.toolCall);
+          mention(args);
+          if (part.name === "bash" && args.includes("gh pr create") && part.id) prCreateCalls.add(part.id);
+        }
+        lastStopReason = msg.stopReason ?? null;
+        midRun = msg.stopReason === "toolUse";
+      } else if (msg.role === "toolResult") {
+        if (prCreateCalls.has(msg.toolCallId) && !msg.isError) {
+          for (const url of textOf(msg.content).match(PR_URL) ?? []) created.add(url);
+        }
+        midRun = true;
+      }
+    }
+  }
+
+  if (!header?.id) return null;
+  if (name) score(name, WEIGHT.name);
+
+  const replyLines = nonEmptyLines(lastReplyText);
+  return {
+    sessionId: header.id,
+    sessionFile,
+    cwd: header.cwd ?? "",
+    name,
+    firstPrompt,
+    lastReply: oneLine(replyLines.at(-1) ?? "", 240),
+    askedQuestion: replyLines.slice(-3).some((l) => l.endsWith("?")),
+    startedAt: header.timestamp ?? mtime.toISOString(),
+    lastActivityAt: mtime.toISOString(),
+    model,
+    lastStopReason,
+    midRun,
+    tickets: pickTickets(scores),
+    createdPrs: [...created],
+    mentionedPrs: [...mentioned],
+    userMessageCount,
+  };
+}
+
+/**
+ * Status from the log alone, for sessions that the extension does not report on.
+ * The log cannot say whether the pi process is still open, so time decides.
+ */
+export function heuristicStatus(s: ParsedSession, now: number): { status: RunStatus; since: string } {
+  const idleMs = now - Date.parse(s.lastActivityAt);
+  if (s.midRun) {
+    // A tool call that has written nothing for this long was killed with its session.
+    return { status: idleMs < 10 * 60_000 ? "working" : "finished", since: s.lastActivityAt };
+  }
+  if (s.lastStopReason === null) return { status: "finished", since: s.lastActivityAt };
+  return { status: idleMs < 4 * 3600_000 ? "awaiting_input" : "finished", since: s.lastActivityAt };
+}
+
+/** Re-parses only the files whose size or mtime changed since the last scan. */
+export class SessionIndex {
+  private cache = new Map<string, { size: number; mtimeMs: number; parsed: ParsedSession | null }>();
+  private readonly dir: string;
+  private readonly ticketPattern: RegExp;
+
+  constructor(dir: string, ticketPattern: RegExp) {
+    this.dir = dir;
+    this.ticketPattern = ticketPattern;
+  }
+
+  async scan(): Promise<ParsedSession[]> {
+    const files: string[] = [];
+    for (const project of await readdir(this.dir, { withFileTypes: true })) {
+      if (!project.isDirectory()) continue;
+      for (const f of await readdir(join(this.dir, project.name))) {
+        if (f.endsWith(".jsonl")) files.push(join(this.dir, project.name, f));
+      }
+    }
+    const seen = new Set(files);
+    for (const key of this.cache.keys()) if (!seen.has(key)) this.cache.delete(key);
+
+    await Promise.all(
+      files.map(async (file) => {
+        const st = await stat(file);
+        const hit = this.cache.get(file);
+        if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) return;
+        const parsed = parseSession(await readFile(file, "utf8"), file, st.mtime, this.ticketPattern);
+        this.cache.set(file, { size: st.size, mtimeMs: st.mtimeMs, parsed });
+      }),
+    );
+    return [...this.cache.values()].flatMap((v) => (v.parsed ? [v.parsed] : []));
+  }
+}

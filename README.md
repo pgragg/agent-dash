@@ -1,0 +1,97 @@
+# agent-dash
+
+A local dashboard for one person who oversees many coding agents at the same time.
+It answers one question: **what do I look at next?**
+
+It reads your pi session logs, your Jira tickets, and your GitHub PRs, and it shows:
+
+1. **Focus next**: a ranked list of the things that wait for you. Each row says why it is there.
+2. **My tickets**: your open Jira tickets. Under each ticket are its agent runs, oldest first, and its PRs.
+3. **Other tickets with recent runs**, and **runs with no ticket**, folded away at the bottom.
+
+The dashboard is read-only. It never writes to Jira, GitHub, or a pi session.
+
+## Run it
+
+```bash
+pnpm install
+pnpm install-extension   # once: exact run status (see below)
+pnpm build && pnpm start # http://127.0.0.1:7777
+```
+
+`pnpm dev` runs the server with `--watch` and Vite on http://127.0.0.1:7778.
+
+The server listens on `127.0.0.1` only, because the page shows prompts and replies from every session.
+
+## Where the data comes from
+
+| Source | How | Notes |
+|---|---|---|
+| pi sessions | `~/.pi/agent/sessions/**/*.jsonl` | Re-parses only the files that changed. A cold scan of about 700 sessions takes about 1 s. |
+| Run status | `~/.agent-dash/status/<sessionId>.json`, written by `extension/agent-dash-status.ts` | Without it, status is a guess from the log, marked `?` |
+| Jira | `POST /rest/api/3/search/jql` with the token in `~/pi/secrets/jira/.env.personal` | Open tickets assigned to you, excluding the deprecated `FSM` project |
+| GitHub | `gh api graphql` with your `gh` login | Your PRs updated in the last 14 days, with CI, review, and merge state |
+
+Jira and GitHub answers are cached for 2 minutes. After the first load, a stale answer is shown at once and refreshed in the background. **refresh** forces a new fetch.
+
+The page updates live: the server watches the session and status folders and pushes a change event over SSE.
+
+## How a run links to a ticket
+
+A ticket key (`FSDK-123`, `EFSUP-45`, any case) is scored by where it appears in the session:
+
+| Where | Weight |
+|---|---|
+| Session name | 5 |
+| Your prompts | 3 |
+| Tool-call arguments (branch names, `gh pr create --title`) | 1 |
+| Assistant text | 1 |
+| Tool results | ignored: one `board` call prints every open ticket |
+
+A run links to its strongest keys: at most 3, each with a score of at least 3 and at least a third of the top score.
+
+PRs link to tickets by the key in their title or branch. Then two rules cross the gap:
+- A run that opened a PR (`gh pr create` in the log) takes the PR's tickets.
+- A PR with no key takes the main ticket of the run that opened it.
+
+## Run status
+
+| Status | With the extension | Without it (guess) |
+|---|---|---|
+| working | `agent_start` fired and the pi process is alive | The log ends mid-run and changed in the last 10 min |
+| awaiting input | `agent_settled` fired and the pi process is alive | The log ends on a finished reply less than 4 h old |
+| finished | `session_shutdown` fired, or the pid is gone | Everything else |
+
+The extension writes its status file on `agent_settled`, not on `agent_end`, because pi can still retry or run queued messages after `agent_end`.
+
+## Focus ranking
+
+Higher scores come first. The rules are in `server/attention.ts`.
+
+| Item | Score |
+|---|---|
+| Live run stopped on an API error | 110 |
+| Live run waiting for you | 100, + up to 60 for the time waited, + 30 if it asked a question. ×0.6 if guessed. 35 after 24 h. |
+| Your PR: a reviewer asked for changes | 95 |
+| Run died on an API error in the last 24 h | 90 |
+| Your PR: CI is red | 85 |
+| Your PR: merge conflict | 80 |
+| Your PR: approved and green, ready to merge | 70 |
+| Ticket overdue | 60, + days late (up to 20), + priority |
+| Ticket due within 2 days | 50, + priority |
+| In-progress ticket with no run for 3 days and no open PR | 25, + priority |
+
+Draft PRs score half. Tickets that are On Hold, Blocked, Waiting or Deferred score 25 less.
+
+## Configuration
+
+Environment variables, all optional: `AGENT_DASH_PORT`, `AGENT_DASH_SESSIONS_DIR`, `AGENT_DASH_STATUS_DIR`, `AGENT_DASH_PROJECTS` (default `FSDK|EFSUP`), `AGENT_DASH_EXCLUDE_PROJECTS` (default `FSM`), `AGENT_DASH_RECENT_DAYS` (default 14), `JIRA_SERVER`, `JIRA_LOGIN`, `JIRA_API_TOKEN`.
+
+## Develop
+
+```bash
+pnpm test       # node:test, no build step: Node runs the TypeScript directly
+pnpm typecheck
+```
+
+Node 24 or later is needed, for its built-in TypeScript type stripping.

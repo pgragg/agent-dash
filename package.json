@@ -1,0 +1,31 @@
+{
+  "name": "agent-dash",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local dashboard that shows which agent runs need your attention, grouped by your Jira tickets",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node server/index.ts",
+    "dev": "concurrently -k -n server,web \"node --watch server/index.ts\" \"vite\"",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test 'test/**/*.test.ts'",
+    "install-extension": "node scripts/install-extension.ts"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "concurrently": "^9.2.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.1.0"
+  }
+}
