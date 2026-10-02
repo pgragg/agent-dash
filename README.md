@@ -21,7 +21,7 @@ pnpm build && pnpm start # http://127.0.0.1:7777
 
 ## The page
 
-The navbar at the top switches between the views: **Board** (`#/`, the queue and workspace below), **PRs** (`#/prs`) and **History** (`#/history`). A conversation has its own page (`#/c:<sessionId>`).
+The navbar at the top switches between the views: **Board** (`#/`, the queue and workspace below), **Actions** (`#/actions`), **PRs** (`#/prs`) and **History** (`#/history`). A conversation has its own page (`#/c:<sessionId>`). Each object has its own [address](#addresses).
 
 ### Board
 
@@ -35,11 +35,38 @@ The navbar at the top switches between the views: **Board** (`#/`, the queue and
 - **Notifications**: **Turn on notifications** in the top bar asks Chrome for permission. After that, the page sends a notification when an agent that worked for 45 s or more starts to wait for you, unless you stopped it with Esc. A click opens that run's entry on the board. They need the page open in a tab (in the background is fine), and an exact status from the extension: a status guessed from the log never notifies. **Notifications on** mutes them (saved in localStorage). If Chrome shows nothing, allow notifications for Google Chrome in macOS System Settings → Notifications. They replace the old `notify-on-wait` pi extension, which asked macOS for a notification from the terminal.
 - **New conversation** (`C`), at the top of the queue, opens a new page (`#/c`). Type the first message and pick the folder (default `~`), and **Start** runs a plain pi with no ticket and no context file. That pi has no terminal: the page goes to `#/c:<sessionId>`, and you talk to the agent there (see [Conversations on the page](#conversations-on-the-page)).
 - **Keyboard**: `J`/`K` move, `E` done for now, `R` reply, `N` note, `A` new agent, `C` new conversation, `O` open the iTerm tab (or the page of a conversation), `S` draft next steps, `⌘↵` send, `?` help.
-- `#/t:FSDK-123` or `#/r:<sessionId>` in the URL selects an entry.
+- `#/t:FSDK-123` or `#/r:<sessionId>` in the URL selects an entry. See [Addresses](#addresses) for the other objects.
+
+### Actions
+
+One short list of what to do next, first to do first. It has two kinds of action:
+
+- **Signals** from the queue that need you: an agent waits, CI is red, a ticket is overdue, and so on. Context only signals (a healthy PR out for review) are not actions.
+- **Drafted next steps** of each open ticket, from its newest finished summary. They come after the signals, and each ticket's first step comes before any second step.
+
+Each row shows the action, its ticket (which opens the ticket on the board), how long the action has been on the list ("added 3 hours ago"), and a button that opens the object to act on, in agent-dash: the agent card (`#/r:`), the step (`#/step:`), the ticket (`#/t:`), or the PR on the PRs view (`#/pr:`). The age is a link to the action itself (`#/a:<id>`).
+
+Each action is a row in the SQLite `actions` table. The server syncs the table on each dashboard load: a new action gets a row, and an action that went away gets `cleared_at`. If it comes back later, it gets a new row, so its age starts again. A source that could not be read (for example a GitHub timeout) clears none of its actions. A next step's row dates from when its summary was saved.
 
 ### PRs
 
 Your open PRs, grouped by ticket. A PR links to a ticket as on the board, so a PR with no key in its title or branch takes the ticket of the run that opened it. A PR that names two tickets shows under both. The groups with the most urgent PR come first, in the [queue ranking](#queue-ranking) order, and PRs with no ticket come last. Under each PR, the signals that need you (for example "CI is red") show with the reason. The ticket title opens that ticket on the board. Only PRs updated in the last 14 days show, because the GitHub fetch uses that window. The keyboard shortcuts work only on the board.
+
+## Addresses
+
+Every object in agent-dash has an address in the URL hash. A link opens the object and flashes it. The rules are in `web/src/routes.ts`.
+
+| Hash | Opens |
+|---|---|
+| `#/t:FSDK-123` | The ticket on the board |
+| `#/r:<sessionId>` | The run: its agent card or history row, under its ticket. A run with no ticket is its own entry. |
+| `#/step:<id>` | A drafted next step, in its ticket's Next steps card |
+| `#/note:<id>` | A note, in its ticket's Notes card |
+| `#/pr:<owner>/<repo>/<number>` | The PR on the PRs view |
+| `#/a:<id>` | The action on the Actions view |
+| `#/c:<sessionId>` | The conversation's page |
+
+An object that is not on the page any more (an old run, a merged PR, a cleared action) shows a note that says so.
 
 ## Conversations on the page
 
@@ -61,6 +88,7 @@ Everything you write lives in SQLite at `~/.agent-dash/agent-dash.db`:
 | `summaries` | One per next-steps request: `ticket`, `status`, `requested_at`, `generated_at`, `summary`, `error` |
 | `next_steps` | One per numbered step of a finished summary: `summary_id`, `ticket`, `position`, `body`. Written when the summary is saved. |
 | `notes` | One per note: `ticket`, `created_at`, `body` |
+| `actions` | One per action on the Actions view: `key` (what it is about, such as `ci_failing pr:<url>`), `kind`, `ticket`, `created_at`, `cleared_at` (set when it goes away) |
 | `PiConversationStatusChange` | One per change to a thread's relevance: `ticket`, `session_id`, `status` (`relevant` or `resolved`), `reason` (resolved only, optional), `created_at`. Append-only; the newest row per ticket and thread is the current state. |
 
 ## Reply to an agent

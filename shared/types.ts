@@ -166,6 +166,24 @@ export interface ThreadStatusChange {
   createdAt: string;
 }
 
+export type ActionKind = AttentionKind | "next_step";
+
+/** A thing to do next, from a queue signal that needs you or a drafted next step. One row in SQLite. */
+export interface Action {
+  /** The `actions` row id. */
+  id: number;
+  kind: ActionKind;
+  summary: string;
+  ticketKey: string | null;
+  ticketSummary: string | null;
+  /** When the row was written: how long the action has been open. */
+  createdAt: string;
+  /** Higher comes first. */
+  score: number;
+  /** The agent-dash object to act on, as a ref ("t:KEY", "r:SESSION", "step:ID", "pr:OWNER/REPO/N"). Never Jira or GitHub. */
+  target: string;
+}
+
 export interface TicketGroup {
   ticket: Ticket;
   /** Oldest first. Resolved threads stay here; `threads` says which ones they are. */
@@ -197,6 +215,8 @@ export interface Dashboard {
   summaries: Record<string, TicketSummaryState>;
   /** Private notes by ticket key, oldest first. */
   notes: Record<string, Note[]>;
+  /** Open actions, first to do first. */
+  actions: Action[];
   sources: { jira: SourceHealth; github: SourceHealth; sessions: SourceHealth };
   extensionInstalled: boolean;
 }

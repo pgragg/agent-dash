@@ -140,7 +140,7 @@ kbd {
   height: 56px; padding: 0 20px; flex: none;
   border-bottom: 1px solid var(--line); background: var(--bg);
 }
-.brand { font: 600 15px var(--display); letter-spacing: -.01em; width: 340px; display: flex; align-items: center; gap: 18px; flex: none; }
+.brand { font: 600 15px var(--display); letter-spacing: -.01em; min-width: 340px; white-space: nowrap; display: flex; align-items: center; gap: 18px; flex: none; }
 /* The view tabs sit inside the brand box, so the headline still lines up with the workspace. */
 .views { display: flex; gap: 2px; font: 500 13.5px var(--sans); letter-spacing: 0; }
 .views a { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border-radius: 9px; text-decoration: none; color: var(--ink-2); }
@@ -383,3 +383,21 @@ a.pr-group-title:hover { text-decoration: underline; text-underline-offset: 3px;
 .h-row.one-line > .h-title { flex: 0 1 auto; min-width: 120px; }
 .h-row.one-line > .shrink { flex: 0 1 auto; min-width: 0; }
 .h-row.one-line > .grow { flex: 1 1 0; }
+
+/* Actions view: one row per thing to do, with a link into the board or the PRs view. */
+.actions { list-style: none; margin: 0; padding: 0; }
+.action { display: flex; align-items: center; gap: 12px; padding: 11px 18px; border-bottom: 1px solid var(--line); }
+.action:last-child { border-bottom: 0; }
+.action > .dot { flex: none; align-self: flex-start; margin-top: 7px; }
+.action-body { flex: 1; min-width: 0; }
+.action-summary { font-size: 13.5px; overflow-wrap: anywhere; }
+.action-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; min-width: 0; }
+.action-meta > * { flex: none; }
+.action-meta .action-ticket { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.action-age { flex: none; text-decoration: none; white-space: nowrap; }
+.action-age:hover { text-decoration: underline; }
+.action > .btn { flex: none; text-decoration: none; }
+
+/* The object that a link points at. */
+.flash { animation: flash 1.8s ease-out; }
+@keyframes flash { 0%, 30% { background: var(--waiting-bg); box-shadow: 0 0 0 2px var(--waiting); } 100% { box-shadow: 0 0 0 2px transparent; } }

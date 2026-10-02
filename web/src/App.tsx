@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { splitSummary } from "../../shared/nextSteps.ts";
-import type { AttentionItem, AttentionKind, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState, Turn } from "../../shared/types.ts";
+import { prRef } from "../../shared/refs.ts";
+import type { Action, ActionKind, AttentionItem, AttentionKind, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState, Turn } from "../../shared/types.ts";
 import { filterHistory, groupByDay } from "./history.ts";
 import { countPrs, groupOpenPrs } from "./prs.ts";
-import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, resumeCommand, runTitle, shortDate, stamp, useDashboard, useNow, useWaitNotifications } from "./lib.tsx";
+import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, resumeCommand, runTitle, shortDate, stamp, useDashboard, useFlash, useNow, useWaitNotifications } from "./lib.tsx";
+import { href, humanAge, parseHash, resolveBoardRef, type Route } from "./routes.ts";
 
 /**
  * agent-dash answers one question: "what do I work on next?".
@@ -266,7 +268,7 @@ function StepRow({ ticket, step, cwd, onError }: { ticket: string; step: NextSte
     setState(err ? "idle" : "started");
   };
   return (
-    <li className="step">
+    <li className="step" id={`step:${step.id}`}>
       <span className="step-body">{inline(step.body)}</span>
       <button className="btn ghost small" onClick={start} disabled={state !== "idle" || !cwd.trim()} title={`Start a pi agent in ${cwd} on this step, with this page as context`}>
         {state === "starting" ? "Starting…" : state === "started" ? "Started ✓" : "Start agent"}
@@ -389,7 +391,7 @@ function Notes({ ticket, notes, now, onError, focusSignal }: { ticket: string; n
       {notes.length > 0 && (
         <ol className="note-list">
           {[...notes].reverse().map((n) => (
-            <li key={n.id}>
+            <li key={n.id} id={`note:${n.id}`}>
               <div className="note-meta">
                 <span title={n.createdAt}>{stamp(n.createdAt)}</span>
                 <span>· {age(n.createdAt, now)} ago</span>
@@ -610,7 +612,7 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket }: { run: R
   const [expanded, setExpanded] = useState(false);
   const long = run.lastMessage.length > 900;
   return (
-    <section className={`card agent tone-border-${runTone(run)}`}>
+    <section className={`card agent tone-border-${runTone(run)}`} id={`r:${run.sessionId}`}>
       <header className="card-head">
         <Dot tone={runTone(run)} pulse={run.status === "working"} />
         <div className="agent-title">
@@ -654,12 +656,20 @@ function PrRow({ pr, now }: { pr: PullRequest; now: number }) {
   );
 }
 
-function History({ runs: allRuns, now, onError, ticket, threads = {} }: { runs: Run[]; now: number; onError: (m: string | null) => void; ticket?: string; threads?: Record<string, ThreadStatusChange> }) {
+function History({ runs: allRuns, now, onError, ticket, threads = {}, focus = null }: { runs: Run[]; now: number; onError: (m: string | null) => void; ticket?: string; threads?: Record<string, ThreadStatusChange>; focus?: string | null }) {
   const [open, setOpen] = useState<string | null>(null);
   const [all, setAll] = useState(false);
   const [showResolved, setShowResolved] = useState(false);
   const runs = allRuns.filter((r) => threads[r.sessionId]?.status !== "resolved");
   const resolved = allRuns.filter((r) => threads[r.sessionId]?.status === "resolved");
+  // A link to one run opens its row, and shows the older runs or the resolved ones when it is there.
+  useEffect(() => {
+    const id = focus?.startsWith("r:") ? focus.slice(2) : null;
+    if (!id || !allRuns.some((r) => r.sessionId === id)) return;
+    setOpen(id);
+    if (runs.slice(0, -6).some((r) => r.sessionId === id)) setAll(true);
+    if (resolved.some((r) => r.sessionId === id)) setShowResolved(true);
+  }, [focus]);
   const shown = all ? runs : runs.slice(-6);
   return (
     <ol className="history">
@@ -671,7 +681,7 @@ function History({ runs: allRuns, now, onError, ticket, threads = {} }: { runs: 
         </li>
       )}
       {shown.map((r) => (
-        <li key={r.sessionId} className={open === r.sessionId ? "open" : ""}>
+        <li key={r.sessionId} id={`h:r:${r.sessionId}`} className={open === r.sessionId ? "open" : ""}>
           <div className="h-row">
             <Dot tone={runTone(r)} pulse={r.status === "working"} />
             <button className="h-title" onClick={() => setOpen(open === r.sessionId ? null : r.sessionId)} title={r.firstPrompt}>
@@ -705,7 +715,7 @@ function History({ runs: allRuns, now, onError, ticket, threads = {} }: { runs: 
         resolved.map((r) => {
           const t = threads[r.sessionId];
           return (
-            <li key={r.sessionId} className="resolved">
+            <li key={r.sessionId} id={`h:r:${r.sessionId}`} className="resolved">
               <div className="h-row">
                 <span className="resolved-mark" aria-hidden>
                   ✓
@@ -728,7 +738,7 @@ function History({ runs: allRuns, now, onError, ticket, threads = {} }: { runs: 
   );
 }
 
-function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSignal, noteSignal, agentSignal }: {
+function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSignal, noteSignal, agentSignal, anchor }: {
   s: Subject;
   data: Dashboard;
   now: number;
@@ -739,7 +749,10 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
   focusSignal: number;
   noteSignal: number;
   agentSignal: number;
+  /** The run, step, or note in this entry that the URL points at. */
+  anchor: string | null;
 }) {
+  useFlash(anchor);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => setError(null), [s.id]);
   // Shared by "Start a new agent" and the next steps' buttons, so both start in the same folder.
@@ -863,7 +876,7 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
         <div className="stack">
           <h2 className="section-title">History · {plural(runs.length, "run")}</h2>
           <div className="card flush">
-            <History runs={runs} now={now} onError={setError} ticket={s.ticket?.ticket.key} threads={s.ticket?.threads} />
+            <History runs={runs} now={now} onError={setError} ticket={s.ticket?.ticket.key} threads={s.ticket?.threads} focus={anchor} />
           </div>
         </div>
       )}
@@ -875,8 +888,10 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
 
 // ---- PRs view -----------------------------------------------------------------------
 
-function PrsView({ data, now }: { data: Dashboard; now: number }) {
+function PrsView({ data, now, focus }: { data: Dashboard; now: number; focus: string | null }) {
+  useFlash(focus);
   const groups = useMemo(() => groupOpenPrs(data), [data]);
+  const missing = focus && !groups.some((g) => g.prs.some((e) => prRef(e.pr.url) === focus)) ? focus.slice(3) : null;
   const total = countPrs(groups);
   const ticketCount = groups.filter((g) => g.ticket).length;
   return (
@@ -889,6 +904,14 @@ function PrsView({ data, now }: { data: Dashboard; now: number }) {
           </span>
         </div>
       </header>
+      {missing && (
+        <div className="toast">
+          {missing} is not an open PR of yours from the last 14 days.{" "}
+          <a href={`https://github.com/${missing.replace(/\/(\d+)$/, "/pull/$1")}`} target="_blank" rel="noreferrer">
+            Open it on GitHub ↗
+          </a>
+        </div>
+      )}
       {groups.length === 0 && <div className="zero big">You have no open PRs.</div>}
       {groups.map((g) => {
         const t = g.ticket;
@@ -901,7 +924,7 @@ function PrsView({ data, now }: { data: Dashboard; now: number }) {
                   <a className="key-link" href={t.url} target="_blank" rel="noreferrer" title="Open in Jira">
                     {t.key} ↗
                   </a>
-                  <a className="pr-group-title" href={`#/t:${encodeURIComponent(t.key)}`} title="Open on the board">
+                  <a className="pr-group-title" href={href(`t:${t.key}`)} title="Open on the board">
                     {t.summary}
                   </a>
                   <span className={`pill cat-${t.statusCategory}`}>{t.status}</span>
@@ -917,7 +940,7 @@ function PrsView({ data, now }: { data: Dashboard; now: number }) {
               {g.prs.map(({ pr, items }) => {
                 const todo = items.filter((a) => !a.info);
                 return (
-                  <div key={pr.url} className="pr-entry">
+                  <div key={pr.url} className="pr-entry" id={prRef(pr.url) ?? undefined}>
                     <PrRow pr={pr} now={now} />
                     {todo.length > 0 && (
                       <ul className="pr-why">
@@ -936,6 +959,80 @@ function PrsView({ data, now }: { data: Dashboard; now: number }) {
           </div>
         );
       })}
+    </article>
+  );
+}
+
+// ---- Actions view -----------------------------------------------------------------
+
+const ACTION_KIND: Record<ActionKind, { short: string; tone: string }> = {
+  ...(Object.fromEntries(Object.entries(KIND).map(([k, v]) => [k, { short: SHORT[k as AttentionKind], tone: v.tone }])) as Record<AttentionKind, { short: string; tone: string }>),
+  next_step: { short: "next step", tone: "muted" },
+};
+
+/** What the action's button opens, in words. */
+function targetLabel(target: string): string {
+  if (target.startsWith("pr:")) return prName(`https://github.com/${target.slice(3).replace(/\/(\d+)$/, "/pull/$1")}`);
+  if (target.startsWith("r:")) return "Open agent";
+  if (target.startsWith("step:")) return "Open step";
+  return "Open on board";
+}
+
+function ActionRow({ a, now }: { a: Action; now: number }) {
+  const kind = ACTION_KIND[a.kind];
+  return (
+    <li className="action" id={`a:${a.id}`}>
+      <Dot tone={kind.tone} />
+      <div className="action-body">
+        <div className="action-summary">{inline(a.summary)}</div>
+        <div className="action-meta">
+          <span className={`tag tone-${kind.tone}`}>{kind.short}</span>
+          {a.ticketKey ? (
+            <a className="key-link" href={href(`t:${a.ticketKey}`)} title="Open the ticket on the board">
+              {a.ticketKey}
+            </a>
+          ) : (
+            <span className="meta">no ticket</span>
+          )}
+          {a.ticketSummary && <span className="meta action-ticket">{a.ticketSummary}</span>}
+        </div>
+      </div>
+      <a className="meta action-age" href={href(`a:${a.id}`)} title={`On this list since ${stamp(a.createdAt)} · link to this action`}>
+        {humanAge(a.createdAt, now) === "just now" ? "added just now" : `added ${humanAge(a.createdAt, now)} ago`}
+      </a>
+      <a className="btn small" href={href(a.target)}>
+        {targetLabel(a.target)} →
+      </a>
+    </li>
+  );
+}
+
+function ActionsView({ data, now, focus }: { data: Dashboard; now: number; focus: string | null }) {
+  useFlash(focus);
+  const actions = data.actions;
+  const steps = actions.filter((a) => a.kind === "next_step").length;
+  return (
+    <article className="workspace">
+      <header className="ws-head">
+        <h1>Next actions</h1>
+        <div className="ws-meta">
+          <span className="meta">
+            {plural(actions.length - steps, "signal")} from the queue · {plural(steps, "drafted next step")} · first to do first
+          </span>
+        </div>
+      </header>
+      {focus && !actions.some((a) => `a:${a.id}` === focus) && <div className="toast">Action {focus.slice(2)} is done or gone: its signal cleared, or its ticket was redrafted.</div>}
+      {actions.length === 0 ? (
+        <div className="zero big">Nothing to do. Draft next steps on a ticket to get its recommended actions here.</div>
+      ) : (
+        <div className="card flush">
+          <ol className="actions">
+            {actions.map((a) => (
+              <ActionRow key={a.id} a={a} now={now} />
+            ))}
+          </ol>
+        </div>
+      )}
     </article>
   );
 }
@@ -1048,7 +1145,7 @@ function HistoryView({ data, now }: { data: Dashboard; now: number }) {
                     </button>
                     {r.tickets.map((k) =>
                       tickets.has(k) ? (
-                        <a key={k} className="key-link" href={`#/t:${encodeURIComponent(k)}`} title={`${tickets.get(k)!.summary} · open on the board`}>
+                        <a key={k} className="key-link" href={href(`t:${k}`)} title={`${tickets.get(k)!.summary} · open on the board`}>
                           {k}
                         </a>
                       ) : (
@@ -1244,27 +1341,15 @@ function Help({ onClose }: { onClose: () => void }) {
 
 // ---- page ---------------------------------------------------------------------------
 
-type View = "board" | "prs" | "history" | "conversation";
-
-/**
- * `#/prs` and `#/history` are views. `#/c` starts a conversation and `#/c:ID` shows one.
- * Anything else is the board, and `#/t:KEY` or `#/r:ID` selects an entry on it.
- */
-function parseHash(): { view: View; id: string | null } {
-  const path = decodeURIComponent(location.hash.slice(2));
-  if (path === "prs" || path === "history") return { view: path, id: null };
-  if (path === "c" || path.startsWith("c:")) return { view: "conversation", id: path.slice(2) || null };
-  return { view: "board", id: path || null };
-}
-
 export function App() {
   const { data, error, loading, refresh } = useDashboard();
   const notify = useWaitNotifications(data);
   const now = useNow(1_000);
   const snoozed = useSnoozed();
-  const [view, setView] = useState<View>(() => parseHash().view);
-  const [selectedId, setSelectedId] = useState<string | null>(() => (parseHash().view === "board" ? parseHash().id : null));
-  const [conversationId, setConversationId] = useState<string | null>(() => (parseHash().view === "conversation" ? parseHash().id : null));
+  const [route, setRoute] = useState<Route>(() => parseHash(location.hash));
+  const view = route.view;
+  // The other views keep the board's ref, so going back lands on the same entry.
+  const [boardRef, setBoardRef] = useState<string | null>(() => (route.view === "board" ? route.ref : null));
   const [help, setHelp] = useState(false);
   const [focusSignal, setFocusSignal] = useState(0);
   const [noteSignal, setNoteSignal] = useState(0);
@@ -1283,23 +1368,22 @@ export function App() {
   const quiet = data ? data.myTickets.map((g) => subjects.get(`t:${g.ticket.key}`)!).filter((s) => !s.items.length && !liveRuns(s).length) : [];
   const order = [...queue, ...othersTurn, ...working, ...done, ...doneInJira, ...quiet];
 
-  const selected = (selectedId && subjects.get(selectedId)) || queue[0] || order[0] || null;
+  const target = data && boardRef ? resolveBoardRef(boardRef, data, new Set(subjects.keys())) : null;
+  const selected = (target && subjects.get(target.subjectId)) || queue[0] || order[0] || null;
 
   useEffect(() => {
     const onHash = () => {
-      const { view, id } = parseHash();
-      setView(view);
-      // The other views keep the board's selection, so going back lands on the same entry.
-      if (view === "board") setSelectedId(id);
-      if (view === "conversation") setConversationId(id);
+      const next = parseHash(location.hash);
+      setRoute(next);
+      if (next.view === "board") setBoardRef(next.ref);
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
   const select = useCallback((id: string) => {
-    setSelectedId(id);
-    history.replaceState(null, "", `#/${encodeURIComponent(id)}`);
+    setBoardRef(id);
+    history.replaceState(null, "", href(id));
   }, []);
 
   const move = useCallback(
@@ -1367,8 +1451,11 @@ export function App() {
         <div className="brand">
           agent-dash
           <nav className="views" aria-label="Views">
-            <a href={selected ? `#/${encodeURIComponent(selected.id)}` : "#/"} className={view === "board" ? "active" : ""} aria-current={view === "board" ? "page" : undefined}>
+            <a href={selected ? href(selected.id) : "#/"} className={view === "board" ? "active" : ""} aria-current={view === "board" ? "page" : undefined}>
               Board {queue.length > 0 && <span className="count">{queue.length}</span>}
+            </a>
+            <a href="#/actions" className={view === "actions" ? "active" : ""} aria-current={view === "actions" ? "page" : undefined}>
+              Actions {data.actions.length > 0 && <span className="count">{data.actions.length}</span>}
             </a>
             <a href="#/prs" className={view === "prs" ? "active" : ""} aria-current={view === "prs" ? "page" : undefined}>
               PRs {openPrs > 0 && <span className="count">{openPrs}</span>}
@@ -1409,17 +1496,21 @@ export function App() {
         </button>
       </header>
 
-      {view === "prs" ? (
+      {route.view === "actions" ? (
         <main className="main">
-          <PrsView data={data} now={now} />
+          <ActionsView data={data} now={now} focus={route.action} />
+        </main>
+      ) : route.view === "prs" ? (
+        <main className="main">
+          <PrsView data={data} now={now} focus={route.pr} />
         </main>
       ) : view === "history" ? (
         <main className="main">
           <HistoryView data={data} now={now} />
         </main>
-      ) : view === "conversation" ? (
+      ) : route.view === "conversation" ? (
         <main className="main">
-          {conversationId ? <ConversationView key={conversationId} sessionId={conversationId} data={data} now={now} /> : <NewConversationForm />}
+          {route.id ? <ConversationView key={route.id} sessionId={route.id} data={data} now={now} /> : <NewConversationForm />}
         </main>
       ) : (
         <div className="columns">
@@ -1480,6 +1571,11 @@ export function App() {
                 Run <code>pnpm install-extension</code> to get exact statuses and replies from here.
               </p>
             )}
+            {boardRef && !target && (
+              <p className="banner">
+                <code>{boardRef}</code> is not on the board. It may be older than 14 days, or closed: look for it in <a href="#/history">History</a>.
+              </p>
+            )}
             {selected ? (
               <Workspace
                 s={selected}
@@ -1492,6 +1588,7 @@ export function App() {
                 focusSignal={focusSignal}
                 noteSignal={noteSignal}
                 agentSignal={agentSignal}
+                anchor={target?.anchor ?? null}
               />
             ) : (
               <div className="zero big">Nothing to show.</div>

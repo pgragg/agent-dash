@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, normalize } from "node:path";
 import type { Dashboard, PullRequest, SourceHealth, Ticket } from "../shared/types.ts";
+import { actionCandidates, keepWhenDown, toActions } from "./actions.ts";
 import { config } from "./config.ts";
 import { startConversation } from "./conversations.ts";
 import { buildHandoff, stepMessage } from "./handoff.ts";
@@ -97,7 +98,7 @@ async function dashboard(force: boolean) {
   }
 
   const jira = !myTickets.health.ok ? myTickets.health : othersHealth.ok ? myTickets.health : othersHealth;
-  return buildDashboard({
+  const d = buildDashboard({
     sessions: parsed,
     reported,
     myTickets: mine,
@@ -112,6 +113,9 @@ async function dashboard(force: boolean) {
     threads: summaryDb.currentThreadStatuses(),
     jiraServer: config.jira.server,
   });
+  const candidates = actionCandidates(d);
+  d.actions = toActions(candidates, summaryDb.syncActions(candidates, keepWhenDown(d.sources), new Date(now)), d);
+  return d;
 }
 
 // ---- live updates -------------------------------------------------------------------

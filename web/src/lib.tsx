@@ -50,6 +50,26 @@ export function useNow(intervalMs: number): number {
   return now;
 }
 
+/**
+ * Scrolls to the element whose DOM id is the ref, and flashes it. A history row's id has an
+ * "h:" prefix, so the agent card of a live run wins over its row in the history.
+ */
+export function useFlash(anchor: string | null) {
+  useEffect(() => {
+    if (!anchor) return;
+    // After the children's own effects, such as a history list that opens to show the row.
+    const t = setTimeout(() => {
+      const el = document.getElementById(anchor) ?? document.getElementById(`h:${anchor}`);
+      if (!el) return;
+      el.scrollIntoView({ block: "center" });
+      el.classList.remove("flash");
+      void el.offsetWidth; // Restarts the animation when the same element flashes again.
+      el.classList.add("flash");
+    }, 60);
+    return () => clearTimeout(t);
+  }, [anchor]);
+}
+
 // ---- names --------------------------------------------------------------------------
 
 export function prName(url: string): string {
