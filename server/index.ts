@@ -10,13 +10,13 @@ import { startConversation } from "./conversations.ts";
 import { agentMessage, agentName, buildHandoff, stepMessage } from "./handoff.ts";
 import { focusItermSession, piCommand, runInNewItermTab } from "./iterm.ts";
 import { buildDashboard, buildHistory, otherTicketKeys } from "./model.ts";
+import * as resumeRoute from "./routes/resume.ts";
 import { fetchMyPrs } from "./sources/github.ts";
 import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
 import { SessionIndex, transcriptTurns } from "./sources/sessions.ts";
 import { isAlive, readReportedStatuses } from "./sources/status.ts";
 import * as summaryDb from "./summaries/db.ts";
 import { reconcile, requestSummary } from "./summaries/runner.ts";
-import * as resumeRoute from "./routes/resume.ts";
 
 const WEB_DIST = new URL("../web/dist/", import.meta.url).pathname;
 const EXTENSION_PATH = join(homedir(), ".pi/agent/extensions/agent-dash-status.ts");

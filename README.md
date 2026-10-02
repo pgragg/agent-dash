@@ -76,7 +76,7 @@ An object that is not on the page any more (an old run, a merged PR, a cleared a
 - **The page** shows the chat (prompts and replies, no tool traffic), the status, and a reply box. It reloads on each change. Until pi saves the first message, it says "Starting pi…".
 - **A restart of the server does not stop a conversation.** rpc mode exits when its stdin ends, so stdin is a FIFO that the pi process opens read-write: `~/.agent-dash/conversations/<id>.in`. The output goes to `<id>.log` next to it.
 - **End conversation** (`POST /api/conversations/end?session=<id>`) stops the pi process with SIGTERM. The server takes the pid from the status file, and stops only a session in rpc mode. A terminal pi is closed from its tab.
-- **Resume here** (`POST /api/conversations/resume?session=<id>`, with the `X-Agent-Dash` guard) continues a finished session headless: `pi --mode rpc --session <file>`, which keeps the session id. Then the page opens `#/c:<sessionId>`. The server takes the log file from its own scan, never from the request. It refuses a session whose pid is still alive, and a session with no status file whose log does not say finished (see [Run status](#run-status)), because two pi processes on one log would mix their entries. **Copy resume** stays, to continue the chat in a terminal.
+- **Resume here** (`POST /api/conversations/resume?session=<id>`, with the `X-Agent-Dash` guard) continues a finished session headless: `pi --mode rpc --session <file>`, which keeps the session id. Then the page opens `#/c:<sessionId>`. The server takes the log file from its own scan, never from the request. Two pi processes on one log would mix their entries, so it resumes only a session that is known to be closed: it has a status file, its pid is gone, and this server is not already running it. A session with no status file (it started before the extension) can still be open in a terminal, so it shows only **Copy resume**. **Copy resume** stays, to continue the chat in a terminal.
 - A conversation is a normal pi session, so it also shows on the board and in History. Its **Open** button goes to its page, not to iTerm.
 - **Limit:** a dialog from an extension (`ctx.ui.select`, `confirm`, `input`) gets no answer on the page. It waits until its timeout, or for ever if it has none.
 
@@ -143,7 +143,7 @@ The extension writes its status file on `agent_settled`, not on `agent_end`, bec
 
 ## Jump to a run's iTerm tab
 
-A live run shows **Open in iTerm** (`O` for the selected entry's main run). A live conversation that the page started shows **Open**, which goes to its page. A finished run shows **Resume here**, which continues it on its page (see [Conversations on the page](#conversations-on-the-page)), and **Copy resume**, which copies `cd <cwd> && pi --session <id>`.
+A live run shows **Open in iTerm** (`O` for the selected entry's main run). A live conversation that the page started shows **Open**, which goes to its page. A finished run with a status file shows **Resume here**, which continues it on its page (see [Conversations on the page](#conversations-on-the-page)), and **Copy resume**, which copies `cd <cwd> && pi --session <id>`.
 
 - The extension records the iTerm2 session uuid from `ITERM_SESSION_ID`.
 - `POST /api/focus?session=<id>` reads the uuid from the status file, never from the request. Then it runs an AppleScript that selects the window, tab and pane, and activates iTerm2.

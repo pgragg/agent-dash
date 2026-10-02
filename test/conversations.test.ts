@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { tmpdir } from "node:os";
+import { test } from "node:test";
 import { rpcArgs } from "../server/conversations.ts";
 import { agentMessage, agentName, HANDOFF_END, HANDOFF_START } from "../server/handoff.ts";
 import { resumeBlocker } from "../server/routes/resume.ts";
@@ -34,15 +34,21 @@ test("a headless ticket agent links to its ticket only, with the context inline 
   assert.equal(transcriptTurns(raw)[0].text, "[agent-dash context for FSDK-5]\n\nsay hi");
 });
 
-test("only a session that cannot still be open resumes", () => {
-  const raw = (cwd: string, at = minutesAgo(600)) => parseSession(jsonl(header("s1", cwd), user("go"), reply("done")), "/f.jsonl", new Date(at), PATTERN)!;
+test("only a session that is known to be closed resumes", () => {
+  const raw = (cwd: string) => parseSession(jsonl(header("s1", cwd), user("go"), reply("done")), "/f.jsonl", new Date(minutesAgo(600)), PATTERN)!;
   const status = (pid: number): ReportedStatus => ({ sessionId: "s1", pid, state: "closed", since: minutesAgo(5) });
   const alive = (pid: number) => pid === 1;
-  assert.equal(resumeBlocker(undefined, undefined, NOW, alive), "no such session");
-  assert.equal(resumeBlocker(raw(tmpdir()), status(1), NOW, alive), "this session is still running");
-  assert.equal(resumeBlocker(raw(tmpdir()), status(2), NOW, alive), null);
-  // No status file: a reply less than 4 h old can still be open in a terminal.
-  assert.equal(resumeBlocker(raw(tmpdir(), minutesAgo(30)), undefined, NOW, alive), "this session can still be open in a terminal");
-  assert.equal(resumeBlocker(raw(tmpdir()), undefined, NOW, alive), null);
-  assert.match(resumeBlocker(raw("/no/such/folder"), status(2), NOW, alive) ?? "", /folder is gone/);
+  const idle = { running: false, alive };
+  assert.equal(resumeBlocker(undefined, undefined, idle), "no such session");
+  assert.equal(resumeBlocker(raw(tmpdir()), status(1), idle), "this session is still running");
+  assert.equal(resumeBlocker(raw(tmpdir()), status(2), idle), null);
+  // A resume that this server just spawned has no live status file yet.
+  assert.equal(resumeBlocker(raw(tmpdir()), status(2), { running: true, alive }), "this session is still running");
+  // No status file: a terminal can still have it open, however old the log is.
+  assert.match(resumeBlocker(raw(tmpdir()), undefined, idle) ?? "", /terminal still has this session open/);
+  assert.match(resumeBlocker(raw("/no/such/folder"), status(2), idle) ?? "", /folder is gone/);
+});
+
+test("a resume keeps the session's own name", () => {
+  assert.deepEqual(rpcArgs("id-1", { name: "x", resume: { sessionId: "id-1", sessionFile: "/s/a.jsonl" } }), ["--mode", "rpc", "--session", "/s/a.jsonl"]);
 });

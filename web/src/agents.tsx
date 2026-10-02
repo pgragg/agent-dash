@@ -27,18 +27,26 @@ export function conversationHash(sessionId: string): string {
   return `#/c:${encodeURIComponent(sessionId)}`;
 }
 
+/** When each run was resumed from this page. The page data says "finished" until pi writes its status file. */
+const resumedAt = new Map<string, number>();
+
+export function resuming(sessionId: string): boolean {
+  return Date.now() - (resumedAt.get(sessionId) ?? 0) < 30_000;
+}
+
 /** Continues a finished session headless, under its own id, and opens its page. */
 export function ResumeHere({ run, onError, small = false }: { run: HistoryRun; onError: (m: string | null) => void; small?: boolean }) {
   const [busy, setBusy] = useState(false);
   return (
     <button
       className={`btn ${small ? "small" : ""}`}
-      disabled={busy}
+      disabled={busy || resuming(run.sessionId)}
       title="Continue this session on its page, with no terminal"
       onClick={async () => {
         setBusy(true);
         try {
           const id = (await postJson(`/api/conversations/resume?session=${encodeURIComponent(run.sessionId)}`)).sessionId ?? run.sessionId;
+          resumedAt.set(id, Date.now());
           onError(null);
           location.hash = conversationHash(id);
         } catch (err) {
@@ -48,7 +56,7 @@ export function ResumeHere({ run, onError, small = false }: { run: HistoryRun; o
         }
       }}
     >
-      {busy ? "Resuming…" : "Resume here"}
+      {busy || resuming(run.sessionId) ? "Resuming…" : "Resume here"}
     </button>
   );
 }

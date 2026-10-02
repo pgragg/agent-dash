@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { splitSummary } from "../../shared/nextSteps.ts";
 import { prRef } from "../../shared/refs.ts";
 import type { Action, ActionKind, AttentionItem, AttentionKind, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState, Turn } from "../../shared/types.ts";
-import { conversationHash, launchAgent, ResumeHere } from "./agents.tsx";
+import { conversationHash, launchAgent, ResumeHere, resuming } from "./agents.tsx";
 import { filterHistory, groupByDay } from "./history.ts";
 import { countPrs, groupOpenPrs } from "./prs.ts";
 import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, resumeCommand, runTitle, shortDate, stamp, useDashboard, useFlash, useNow, useWaitNotifications } from "./lib.tsx";
@@ -182,7 +182,8 @@ function OpenTab({ run, onError, className = "btn ghost", label = "Open in iTerm
   }
   if (!run.itermSessionId) {
     const copy = <CopyButton text={resumeCommand(run)} label="Copy resume" className={className} />;
-    return run.status === "finished" ? <><ResumeHere run={run} onError={onError} small={className.includes("small")} />{copy}</> : copy;
+    // Only a run with a status file is known to be closed; another one may still be open in a terminal.
+    return run.status === "finished" && run.statusSource === "extension" ? <><ResumeHere run={run} onError={onError} small={className.includes("small")} />{copy}</> : copy;
   }
   return (
     <button className={className} title="Bring this session's iTerm tab to the front" onClick={async () => onError(await api.focusTab(run.sessionId))}>
@@ -647,7 +648,8 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket }: { run: R
         <OpenTab run={run} onError={onError} hotkey={primary} />
       </header>
       {/* The whole chat ends with the last message, so it replaces it. */}
-      {chat && <Chat sessionId={run.sessionId} refreshKey={run.lastActivityAt + run.status} />}
+      {/* A working agent writes its log on every tool call; reload on a new prompt or when it stops, not on each write. */}
+      {chat && <Chat sessionId={run.sessionId} refreshKey={run.status === "working" ? run.userMessageCount : run.lastActivityAt + run.status} />}
       {!chat && run.lastMessage && (
         <div className={`agent-message ${long && !expanded ? "clamped" : ""}`}>
           <Markdown text={run.lastMessage} />
@@ -658,7 +660,7 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket }: { run: R
           )}
         </div>
       )}
-      <button className="btn ghost small chat-toggle" onClick={() => setChat(!chat)}>{chat ? "Show only the last message" : "Show the conversation"}</button>
+      <button className="btn ghost small chat-toggle" aria-expanded={chat} onClick={() => setChat(!chat)}>{chat ? "Show only the last message" : "Show the conversation"}</button>
       {run.status !== "finished" && <Composer run={run} onError={onError} focusSignal={primary ? focusSignal : 0} />}
     </section>
   );
@@ -1320,7 +1322,7 @@ function ConversationView({ sessionId, data, now }: { sessionId: string; data: D
       {run && <Chat sessionId={sessionId} refreshKey={run.lastActivityAt + run.status} />}
       {run?.status === "working" && <p className="meta">The agent is working…</p>}
       {run && run.status !== "finished" && <Composer run={run} onError={setError} focusSignal={0} />}
-      {run?.status === "finished" && <p className="meta">This conversation ended. Resume here (at the top) continues it on this page, and Copy resume in a terminal.</p>}
+      {run?.status === "finished" && <p className="meta">{resuming(sessionId) ? "Starting pi…" : "This conversation ended. Resume here (at the top) continues it on this page, and Copy resume in a terminal."}</p>}
       <div ref={end} />
     </article>
   );

@@ -8,7 +8,7 @@ export interface ConversationOptions {
   cwd: string;
   /** The first message. A resumed session can start without one and wait for a reply. */
   message?: string;
-  /** The session display name; a ticket key in it links the run to the ticket. */
+  /** The session display name; a ticket key in it links the run to the ticket. A resume keeps the file's name. */
   name?: string;
   /** Continue this session file. pi keeps the id that the file holds. */
   resume?: { sessionId: string; sessionFile: string };
@@ -17,8 +17,15 @@ export interface ConversationOptions {
 /** The pi arguments of a headless run. A new run gets the id that the server picked. */
 export function rpcArgs(sessionId: string, opts: Pick<ConversationOptions, "name" | "resume">): string[] {
   const args = ["--mode", "rpc", ...(opts.resume ? ["--session", opts.resume.sessionFile] : ["--session-id", sessionId])];
-  if (opts.name) args.push("--name", opts.name);
+  if (opts.name && !opts.resume) args.push("--name", opts.name);
   return args;
+}
+
+/** Runs this server started that have not exited. pi writes its status file only seconds after the spawn. */
+const running = new Set<string>();
+
+export function isRunning(sessionId: string): boolean {
+  return running.has(sessionId);
 }
 
 /**
@@ -60,7 +67,9 @@ export function startConversation(opts: ConversationOptions): string {
   closeSync(stdin);
   closeSync(log);
   // An ended run can exit after its resume made a new FIFO at the same path; keep that one.
+  running.add(sessionId);
   const cleanup = () => {
+    running.delete(sessionId);
     if (statSync(fifo, { throwIfNoEntry: false })?.ino === ino) rmSync(fifo, { force: true });
   };
   child.on("exit", cleanup);
