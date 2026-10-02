@@ -13,6 +13,8 @@ export const config = {
   inboxDir: env.AGENT_DASH_INBOX_DIR ?? join(home, ".agent-dash/inbox"),
   /** Context files for agents started from the dash, kept so you can see what each one got. */
   handoffDir: join(home, ".agent-dash/handoffs"),
+  /** stdin FIFO and output log of each headless conversation started from the dash. */
+  conversationsDir: join(home, ".agent-dash/conversations"),
   jira: {
     server: env.JIRA_SERVER ?? "https://postmanlabs.atlassian.net",
     login: env.JIRA_LOGIN ?? "piper.gragg@postman.com",

@@ -50,6 +50,7 @@ export function toRuns(sessions: ParsedSession[], reported: Map<string, Reported
         userMessageCount: s.userMessageCount,
         itermSessionId: r && status !== "finished" ? (r.itermSessionId ?? null) : null,
         canReply: Boolean(r?.inbox) && status !== "finished",
+        headless: r?.mode === "rpc" && status !== "finished",
       } satisfies Run;
     });
 }

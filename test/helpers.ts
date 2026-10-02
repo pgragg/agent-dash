@@ -46,6 +46,7 @@ export function run(over: Partial<Run> = {}): Run {
     mentionedPrs: [],
     userMessageCount: 1,
     canReply: false,
+    headless: false,
     itermSessionId: null,
     ...over,
   };

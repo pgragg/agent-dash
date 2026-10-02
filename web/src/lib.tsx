@@ -185,7 +185,14 @@ export const api = {
   reply: (sessionId: string, text: string) => post(`/api/reply?session=${encodeURIComponent(sessionId)}`, { text }),
   addNote: (ticket: string, body: string) => post(`/api/notes?ticket=${encodeURIComponent(ticket)}`, { body }),
   deleteNote: (id: number) => post(`/api/notes?id=${id}`, undefined, "DELETE"),
-  newConversation: () => post("/api/conversations"),
+  /** Starts a headless pi with the first message; resolves to its session id, or throws the reason. */
+  newConversation: async (message: string, cwd: string): Promise<string> => {
+    const res = await fetch("/api/conversations", { method: "POST", headers: { "X-Agent-Dash": "1", "Content-Type": "application/json" }, body: JSON.stringify({ message, cwd }) });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error ?? `failed (${res.status})`);
+    return json.sessionId;
+  },
+  endConversation: (sessionId: string) => post(`/api/conversations/end?session=${encodeURIComponent(sessionId)}`),
   startAgent: (ticket: string, message: string, cwd: string) => post(`/api/agents?ticket=${encodeURIComponent(ticket)}`, { message, cwd }),
   /** The server writes the first message from the stored step. */
   startStep: (ticket: string, step: number, cwd: string) => post(`/api/agents?ticket=${encodeURIComponent(ticket)}`, { step, cwd }),

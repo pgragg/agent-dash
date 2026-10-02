@@ -117,6 +117,20 @@ test("only a live run with a reported iTerm tab offers 'open tab'", () => {
   assert.deepEqual(tab, { live: "UUID-1", dead: null });
 });
 
+test("only a live rpc run is headless: the page is its UI, and it takes replies", () => {
+  const rpc = { sessionId: "rpc", pid: 1, state: "awaiting_input" as const, since: minutesAgo(1), inbox: true, mode: "rpc" };
+  const ended = { ...rpc, sessionId: "ended", state: "closed" as const };
+  const tui = { ...rpc, sessionId: "tui", mode: "tui" };
+  const d = buildDashboard({
+    ...base([session({ sessionId: "rpc" }), session({ sessionId: "ended" }), session({ sessionId: "tui" })]),
+    reported: new Map<string, ReportedStatus>([["rpc", rpc], ["ended", ended], ["tui", tui]]),
+    myTickets: [],
+    isAlive: () => true,
+  });
+  const runs = Object.fromEntries(d.unlinkedRuns.map((r) => [r.sessionId, [r.headless, r.canReply]]));
+  assert.deepEqual(runs, { rpc: [true, true], ended: [false, false], tui: [false, true] });
+});
+
 test("every focus row gets a run: a PR row the run that opened it, a ticket row the ticket's live run", () => {
   const url = "https://github.com/o/r/pull/9";
   const d = build(

@@ -25,6 +25,11 @@ const INBOX = process.env.AGENT_DASH_INBOX_DIR ?? join(homedir(), ".agent-dash/i
 /** iTerm2 sets ITERM_SESSION_ID to "w0t3p0:<uuid>"; the uuid lets the dashboard focus this tab. */
 const ITERM_SESSION = process.env.ITERM_SESSION_ID?.split(":")[1] ?? null;
 
+/** A session you sit at (tui) or one the dash runs headless (rpc); a `pi -p` run has no one to reply for. */
+function takesReplies(ctx: ExtensionContext): boolean {
+  return ctx.mode === "tui" || ctx.mode === "rpc";
+}
+
 function write(ctx: ExtensionContext, state: State): void {
   const sessionId = ctx.sessionManager.getSessionId();
   if (!sessionId) return;
@@ -35,7 +40,9 @@ function write(ctx: ExtensionContext, state: State): void {
     cwd: ctx.cwd,
     pid: process.pid,
     itermSessionId: ITERM_SESSION,
-    inbox: ctx.mode === "tui",
+    inbox: takesReplies(ctx),
+    // An rpc session has no terminal; the dash page is the only way to talk to it.
+    mode: ctx.mode,
     state,
     since: new Date().toISOString(),
   };
@@ -79,8 +86,7 @@ export default function (pi: ExtensionAPI) {
     watcher?.close();
     watcher = null;
     const sessionId = ctx.sessionManager.getSessionId();
-    // Only a session you sit at takes replies; a `pi -p` run has no one to reply for.
-    if (!sessionId || ctx.mode !== "tui") return;
+    if (!sessionId || !takesReplies(ctx)) return;
     const dir = join(INBOX, sessionId);
     try {
       mkdirSync(dir, { recursive: true });

@@ -39,6 +39,8 @@ export interface Run {
   itermSessionId: string | null;
   /** The live session runs a status extension with a reply inbox, so the dash can send it a message. */
   canReply: boolean;
+  /** A live headless conversation: no terminal, so the dash page is where you talk to it. */
+  headless: boolean;
 }
 
 /** A run in the History view. The whole last message stays out, so the list of every chat stays small. */

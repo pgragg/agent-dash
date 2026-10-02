@@ -3,6 +3,8 @@
 A local dashboard for one person who oversees many coding agents at the same time.
 It answers one question: **what do I look at next?**
 
+**The goal: one place for the whole developer workflow.** You find the next task, start agents, talk to them, and follow their PRs on this page, so you do not switch between iTerm and agent-dash. Each new feature moves one more step of the workflow from the terminal onto the page.
+
 It reads your pi session logs, your Jira tickets, and your GitHub PRs. You can act on the answer without leaving the page.
 
 The dashboard never writes to Jira or GitHub. The only thing it sends anywhere is a reply that you type to one of your own pi sessions.
@@ -19,7 +21,7 @@ pnpm build && pnpm start # http://127.0.0.1:7777
 
 ## The page
 
-The navbar at the top switches between two views: **Board** (`#/`, the queue and workspace below) and **PRs** (`#/prs`).
+The navbar at the top switches between the views: **Board** (`#/`, the queue and workspace below), **PRs** (`#/prs`) and **History** (`#/history`). A conversation has its own page (`#/c:<sessionId>`).
 
 ### Board
 
@@ -31,13 +33,24 @@ The navbar at the top switches between two views: **Board** (`#/`, the queue and
 - **Start a new agent** (`A`): type the first message, pick the folder, and **Start agent** opens a new iTerm tab running `pi --name "<KEY>: …" @context.md "<your message>"`. The context file holds what the page shows: your notes, the drafted next steps and their date, the PRs, the latest message from each relevant agent, and the run history (title, start, prompts, status, resolved or relevant). **What the agent gets** previews it. The folder you pick here is also the folder of the **Start agent** buttons in the next steps. Context files stay in `~/.agent-dash/handoffs/`. The context sits between `[agent-dash context for KEY]` markers, and the session parser counts only that key, so the tickets and PRs it mentions do not link the new run to them.
 - **History** (`#/history`): every pi chat on this machine, newest first, grouped by day, with no time window. The search box matches every word against the name, first prompt, last reply, folder and tickets. Click a chat to read it: your prompts and the agent's replies, without tool traffic, the newest 40 first. A live chat reloads as it changes. `GET /api/history` gives the list (without each run's whole last message, to keep it small), and `GET /api/transcript?session=<id>` gives one chat. The server finds the log by session id from its own scan, and never takes a path from the page.
 - **Notifications**: **Turn on notifications** in the top bar asks Chrome for permission. After that, the page sends a notification when an agent that worked for 45 s or more starts to wait for you, unless you stopped it with Esc. A click opens that run's entry on the board. They need the page open in a tab (in the background is fine), and an exact status from the extension: a status guessed from the log never notifies. **Notifications on** mutes them (saved in localStorage). If Chrome shows nothing, allow notifications for Google Chrome in macOS System Settings → Notifications. They replace the old `notify-on-wait` pi extension, which asked macOS for a notification from the terminal.
-- **New conversation** (`C`), at the top of the queue, opens a new iTerm tab running a plain `pi` in your home folder: no ticket, no context file, no first message. It is `POST /api/conversations`, with the same `X-Agent-Dash` guard as `/api/focus`.
-- **Keyboard**: `J`/`K` move, `E` done for now, `R` reply, `N` note, `A` new agent, `C` new conversation, `O` open the iTerm tab, `S` draft next steps, `⌘↵` send, `?` help.
+- **New conversation** (`C`), at the top of the queue, opens a new page (`#/c`). Type the first message and pick the folder (default `~`), and **Start** runs a plain pi with no ticket and no context file. That pi has no terminal: the page goes to `#/c:<sessionId>`, and you talk to the agent there (see [Conversations on the page](#conversations-on-the-page)).
+- **Keyboard**: `J`/`K` move, `E` done for now, `R` reply, `N` note, `A` new agent, `C` new conversation, `O` open the iTerm tab (or the page of a conversation), `S` draft next steps, `⌘↵` send, `?` help.
 - `#/t:FSDK-123` or `#/r:<sessionId>` in the URL selects an entry.
 
 ### PRs
 
 Your open PRs, grouped by ticket. A PR links to a ticket as on the board, so a PR with no key in its title or branch takes the ticket of the run that opened it. A PR that names two tickets shows under both. The groups with the most urgent PR come first, in the [queue ranking](#queue-ranking) order, and PRs with no ticket come last. Under each PR, the signals that need you (for example "CI is red") show with the reason. The ticket title opens that ticket on the board. Only PRs updated in the last 14 days show, because the GitHub fetch uses that window. The keyboard shortcuts work only on the board.
+
+## Conversations on the page
+
+`POST /api/conversations` (body `{message, cwd}`, with the `X-Agent-Dash` guard) starts `pi --mode rpc --session-id <uuid>` in the folder. The server picks the session id, so the page can open the conversation before pi writes anything.
+
+- **The first message and each reply** go through the [reply inbox](#reply-to-an-agent), as for a terminal session. The status extension delivers them in rpc mode too, and records `mode: "rpc"` in the status file.
+- **The page** shows the chat (prompts and replies, no tool traffic), the status, and a reply box. It reloads on each change. Until pi saves the first message, it says "Starting pi…".
+- **A restart of the server does not stop a conversation.** rpc mode exits when its stdin ends, so stdin is a FIFO that the pi process opens read-write: `~/.agent-dash/conversations/<id>.in`. The output goes to `<id>.log` next to it.
+- **End conversation** (`POST /api/conversations/end?session=<id>`) stops the pi process with SIGTERM. The server takes the pid from the status file, and stops only a session in rpc mode. A terminal pi is closed from its tab. After the end, **Copy resume** continues the chat in a terminal.
+- A conversation is a normal pi session, so it also shows on the board and in History. Its **Open** button goes to its page, not to iTerm.
+- **Limit:** a dialog from an extension (`ctx.ui.select`, `confirm`, `input`) gets no answer on the page. It waits until its timeout, or for ever if it has none.
 
 ## Storage
 
@@ -54,7 +67,7 @@ Everything you write lives in SQLite at `~/.agent-dash/agent-dash.db`:
 
 `POST /api/reply?session=<id>` writes the text to `~/.agent-dash/inbox/<sessionId>/<n>.txt`. The status extension in that session watches the folder, and sends each file to the agent as your message with `pi.sendUserMessage`. While the agent works, the message waits until the agent finishes.
 
-The server takes a reply only for a live interactive session whose status file says `inbox: true`. A `pi -p` run does not watch an inbox. A session that started before the extension changed needs `/reload` once; until then, its card says so.
+The server takes a reply only for a live session whose status file says `inbox: true`: a terminal (tui) session, or a [conversation on the page](#conversations-on-the-page) (rpc). A `pi -p` run does not watch an inbox. A session that started before the extension changed needs `/reload` once; until then, its card says so.
 
 The server listens on `127.0.0.1` only, because the page shows prompts and replies from every session.
 
@@ -101,7 +114,7 @@ The extension writes its status file on `agent_settled`, not on `agent_end`, bec
 
 ## Jump to a run's iTerm tab
 
-A live run shows **Open in iTerm** (`O` for the selected entry's main run). A finished run shows **Copy resume**, which copies `cd <cwd> && pi --session <id>`.
+A live run shows **Open in iTerm** (`O` for the selected entry's main run). A live conversation that the page started shows **Open**, which goes to its page. A finished run shows **Copy resume**, which copies `cd <cwd> && pi --session <id>`.
 
 - The extension records the iTerm2 session uuid from `ITERM_SESSION_ID`.
 - `POST /api/focus?session=<id>` reads the uuid from the status file, never from the request. Then it runs an AppleScript that selects the window, tab and pane, and activates iTerm2.

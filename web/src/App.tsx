@@ -170,6 +170,13 @@ function CopyButton({ text, label, className = "btn ghost" }: { text: string; la
 }
 
 function OpenTab({ run, onError, className = "btn ghost", label = "Open in iTerm", hotkey = false }: { run: HistoryRun; onError: (m: string | null) => void; className?: string; label?: string; hotkey?: boolean }) {
+  if (run.headless) {
+    return (
+      <a className={className} href={`#/c:${encodeURIComponent(run.sessionId)}`} title="Open this conversation's page">
+        Open {hotkey && <Kbd>O</Kbd>}
+      </a>
+    );
+  }
   if (!run.itermSessionId) return <CopyButton text={resumeCommand(run)} label="Copy resume" className={className} />;
   return (
     <button className={className} title="Bring this session's iTerm tab to the front" onClick={async () => onError(await api.focusTab(run.sessionId))}>
@@ -505,7 +512,7 @@ function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd:
   );
 }
 
-function Composer({ run, onError, focusSignal }: { run: Run; onError: (m: string | null) => void; focusSignal: number }) {
+function Composer({ run, onError, focusSignal }: { run: HistoryRun; onError: (m: string | null) => void; focusSignal: number }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [sentAt, setSentAt] = useState<number | null>(null);
@@ -1100,25 +1107,101 @@ function NotifyButton({ state, onEnable, onMute }: { state: NotifyState; onEnabl
   );
 }
 
-/** Opens a plain pi in a new iTerm tab, in the home folder, with no ticket context. */
-function NewConversation({ signal }: { signal: number }) {
-  const [busy, setBusy] = useState(false);
+// ---- conversations ------------------------------------------------------------------
+
+/** A plain pi with no ticket context, run headless: this page is where you talk to it. */
+function NewConversationForm() {
+  const [message, setMessage] = useState("");
+  const [cwd, setCwd] = useState("~");
+  const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const start = useCallback(async () => {
-    setBusy(true);
-    setError(await api.newConversation());
-    setBusy(false);
-  }, []);
-  useEffect(() => {
-    if (signal) start();
-  }, [signal, start]);
+  const start = async () => {
+    if (!message.trim() || starting) return;
+    setStarting(true);
+    try {
+      const id = await api.newConversation(message, cwd);
+      location.hash = `#/c:${encodeURIComponent(id)}`;
+    } catch (err) {
+      setError((err as Error).message);
+      setStarting(false);
+    }
+  };
   return (
-    <div className="new-conversation">
-      <button className="btn" onClick={start} disabled={busy} title="Open pi in a new iTerm tab, with no ticket context">
-        {busy ? "Opening…" : "+ New conversation"} <Kbd>C</Kbd>
-      </button>
-      {error && <p className="new-conversation-error">{error}</p>}
-    </div>
+    <article className="workspace">
+      <header className="ws-head">
+        <h1>New conversation</h1>
+        <span className="meta">A plain pi with no ticket context. It runs without a terminal, and you talk to it on this page.</span>
+      </header>
+      {error && <div className="toast">{error}</div>}
+      <div className="composer">
+        <textarea
+          autoFocus
+          rows={5}
+          value={message}
+          placeholder="What do you want to do?"
+          onChange={(e) => setMessage(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              start();
+            }
+          }}
+        />
+        <div className="composer-bar">
+          <label className="folder">
+            <span className="meta">in</span>
+            <input value={cwd} onChange={(e) => setCwd(e.target.value)} spellCheck={false} />
+          </label>
+          <button className="btn primary" onClick={start} disabled={starting || !message.trim() || !cwd.trim()}>
+            {starting ? "Starting…" : "Start"} <Kbd>⌘↵</Kbd>
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function ConversationView({ sessionId, data, now }: { sessionId: string; data: Dashboard; now: number }) {
+  const run = useMemo(() => [...data.myTickets, ...data.otherTickets].flatMap((g) => g.runs).concat(data.unlinkedRuns).find((r) => r.sessionId === sessionId), [data, sessionId]);
+  const [error, setError] = useState<string | null>(null);
+  const end = useRef<HTMLDivElement>(null);
+  // New turns land at the bottom, next to the reply box.
+  // A block body: Chrome's scrollIntoView returns a Promise, which React would call as a cleanup.
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "end" });
+  }, [run?.lastActivityAt]);
+  return (
+    <article className="workspace">
+      <header className="ws-head">
+        <h1>{run ? runTitle(run) : "New conversation"}</h1>
+        <div className="ws-meta">
+          {run ? (
+            <>
+              <Dot tone={runTone(run)} pulse={run.status === "working"} />
+              <span className="meta">
+                {statusText(run, now)} · {dirLabel(run.cwd)} · {plural(run.userMessageCount, "prompt")}
+              </span>
+              {run.headless ? (
+                <button className="btn ghost small" title="Stop this pi process. Copy resume continues it in a terminal." onClick={async () => setError(await api.endConversation(sessionId))}>
+                  End conversation
+                </button>
+              ) : (
+                <OpenTab run={run} onError={setError} className="btn ghost small" />
+              )}
+            </>
+          ) : (
+            <span className="meta">Starting pi…</span>
+          )}
+        </div>
+      </header>
+      {error && <div className="toast">{error}</div>}
+      {/* The run shows once pi saved the first message; until then there is no chat to load. */}
+      {run && <Chat sessionId={sessionId} refreshKey={run.lastActivityAt + run.status} />}
+      {run?.status === "working" && <p className="meta">The agent is working…</p>}
+      {run && run.status !== "finished" && <Composer run={run} onError={setError} focusSignal={0} />}
+      {run?.status === "finished" && <p className="meta">This conversation ended. Copy resume continues it in a terminal.</p>}
+      <div ref={end} />
+    </article>
   );
 }
 
@@ -1129,11 +1212,11 @@ const KEYS: [string, string][] = [
   ["K / ↑", "Previous item"],
   ["E", "Done for now (comes back when something changes)"],
   ["R", "Reply to the agent"],
-  ["O", "Open the agent's iTerm tab"],
+  ["O", "Open the agent's iTerm tab, or its page if it has no tab"],
   ["S", "Draft next steps"],
   ["N", "Add a note"],
   ["A", "Start a new agent with this ticket's context"],
-  ["C", "Start a new conversation with pi, with no context"],
+  ["C", "Start a new conversation with pi on its own page, with no context"],
   ["⌘↵", "Send the reply"],
   ["Esc", "Leave the reply box"],
   ["?", "Show or hide this help"],
@@ -1161,12 +1244,17 @@ function Help({ onClose }: { onClose: () => void }) {
 
 // ---- page ---------------------------------------------------------------------------
 
-type View = "board" | "prs" | "history";
+type View = "board" | "prs" | "history" | "conversation";
 
-/** `#/prs` and `#/history` are views. Anything else is the board, and `#/t:KEY` or `#/r:ID` selects an entry on it. */
+/**
+ * `#/prs` and `#/history` are views. `#/c` starts a conversation and `#/c:ID` shows one.
+ * Anything else is the board, and `#/t:KEY` or `#/r:ID` selects an entry on it.
+ */
 function parseHash(): { view: View; id: string | null } {
   const path = decodeURIComponent(location.hash.slice(2));
-  return path === "prs" || path === "history" ? { view: path, id: null } : { view: "board", id: path || null };
+  if (path === "prs" || path === "history") return { view: path, id: null };
+  if (path === "c" || path.startsWith("c:")) return { view: "conversation", id: path.slice(2) || null };
+  return { view: "board", id: path || null };
 }
 
 export function App() {
@@ -1175,12 +1263,12 @@ export function App() {
   const now = useNow(1_000);
   const snoozed = useSnoozed();
   const [view, setView] = useState<View>(() => parseHash().view);
-  const [selectedId, setSelectedId] = useState<string | null>(() => parseHash().id);
+  const [selectedId, setSelectedId] = useState<string | null>(() => (parseHash().view === "board" ? parseHash().id : null));
+  const [conversationId, setConversationId] = useState<string | null>(() => (parseHash().view === "conversation" ? parseHash().id : null));
   const [help, setHelp] = useState(false);
   const [focusSignal, setFocusSignal] = useState(0);
   const [noteSignal, setNoteSignal] = useState(0);
   const [agentSignal, setAgentSignal] = useState(0);
-  const [conversationSignal, setConversationSignal] = useState(0);
 
   const subjects = useMemo(() => (data ? buildSubjects(data) : new Map<string, Subject>()), [data]);
   const all = [...subjects.values()];
@@ -1203,6 +1291,7 @@ export function App() {
       setView(view);
       // The other views keep the board's selection, so going back lands on the same entry.
       if (view === "board") setSelectedId(id);
+      if (view === "conversation") setConversationId(id);
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
@@ -1243,10 +1332,11 @@ export function App() {
       else if (e.key === "r") setFocusSignal((n) => n + 1);
       else if (e.key === "n" && selected?.ticket) setNoteSignal((n) => n + 1);
       else if (e.key === "a" && selected?.ticket) setAgentSignal((n) => n + 1);
-      else if (e.key === "c") setConversationSignal((n) => n + 1);
+      else if (e.key === "c") location.hash = "#/c";
       else if (e.key === "o" && selected) {
         const run = primaryRun(selected);
-        if (run?.itermSessionId) api.focusTab(run.sessionId);
+        if (run?.headless) location.hash = `#/c:${encodeURIComponent(run.sessionId)}`;
+        else if (run?.itermSessionId) api.focusTab(run.sessionId);
       } else if (e.key === "s" && selected?.ticket) {
         const st = data?.summaries[selected.ticket.ticket.key]?.latest;
         if (st?.status !== "in_progress") api.summarize(selected.ticket.ticket.key, false);
@@ -1327,10 +1417,18 @@ export function App() {
         <main className="main">
           <HistoryView data={data} now={now} />
         </main>
+      ) : view === "conversation" ? (
+        <main className="main">
+          {conversationId ? <ConversationView key={conversationId} sessionId={conversationId} data={data} now={now} /> : <NewConversationForm />}
+        </main>
       ) : (
         <div className="columns">
           <nav className="rail">
-            <NewConversation signal={conversationSignal} />
+            <div className="new-conversation">
+              <a className="btn" href="#/c" title="Start a plain pi with no ticket context, and talk to it on its own page">
+                + New conversation <Kbd>C</Kbd>
+              </a>
+            </div>
             <RailSection title="Up next" count={queue.length}>
               {queue.map((s, i) => (
                 <QueueItem key={s.id} s={s} rank={i + 1} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
