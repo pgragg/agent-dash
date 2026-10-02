@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, watch } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
-import { extname, join, normalize } from "node:path";
-import type { PullRequest, SourceHealth, Ticket } from "../shared/types.ts";
+import { basename, dirname, extname, join, normalize } from "node:path";
+import type { Dashboard, PullRequest, SourceHealth, Ticket } from "../shared/types.ts";
 import { config } from "./config.ts";
 import { focusItermSession } from "./iterm.ts";
 import { buildDashboard, otherTicketKeys } from "./model.ts";
@@ -11,6 +11,8 @@ import { fetchMyPrs } from "./sources/github.ts";
 import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
 import { SessionIndex } from "./sources/sessions.ts";
 import { readReportedStatuses } from "./sources/status.ts";
+import * as summaryDb from "./summaries/db.ts";
+import { reconcile, requestSummary } from "./summaries/runner.ts";
 
 const WEB_DIST = new URL("../web/dist/", import.meta.url).pathname;
 const EXTENSION_PATH = join(homedir(), ".pi/agent/extensions/agent-dash-status.ts");
@@ -84,6 +86,14 @@ async function dashboard(force: boolean) {
     }
   }
 
+  reconcile();
+  const summaries: Dashboard["summaries"] = {};
+  // pid and work dir stay on the server.
+  const pub = ({ pid: _pid, workDir: _dir, ...rest }: summaryDb.SummaryRecord) => rest;
+  for (const [key, { latest, lastDone }] of summaryDb.summariesByTicket()) {
+    summaries[key] = { latest: pub(latest), lastDone: lastDone ? pub(lastDone) : null };
+  }
+
   const jira = !myTickets.health.ok ? myTickets.health : othersHealth.ok ? myTickets.health : othersHealth;
   return buildDashboard({
     sessions: parsed,
@@ -95,6 +105,7 @@ async function dashboard(force: boolean) {
     recentDays: config.recentDays,
     sources: { jira, github: prs.health, sessions: sessionsHealth },
     extensionInstalled: existsSync(EXTENSION_PATH),
+    summaries,
     jiraServer: config.jira.server,
   });
 }
@@ -116,6 +127,10 @@ function broadcast(): void {
 mkdirSync(config.statusDir, { recursive: true });
 watch(config.sessionsDir, { recursive: true }, broadcast);
 watch(config.statusDir, broadcast);
+// A summary run saves into SQLite from its own process; WAL writes touch agent-dash.db-wal.
+watch(dirname(summaryDb.DB_PATH), (_e, file) => {
+  if (file?.startsWith(basename(summaryDb.DB_PATH))) broadcast();
+});
 // Time alone changes a status: a pid dies, or a wait crosses a threshold.
 setInterval(broadcast, 30_000).unref();
 
@@ -141,6 +156,16 @@ const server = createServer(async (req, res) => {
     if (url.pathname === "/api/dashboard") {
       const body = JSON.stringify(await dashboard(url.searchParams.has("refresh")));
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(body);
+    } else if (url.pathname === "/api/summaries" && req.method === "POST") {
+      // Same CSRF guard as /api/focus: this endpoint starts a paid model run.
+      if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
+      const key = url.searchParams.get("ticket") ?? "";
+      const d = await dashboard(false);
+      const group = [...d.myTickets, ...d.otherTickets].find((g) => g.ticket.key === key);
+      if (!group) return void res.writeHead(404, { "Content-Type": "application/json" }).end(JSON.stringify({ error: `unknown ticket ${key}` }));
+      const rec = await requestSummary(group, { force: url.searchParams.has("force"), onChange: broadcast });
+      broadcast();
+      res.writeHead(202, { "Content-Type": "application/json" }).end(JSON.stringify({ id: rec.id, status: rec.status }));
     } else if (url.pathname === "/api/focus" && req.method === "POST") {
       // A custom header forces a CORS preflight, which this server never answers,
       // so another web page cannot make the browser call this endpoint.

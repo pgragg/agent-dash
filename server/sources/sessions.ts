@@ -178,6 +178,31 @@ export function parseSession(raw: string, sessionFile: string, mtime: Date, tick
 }
 
 /**
+ * The conversation without tool traffic: your prompts and the agent's replies, newest kept
+ * when it is too long. A summary agent reads this instead of a multi-megabyte log.
+ */
+export function digestSession(raw: string, maxChars: number): string {
+  const turns: string[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line) continue;
+    let entry: any;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (entry.type !== "message") continue;
+    const role = entry.message?.role;
+    if (role !== "user" && role !== "assistant") continue;
+    const text = textOf(entry.message.content).trim();
+    if (text) turns.push(`${role === "user" ? "USER" : "AGENT"} (${entry.timestamp ?? "?"}): ${text}`);
+  }
+  let out = turns.join("\n\n");
+  if (out.length > maxChars) out = `[…earlier turns cut…]\n${out.slice(out.length - maxChars)}`;
+  return out;
+}
+
+/**
  * Status from the log alone, for sessions that the extension does not report on.
  * The log cannot say whether the pi process is still open, so time decides.
  */

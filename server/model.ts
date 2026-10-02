@@ -13,6 +13,7 @@ export interface ModelInput {
   recentDays: number;
   sources: Dashboard["sources"];
   extensionInstalled: boolean;
+  summaries?: Dashboard["summaries"];
   isAlive?: (pid: number) => boolean;
   jiraServer: string;
 }
@@ -156,6 +157,7 @@ export function buildDashboard(input: ModelInput): Dashboard {
     otherTickets,
     unlinkedRuns,
     counts,
+    summaries: input.summaries ?? {},
     sources: input.sources,
     extensionInstalled: input.extensionInstalled,
   };

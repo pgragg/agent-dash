@@ -19,7 +19,7 @@ body { margin: 0; }
 a { color: inherit; }
 code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: #0000000d; padding: 1px 4px; border-radius: 4px; }
 
-.page { max-width: 1100px; margin: 0 auto; padding: 16px 24px 80px; }
+.page { max-width: 1240px; margin: 0 auto; padding: 16px 24px 80px; }
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
 .spacer { flex: 1; }
@@ -49,7 +49,7 @@ button { font: inherit; border: 1px solid var(--line); background: var(--card); 
 
 /* Focus queue */
 .focus { list-style: none; padding: 0; margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
-.focus-item { display: grid; grid-template-columns: 70px 1fr 64px 90px 28px 32px 92px; gap: 10px; padding: 7px 12px; border-top: 1px solid var(--line); align-items: baseline; }
+.focus-item { display: grid; grid-template-columns: 70px 1fr 64px 90px 28px 32px 92px 118px; gap: 10px; padding: 7px 12px; border-top: 1px solid var(--line); align-items: baseline; }
 .focus-cell { font-size: 12px; white-space: nowrap; }
 
 .focus-updated { color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -107,3 +107,11 @@ button { font: inherit; border: 1px solid var(--line); background: var(--card); 
 .created-prs[open] { display: flex; flex-wrap: wrap; gap: 8px; }
 .open-tab { color: var(--working); font-weight: 500; }
 .focus-error { color: var(--bad); }
+
+.summarizing { color: var(--working); animation: pulse 1.6s ease-in-out infinite; }
+.stuck { color: var(--bad); }
+@keyframes pulse { 50% { opacity: .45; } }
+.summary-panel { grid-column: 2 / -1; background: #fafaf8; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin-top: 4px; }
+.summary-text { font-size: 13px; line-height: 1.5; }
+.summary-text > div:empty { height: 6px; }
+.summary-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--muted); margin-top: 6px; }

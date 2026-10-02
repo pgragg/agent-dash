@@ -93,6 +93,29 @@ Higher scores come first. The rules are in `server/attention.ts`.
 
 Draft PRs score half. Tickets that are On Hold, Blocked, Waiting or Deferred score 25 less.
 
+## Next-steps summaries
+
+Each Focus row with a ticket has a **next steps** link. **summarize** starts a headless pi run that writes a very short summary for the ticket: its state, 1 to 4 next steps with who acts, and its blockers.
+
+1. The server adds an `in_progress` row to SQLite (`~/.agent-dash/agent-dash.db`, table `summaries`) with the ticket and `requested_at`.
+2. It writes `~/.agent-dash/summaries/<id>/context.md` with what it already knows: ticket fields, linked PRs, and a digest of each pi session about the ticket (prompts and replies, no tool output, newest first within a 60k-character budget).
+3. It starts `pi -p --no-extensions --tools read,bash --session-dir ~/.agent-dash/summary-sessions`. The separate session folder keeps summary runs out of the ticket's run list. The prompt is read-only, and tells the run to read the context, then `jira issue view --comments`, `gh pr view --comments`, and `scripts/slack-search.ts`.
+4. The run saves its summary with `node scripts/save-summary.ts <id> < summary.md`. That sets `status = done` and `generated_at`.
+
+| State on the page | Meaning |
+|---|---|
+| summarize | No summary yet |
+| summarizing 2m… | A run is in progress. The last finished summary stays readable meanwhile. |
+| summary ▸ | Expands the summary, with when it was requested and generated, and a re-request link |
+| stuck · re-request | In progress for more than 30 minutes. Re-request stops the old run and starts a new one. |
+| failed · retry | The run ended without a summary. Hover for the error. |
+
+If a run exits without saving, the server takes its last reply (pi -p prints it) as the summary. If there is no reply, it marks the row failed. The server also stops a run after 30 minutes. Runs are detached and write to log files, so a server restart does not stop them. On the next page load, the server checks rows whose pid is gone.
+
+`scripts/slack-search.ts "<query>"` searches Slack read-only. It opens Slack once with the saved login in `~/pi/secrets/slack/` and calls Slack's `search.messages` from inside the page, because clicking through the search box from a headless browser is unreliable.
+
+Optional: `AGENT_DASH_SUMMARY_MODEL` and `AGENT_DASH_SUMMARY_THINKING` choose the model and thinking level of summary runs.
+
 ## Configuration
 
 Environment variables, all optional: `AGENT_DASH_PORT`, `AGENT_DASH_SESSIONS_DIR`, `AGENT_DASH_STATUS_DIR`, `AGENT_DASH_PROJECTS` (default `FSDK|EFSUP`), `AGENT_DASH_EXCLUDE_PROJECTS` (default `FSM`), `AGENT_DASH_RECENT_DAYS` (default 14), `JIRA_SERVER`, `JIRA_LOGIN`, `JIRA_API_TOKEN`.

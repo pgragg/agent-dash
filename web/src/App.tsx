@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { AttentionItem, Dashboard, PullRequest, Run, SourceHealth, TicketGroup } from "../../shared/types.ts";
+import type { AttentionItem, Dashboard, PullRequest, Run, SourceHealth, TicketGroup, TicketSummaryState } from "../../shared/types.ts";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -288,8 +288,91 @@ const KIND_LABEL: Record<AttentionItem["kind"], string> = {
   stalled: "stalled",
 };
 
-function FocusRow({ item, now }: { item: AttentionItem; now: number }) {
+// ---- next-steps summaries ------------------------------------------------------------
+
+/** Same limit as the server: after this, a request counts as stuck. */
+const SUMMARY_STALE_MS = 30 * 60_000;
+
+async function requestSummary(ticket: string, force: boolean): Promise<string | null> {
+  const res = await fetch(`/api/summaries?ticket=${encodeURIComponent(ticket)}${force ? "&force" : ""}`, { method: "POST", headers: { "X-Agent-Dash": "1" } });
+  if (res.ok) return null;
+  const body = await res.json().catch(() => ({}));
+  return body.error ?? `failed (${res.status})`;
+}
+
+/** Just enough markdown for a summary: **bold**, and line breaks kept. */
+function SummaryText({ text }: { text: string }) {
+  return (
+    <div className="summary-text">
+      {text.split("\n").map((line, i) => (
+        <div key={i}>{line.split(/(\*\*[^*]+\*\*)/g).map((part, j) => (part.startsWith("**") && part.endsWith("**") ? <strong key={j}>{part.slice(2, -2)}</strong> : part))}</div>
+      ))}
+    </div>
+  );
+}
+
+type SummaryView = "none" | "running" | "stuck" | "failed" | "done";
+
+function summaryView(state: TicketSummaryState | undefined, now: number): SummaryView {
+  if (!state) return "none";
+  const { latest } = state;
+  if (latest.status === "in_progress") return now - Date.parse(latest.requestedAt) > SUMMARY_STALE_MS ? "stuck" : "running";
+  if (latest.status === "failed") return state.lastDone ? "done" : "failed";
+  return "done";
+}
+
+function SummaryCell({ ticket, state, now, open, onToggle, onError }: {
+  ticket: string;
+  state: TicketSummaryState | undefined;
+  now: number;
+  open: boolean;
+  onToggle: () => void;
+  onError: (message: string | null) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const ask = async (force: boolean) => {
+    setBusy(true);
+    onError(await requestSummary(ticket, force));
+    setBusy(false);
+  };
+  const view = summaryView(state, now);
+  if (busy) return <span className="muted">starting…</span>;
+  if (view === "none") return <button className="link-button" title="Start a pi run that writes next steps for this ticket" onClick={() => ask(false)}>summarize</button>;
+  if (view === "running") return <button className="link-button summarizing" onClick={onToggle} title="A pi run is writing the summary">summarizing {sinceLabel(state!.latest.requestedAt, now).replace(" ago", "")}…</button>;
+  if (view === "stuck") return <button className="link-button stuck" title="Running for more than 30 minutes" onClick={() => ask(true)}>stuck · re-request</button>;
+  if (view === "failed") return <button className="link-button stuck" title={state!.latest.error ?? ""} onClick={() => ask(true)}>failed · retry</button>;
+  return <button className="link-button" onClick={onToggle}>summary {open ? "▾" : "▸"}</button>;
+}
+
+function SummaryPanel({ ticket, state, now, onError }: { ticket: string; state: TicketSummaryState; now: number; onError: (message: string | null) => void }) {
+  const { latest, lastDone } = state;
+  const shown = latest.status === "done" ? latest : lastDone;
+  const view = summaryView(state, now);
+  return (
+    <div className="summary-panel">
+      {shown?.summary ? <SummaryText text={shown.summary} /> : <div className="muted">No summary yet.</div>}
+      <div className="summary-meta">
+        {shown && (
+          <>
+            <span title={shown.requestedAt}>requested {sinceLabel(shown.requestedAt, now)}</span>
+            {shown.generatedAt && <span title={shown.generatedAt}>generated {sinceLabel(shown.generatedAt, now)}</span>}
+          </>
+        )}
+        {view === "running" && <span className="summarizing">a new summary is in progress ({sinceLabel(latest.requestedAt, now).replace(" ago", "")})</span>}
+        {latest.status === "failed" && <span className="stuck" title={latest.error ?? ""}>the last request failed</span>}
+        {(view === "done" || view === "stuck") && (
+          <button className="link-button" onClick={async () => onError(await requestSummary(ticket, view === "stuck"))}>
+            re-request
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FocusRow({ item, now, summary }: { item: AttentionItem; now: number; summary: TicketSummaryState | undefined }) {
   const [tabError, setTabError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
   return (
     <li className={`focus-item kind-${item.kind}`}>
       <span className="focus-kind">{KIND_LABEL[item.kind]}</span>
@@ -314,12 +397,16 @@ function FocusRow({ item, now }: { item: AttentionItem; now: number }) {
       </span>
       <span className="focus-cell">{item.sessionId && <a href={`#run-${item.sessionId}`}>run</a>}</span>
       <span className="focus-cell">{item.run && <TabOrResume run={item.run} onError={setTabError} />}</span>
+      <span className="focus-cell">
+        {item.ticketKey && <SummaryCell ticket={item.ticketKey} state={summary} now={now} open={open} onToggle={() => setOpen(!open)} onError={setTabError} />}
+      </span>
       {tabError && <span className="focus-error focus-row-error">{tabError}</span>}
+      {open && item.ticketKey && summary && <SummaryPanel ticket={item.ticketKey} state={summary} now={now} onError={setTabError} />}
     </li>
   );
 }
 
-function FocusNext({ items }: { items: AttentionItem[] }) {
+function FocusNext({ items, summaries }: { items: AttentionItem[]; summaries: Dashboard["summaries"] }) {
   const [all, setAll] = useState(false);
   const now = useNow(10_000);
   if (items.length === 0) return <p className="muted">Nothing needs you. The agents are working or done.</p>;
@@ -335,9 +422,10 @@ function FocusNext({ items }: { items: AttentionItem[] }) {
           <span className="focus-cell">PR</span>
           <span className="focus-cell">run</span>
           <span className="focus-cell">jump</span>
+          <span className="focus-cell">next steps</span>
         </li>
         {shown.map((a, i) => (
-          <FocusRow key={`${a.kind}-${a.sessionId ?? a.prUrl ?? a.ticketKey}-${i}`} item={a} now={now} />
+          <FocusRow key={`${a.kind}-${a.sessionId ?? a.prUrl ?? a.ticketKey}-${i}`} item={a} now={now} summary={a.ticketKey ? summaries[a.ticketKey] : undefined} />
         ))}
       </ol>
       {items.length > shown.length && (
@@ -414,7 +502,7 @@ export function App() {
       )}
 
       <h2>Focus next</h2>
-      <FocusNext items={data.attention} />
+      <FocusNext items={data.attention} summaries={data.summaries} />
 
       <h2>
         My tickets <span className="muted">({data.myTickets.length})</span>

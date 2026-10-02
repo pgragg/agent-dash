@@ -91,6 +91,22 @@ export interface AttentionItem {
   run?: Run;
 }
 
+export interface TicketSummary {
+  id: number;
+  ticket: string;
+  status: "in_progress" | "done" | "failed";
+  requestedAt: string;
+  generatedAt: string | null;
+  summary: string | null;
+  error: string | null;
+}
+
+/** The newest request (any status), and the newest finished summary to show meanwhile. */
+export interface TicketSummaryState {
+  latest: TicketSummary;
+  lastDone: TicketSummary | null;
+}
+
 export interface TicketGroup {
   ticket: Ticket;
   /** Oldest first. */
@@ -114,6 +130,8 @@ export interface Dashboard {
   /** Recent runs that link to no ticket. Newest first. */
   unlinkedRuns: Run[];
   counts: Record<RunStatus, number>;
+  /** Next-steps summaries by ticket key. */
+  summaries: Record<string, TicketSummaryState>;
   sources: { jira: SourceHealth; github: SourceHealth; sessions: SourceHealth };
   extensionInstalled: boolean;
 }
