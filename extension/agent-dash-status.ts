@@ -47,6 +47,8 @@ interface Dialog {
   options?: string[];
   placeholder?: string;
   prefill?: string;
+  /** The prefill was too long for the status file, so the page must not send it back. */
+  prefillCut?: boolean;
   since: string;
 }
 
@@ -174,7 +176,10 @@ export default function (pi: ExtensionAPI) {
           if (method === "select" && Array.isArray(second)) d.options = second.slice(0, 30).map((o) => cut(String(o), 200));
           if (method === "confirm" && typeof second === "string") d.message = cut(second, 1000);
           if (method === "input" && typeof second === "string") d.placeholder = cut(second, 200);
-          if (method === "editor" && typeof second === "string") d.prefill = second.slice(0, 4000);
+          if (method === "editor" && typeof second === "string") {
+            d.prefill = second.slice(0, 4000);
+            if (second.length > 4000) d.prefillCut = true;
+          }
           // select, confirm and input take { signal } third; pi closes the dialog when it fires.
           const stop = new AbortController();
           if (method !== "editor") {

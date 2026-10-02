@@ -150,7 +150,10 @@ function readBody(req: IncomingMessage, max: number): Promise<string> {
     let body = "";
     req.on("data", (chunk) => {
       body += chunk;
-      if (body.length > max) reject(new Error("request body too large"));
+      if (body.length > max) {
+        reject(new Error("request body too large"));
+        req.destroy();
+      }
     });
     req.on("end", () => resolve(body));
     req.on("error", reject);

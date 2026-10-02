@@ -11,8 +11,13 @@ import { age, api, dirLabel, post } from "./lib.tsx";
 const q = (sessionId: string) => `session=${encodeURIComponent(sessionId)}`;
 
 const controlApi = {
-  stop: (sessionId: string) => post(`/api/stop?${q(sessionId)}`),
-  answer: (sessionId: string, answer: { value: string } | { confirmed: boolean } | { cancelled: true }) => post(`/api/dialog?${q(sessionId)}`, answer),
+  /** Resolves to an error, or to a note when the stop cannot close everything. */
+  stop: async (sessionId: string): Promise<string | null> => {
+    const res = await fetch(`/api/stop?${q(sessionId)}`, { method: "POST", headers: { "X-Agent-Dash": "1" } });
+    const json = await res.json().catch(() => ({}));
+    return res.ok ? (json.note ?? null) : (json.error ?? `failed (${res.status})`);
+  },
+  answer: (sessionId: string, answer: { index: number } | { value: string } | { confirmed: boolean } | { cancelled: true }) => post(`/api/dialog?${q(sessionId)}`, answer),
 };
 
 /** The tool that runs now, and an open dialog. `working` shows while the agent works with no tool. */
@@ -56,8 +61,8 @@ function DialogCard({ run, dialog, now, onError }: { run: Run; dialog: RunDialog
       ) : (
         <div className="dialog-actions">
           {dialog.method === "select" &&
-            (dialog.options ?? []).map((o) => (
-              <button key={o} className="btn small" disabled={sending} onClick={() => answer({ value: o })}>
+            (dialog.options ?? []).map((o, index) => (
+              <button key={index} className="btn small" disabled={sending} onClick={() => answer({ index })}>
                 {o}
               </button>
             ))}
@@ -71,7 +76,8 @@ function DialogCard({ run, dialog, now, onError }: { run: Run; dialog: RunDialog
               </button>
             </>
           )}
-          {(dialog.method === "input" || dialog.method === "editor") && (
+          {dialog.prefillCut && <p className="meta">The text is too long to edit here. Dismiss it, or answer it in the session.</p>}
+          {(dialog.method === "input" || dialog.method === "editor") && !dialog.prefillCut && (
             <>
               <textarea rows={dialog.method === "editor" ? 6 : 2} value={text} placeholder={dialog.placeholder} onChange={(e) => setText(e.target.value)} />
               <button className="btn small primary" disabled={sending} onClick={() => answer({ value: text })}>

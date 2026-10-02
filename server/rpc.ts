@@ -18,7 +18,8 @@ export interface UiRequest {
   prefill?: string;
 }
 
-export type UiAnswer = { value: string } | { confirmed: boolean } | { cancelled: true };
+/** A select is answered by option index: the status file shows options cut to one line. */
+export type UiAnswer = { value: string } | { index: number } | { confirmed: boolean } | { cancelled: true };
 
 const DIALOGS = new Set(["select", "confirm", "input", "editor"]);
 
@@ -74,8 +75,12 @@ export function uiResponse(req: UiRequest, answer: UiAnswer): { line: string } |
     if (!("confirmed" in answer) || typeof answer.confirmed !== "boolean") return { error: "a confirm dialog takes yes or no" };
     return { line: JSON.stringify({ ...base, confirmed: answer.confirmed }) };
   }
+  if (req.method === "select") {
+    const value = "index" in answer ? req.options?.[answer.index] : "value" in answer && req.options?.includes(answer.value) ? answer.value : undefined;
+    if (typeof value !== "string") return { error: "not one of the options" };
+    return { line: JSON.stringify({ ...base, value }) };
+  }
   if (!("value" in answer) || typeof answer.value !== "string") return { error: "this dialog takes a value" };
-  if (req.method === "select" && !req.options?.includes(answer.value)) return { error: "not one of the options" };
   return { line: JSON.stringify({ ...base, value: answer.value }) };
 }
 

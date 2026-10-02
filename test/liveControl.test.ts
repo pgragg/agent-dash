@@ -159,6 +159,10 @@ test("the response line fits the dialog, and a select answer must be one of its 
   const select = JSON.parse(req("s", "select", { options: ["Allow", "Block"] })) as UiRequest;
   assert.deepEqual(uiResponse(select, { value: "Allow" }), { line: '{"type":"extension_ui_response","id":"s","value":"Allow"}' });
   assert.ok("error" in uiResponse(select, { value: "rm -rf" }));
+  // The page answers by index, because it shows options cut to one line.
+  const long = JSON.parse(req("l", "select", { options: ["Allow\n(dangerous)", "Block"] })) as UiRequest;
+  assert.deepEqual(uiResponse(long, { index: 0 }), { line: JSON.stringify({ type: "extension_ui_response", id: "l", value: "Allow\n(dangerous)" }) });
+  assert.ok("error" in uiResponse(long, { index: 2 }));
   const confirm = JSON.parse(req("c")) as UiRequest;
   assert.deepEqual(uiResponse(confirm, { confirmed: false }), { line: '{"type":"extension_ui_response","id":"c","confirmed":false}' });
   assert.ok("error" in uiResponse(confirm, { value: "yes" }));

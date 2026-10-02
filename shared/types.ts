@@ -65,6 +65,8 @@ export interface RunDialog {
   options?: string[];
   placeholder?: string;
   prefill?: string;
+  /** The prefill was too long for the status file: sending the page's copy back would lose text. */
+  prefillCut?: boolean;
   since: string;
 }
 

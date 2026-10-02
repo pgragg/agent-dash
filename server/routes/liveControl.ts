@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { config } from "../config.ts";
 import { newestOpenDialog, readLogTail, sameDialog, type UiAnswer, uiResponse, writeFifoLine } from "../rpc.ts";
+import type { RunDialog } from "../../shared/types.ts";
 import { isAlive, readReportedStatuses, takesControls } from "../sources/status.ts";
 
 /** Talk to a live session from the page: reply, steer, stop, and answer an extension dialog. */
@@ -73,7 +74,10 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   if (url.pathname === "/api/stop") {
     if (!takesControls(status)) return done(409, { error: "type /reload in the session to stop it from here" });
     writeInbox(sessionId, "abort", "");
-    return done(202, { ok: true });
+    // An editor dialog takes no abort signal, so Stop cannot close it from the extension.
+    if (status.dialog?.method !== "editor") return done(202, { ok: true });
+    if (status.mode === "rpc" && (await answerOpenDialog(sessionId, status.dialog, { cancelled: true })) === null) return done(202, { ok: true });
+    return done(202, { ok: true, note: "The agent stops when the editor dialog closes. Close it in the session's tab." });
   }
 
   // Only a headless run reads its stdin from a FIFO; a terminal dialog is answered in iTerm.
@@ -82,18 +86,24 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   // The cap keeps an answer far below the pipe buffer, so the FIFO write never waits.
   const answer = await body<UiAnswer>(32_000);
   if (!answer) return done(400, { error: "the answer is not JSON" });
+  const err = await answerOpenDialog(sessionId, status.dialog, answer);
+  return err ? done(err.code, { error: err.error }) : done(202, { ok: true });
+}
+
+/** Write the answer to the dialog that the status file names. Returns null on success. */
+async function answerOpenDialog(sessionId: string, open: RunDialog, answer: UiAnswer): Promise<{ code: number; error: string } | null> {
   const log = await readLogTail(join(config.conversationsDir, `${sessionId}.log`)).catch(() => "");
   const request = newestOpenDialog(log, answered);
-  // The status file says which dialog is open; never answer a different one.
-  if (!request || !sameDialog(request, status.dialog)) return done(409, { error: "the dialog is gone" });
+  // Never answer a different dialog than the one the status file says is open.
+  if (!request || !sameDialog(request, open)) return { code: 409, error: "the dialog is gone" };
   const out = uiResponse(request, answer);
-  if ("error" in out) return done(400, out);
+  if ("error" in out) return { code: 400, error: out.error };
   try {
     writeFifoLine(join(config.conversationsDir, `${sessionId}.in`), out.line);
   } catch {
-    return done(409, { error: "the session no longer reads its input" });
+    return { code: 409, error: "the session no longer reads its input" };
   }
   answered.add(request.id);
   if (answered.size > 200) answered.delete(answered.values().next().value!);
-  return done(202, { ok: true });
+  return null;
 }

@@ -82,3 +82,27 @@ test("a dialog is answered once, through the FIFO, only in an rpc session and on
   }
   assert.equal(readFileSync(join(tmp, "conv", `${id}.log`), "utf8").includes("d1"), true);
 });
+
+test("Stop cancels an editor dialog through the FIFO in rpc, and says so when it cannot in a terminal", async () => {
+  const dialog = { method: "editor", title: "Edit", since: new Date().toISOString() };
+  status("tuieditor1", { version: 2, mode: "tui", dialog });
+  const tui = await fetch(`${base}/api/stop?session=tuieditor1`, { method: "POST", headers: { "X-Agent-Dash": "1" } });
+  assert.equal(tui.status, 202);
+  assert.match(((await tui.json()) as { note?: string }).note ?? "", /editor dialog/);
+
+  const id = "rpceditor1";
+  status(id, { version: 2, mode: "rpc", dialog });
+  writeFileSync(join(tmp, "conv", `${id}.log`), `${JSON.stringify({ type: "extension_ui_request", id: "e1", method: "editor", title: "Edit", prefill: "x" })}\n`);
+  const fifo = join(tmp, "conv", `${id}.in`);
+  execFileSync("mkfifo", [fifo]);
+  const fd = openSync(fifo, "r+");
+  try {
+    const rpc = await fetch(`${base}/api/stop?session=${id}`, { method: "POST", headers: { "X-Agent-Dash": "1" } });
+    assert.deepEqual(await rpc.json(), { ok: true });
+    const buf = Buffer.alloc(200);
+    assert.equal(buf.subarray(0, readSync(fd, buf)).toString(), '{"type":"extension_ui_response","id":"e1","cancelled":true}\n');
+  } finally {
+    closeSync(fd);
+  }
+  assert.deepEqual(inbox(id).map((f) => f.split(".").pop()), ["abort"]);
+});
