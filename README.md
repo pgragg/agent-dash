@@ -19,6 +19,10 @@ pnpm build && pnpm start # http://127.0.0.1:7777
 
 ## The page
 
+The navbar at the top switches between two views: **Board** (`#/`, the queue and workspace below) and **PRs** (`#/prs`).
+
+### Board
+
 - **Left: the queue.** One entry per ticket (or per ticket-less run or PR), ranked by its most urgent signal (see [Queue ranking](#queue-ranking)). Under it: **Waiting on others** (only context left, such as a PR out for review), **Done in Jira** (closed tickets that still have agents open, tagged green **done**; never in the queue), **Agents at work**, **Done for now**, and **Quiet tickets** (your tickets with nothing going on). An entry with several signals shows the most urgent one, with the others as tags: for example "Agent is waiting on you" with **in review**.
 - **Right: a workspace for the selected entry.** In order: why the entry is in the queue, the drafted [next steps](#next-steps-summaries), each live agent's whole last message with a reply box, the PRs, and the run history.
 - **Done for now** (`E`) hides an entry until one of its signals changes, so the queue works like an inbox. It is saved in the browser's localStorage.
@@ -27,6 +31,10 @@ pnpm build && pnpm start # http://127.0.0.1:7777
 - **Start a new agent** (`A`): type the first message, pick the folder, and **Start agent** opens a new iTerm tab running `pi --name "<KEY>: …" @context.md "<your message>"`. The context file holds what the page shows: your notes, the drafted next steps and their date, the PRs, the latest message from each relevant agent, and the run history (title, start, prompts, status, resolved or relevant). **What the agent gets** previews it. Context files stay in `~/.agent-dash/handoffs/`. The context sits between `[agent-dash context for KEY]` markers, and the session parser counts only that key, so the tickets and PRs it mentions do not link the new run to them.
 - **Keyboard**: `J`/`K` move, `E` done for now, `R` reply, `N` note, `A` new agent, `O` open the iTerm tab, `S` draft next steps, `⌘↵` send, `?` help.
 - `#/t:FSDK-123` or `#/r:<sessionId>` in the URL selects an entry.
+
+### PRs
+
+Your open PRs, grouped by ticket. A PR links to a ticket as on the board, so a PR with no key in its title or branch takes the ticket of the run that opened it. A PR that names two tickets shows under both. The groups with the most urgent PR come first, in the [queue ranking](#queue-ranking) order, and PRs with no ticket come last. Under each PR, the signals that need you (for example "CI is red") show with the reason. The ticket title opens that ticket on the board. Only PRs updated in the last 14 days show, because the GitHub fetch uses that window. The keyboard shortcuts work only on the board.
 
 ## Storage
 

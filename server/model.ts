@@ -189,6 +189,7 @@ export function buildDashboard(input: ModelInput): Dashboard {
     myTickets,
     otherTickets,
     unlinkedRuns,
+    prs,
     counts,
     summaries: input.summaries ?? {},
     notes: input.notes ?? {},

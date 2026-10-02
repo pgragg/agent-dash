@@ -159,6 +159,8 @@ export interface Dashboard {
   otherTickets: TicketGroup[];
   /** Recent runs that link to no ticket. Newest first. */
   unlinkedRuns: Run[];
+  /** All my PRs in the window, with the tickets that cross-linking gave them. */
+  prs: PullRequest[];
   counts: Record<RunStatus, number>;
   /** Next-steps summaries by ticket key. */
   summaries: Record<string, TicketSummaryState>;

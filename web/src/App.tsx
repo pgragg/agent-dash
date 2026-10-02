@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AttentionItem, AttentionKind, Dashboard, Note, PullRequest, Run, ThreadStatusChange, TicketGroup, TicketSummaryState } from "../../shared/types.ts";
+import { countPrs, groupOpenPrs } from "./prs.ts";
 import { age, api, dirLabel, dueLabel, elapsed, Markdown, plural, prName, resumeCommand, runTitle, shortDate, stamp, useDashboard, useNow } from "./lib.tsx";
 
 /**
@@ -826,6 +827,73 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
   );
 }
 
+// ---- PRs view -----------------------------------------------------------------------
+
+function PrsView({ data, now }: { data: Dashboard; now: number }) {
+  const groups = useMemo(() => groupOpenPrs(data), [data]);
+  const total = countPrs(groups);
+  const ticketCount = groups.filter((g) => g.ticket).length;
+  return (
+    <article className="workspace">
+      <header className="ws-head">
+        <h1>Open pull requests</h1>
+        <div className="ws-meta">
+          <span className="meta">
+            {plural(total, "open PR")} · {plural(ticketCount, "ticket")} · most urgent first
+          </span>
+        </div>
+      </header>
+      {groups.length === 0 && <div className="zero big">You have no open PRs.</div>}
+      {groups.map((g) => {
+        const t = g.ticket;
+        const due = t && t.statusCategory !== "done" ? dueLabel(t.dueDate) : null;
+        return (
+          <div className="stack" key={t?.key ?? "none"}>
+            <header className="pr-group-head">
+              {t ? (
+                <>
+                  <a className="key-link" href={t.url} target="_blank" rel="noreferrer" title="Open in Jira">
+                    {t.key} ↗
+                  </a>
+                  <a className="pr-group-title" href={`#/t:${encodeURIComponent(t.key)}`} title="Open on the board">
+                    {t.summary}
+                  </a>
+                  <span className={`pill cat-${t.statusCategory}`}>{t.status}</span>
+                  {due && <span className={`tone-text-${due.tone}`}>{due.text}</span>}
+                </>
+              ) : (
+                <span className="pr-group-title">No ticket</span>
+              )}
+              <span className="grow" />
+              <span className="meta">{plural(g.prs.length, "PR")}</span>
+            </header>
+            <div className="card flush">
+              {g.prs.map(({ pr, items }) => {
+                const todo = items.filter((a) => !a.info);
+                return (
+                  <div key={pr.url} className="pr-entry">
+                    <PrRow pr={pr} now={now} />
+                    {todo.length > 0 && (
+                      <ul className="pr-why">
+                        {todo.map((a) => (
+                          <li key={a.kind}>
+                            <Dot tone={KIND[a.kind].tone} />
+                            <span>{a.reason}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </article>
+  );
+}
+
 // ---- help ---------------------------------------------------------------------------
 
 const KEYS: [string, string][] = [
@@ -864,11 +932,20 @@ function Help({ onClose }: { onClose: () => void }) {
 
 // ---- page ---------------------------------------------------------------------------
 
+type View = "board" | "prs";
+
+/** `#/prs` is the PRs view. Anything else is the board, and `#/t:KEY` or `#/r:ID` selects an entry on it. */
+function parseHash(): { view: View; id: string | null } {
+  const path = decodeURIComponent(location.hash.slice(2));
+  return path === "prs" ? { view: "prs", id: null } : { view: "board", id: path || null };
+}
+
 export function App() {
   const { data, error, loading, refresh } = useDashboard();
   const now = useNow(1_000);
   const snoozed = useSnoozed();
-  const [selectedId, setSelectedId] = useState<string | null>(() => decodeURIComponent(location.hash.slice(2)) || null);
+  const [view, setView] = useState<View>(() => parseHash().view);
+  const [selectedId, setSelectedId] = useState<string | null>(() => parseHash().id);
   const [help, setHelp] = useState(false);
   const [focusSignal, setFocusSignal] = useState(0);
   const [noteSignal, setNoteSignal] = useState(0);
@@ -890,7 +967,12 @@ export function App() {
   const selected = (selectedId && subjects.get(selectedId)) || queue[0] || order[0] || null;
 
   useEffect(() => {
-    const onHash = () => setSelectedId(decodeURIComponent(location.hash.slice(2)) || null);
+    const onHash = () => {
+      const { view, id } = parseHash();
+      setView(view);
+      // The PRs view keeps the board's selection, so going back lands on the same entry.
+      if (view === "board") setSelectedId(id);
+    };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -921,6 +1003,7 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
       if (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (view !== "board" && e.key !== "?" && e.key !== "Escape") return;
       if (e.key === "j" || e.key === "ArrowDown") move(1);
       else if (e.key === "k" || e.key === "ArrowUp") move(-1);
       else if (e.key === "e") snoozeAndAdvance();
@@ -940,7 +1023,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [move, snoozeAndAdvance, selected, data]);
+  }, [move, snoozeAndAdvance, selected, data, view]);
 
   useEffect(() => {
     const waiting = data?.counts.awaiting_input ?? 0;
@@ -954,12 +1037,21 @@ export function App() {
   const position = selected && queue.includes(selected) ? `${queue.indexOf(selected) + 1} of ${queue.length} in the queue` : null;
   const sources = Object.entries(data.sources);
   const down = sources.filter(([, h]) => !h.ok);
+  const openPrs = data.prs.filter((p) => p.state === "open").length;
 
   return (
     <div className="app">
       <header className="topbar">
         <div className="brand">
           agent-dash
+          <nav className="views" aria-label="Views">
+            <a href={selected ? `#/${encodeURIComponent(selected.id)}` : "#/"} className={view === "board" ? "active" : ""} aria-current={view === "board" ? "page" : undefined}>
+              Board {queue.length > 0 && <span className="count">{queue.length}</span>}
+            </a>
+            <a href="#/prs" className={view === "prs" ? "active" : ""} aria-current={view === "prs" ? "page" : undefined}>
+              PRs {openPrs > 0 && <span className="count">{openPrs}</span>}
+            </a>
+          </nav>
         </div>
         <div className="headline">
           {queue.length ? (
@@ -991,77 +1083,83 @@ export function App() {
         </button>
       </header>
 
-      <div className="columns">
-        <nav className="rail">
-          <RailSection title="Up next" count={queue.length}>
-            {queue.map((s, i) => (
-              <QueueItem key={s.id} s={s} rank={i + 1} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
-            ))}
-          </RailSection>
-          {queue.length === 0 && (
-            <div className="zero">
-              <div className="zero-mark">✓</div>
-              <p>
-                <b>Queue clear.</b>
-                <br />
-                {workingRuns ? `${plural(workingRuns, "agent")} still working.` : "No agent is working."}
-              </p>
-            </div>
-          )}
-          <RailSection title="Waiting on others" count={othersTurn.length} hint="Someone else has the next move, such as a reviewer">
-            {othersTurn.map((s) => (
-              <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
-            ))}
-          </RailSection>
-          <RailSection title="Agents at work" count={working.length} hint="Live runs that need nothing from you yet">
-            {working.map((s) => (
-              <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
-            ))}
-          </RailSection>
-          <RailSection title="Done for now" count={done.length} defaultOpen={false} hint="Back in the queue when something changes">
-            {done.map((s) => (
-              <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
-            ))}
-          </RailSection>
-          <RailSection title="Done in Jira" count={doneInJira.length} defaultOpen={false} hint="Closed tickets that still have agents open">
-            {doneInJira.map((s) => (
-              <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} />
-            ))}
-          </RailSection>
-          <RailSection title="Quiet tickets" count={quiet.length} defaultOpen={false} hint="Your tickets with nothing going on">
-            {quiet.map((s) => (
-              <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
-            ))}
-          </RailSection>
-          <footer className="rail-foot">
-            <Kbd>J</Kbd> <Kbd>K</Kbd> move · <Kbd>E</Kbd> done · <Kbd>R</Kbd> reply · <Kbd>N</Kbd> note · <Kbd>?</Kbd> more
-          </footer>
-        </nav>
-
+      {view === "prs" ? (
         <main className="main">
-          {!data.extensionInstalled && (
-            <p className="banner">
-              Run <code>pnpm install-extension</code> to get exact statuses and replies from here.
-            </p>
-          )}
-          {selected ? (
-            <Workspace
-              s={selected}
-              data={data}
-              now={now}
-              position={position}
-              snoozed={snoozed.isSnoozed(selected)}
-              onSnooze={snoozeAndAdvance}
-              onWake={() => snoozed.wake(selected)}
-              focusSignal={focusSignal}
-              noteSignal={noteSignal}
-              agentSignal={agentSignal}
-            />
-          ) : (
-            <div className="zero big">Nothing to show.</div>
-          )}
+          <PrsView data={data} now={now} />
         </main>
-      </div>
+      ) : (
+        <div className="columns">
+          <nav className="rail">
+            <RailSection title="Up next" count={queue.length}>
+              {queue.map((s, i) => (
+                <QueueItem key={s.id} s={s} rank={i + 1} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
+              ))}
+            </RailSection>
+            {queue.length === 0 && (
+              <div className="zero">
+                <div className="zero-mark">✓</div>
+                <p>
+                  <b>Queue clear.</b>
+                  <br />
+                  {workingRuns ? `${plural(workingRuns, "agent")} still working.` : "No agent is working."}
+                </p>
+              </div>
+            )}
+            <RailSection title="Waiting on others" count={othersTurn.length} hint="Someone else has the next move, such as a reviewer">
+              {othersTurn.map((s) => (
+                <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
+              ))}
+            </RailSection>
+            <RailSection title="Agents at work" count={working.length} hint="Live runs that need nothing from you yet">
+              {working.map((s) => (
+                <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
+              ))}
+            </RailSection>
+            <RailSection title="Done for now" count={done.length} defaultOpen={false} hint="Back in the queue when something changes">
+              {done.map((s) => (
+                <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
+              ))}
+            </RailSection>
+            <RailSection title="Done in Jira" count={doneInJira.length} defaultOpen={false} hint="Closed tickets that still have agents open">
+              {doneInJira.map((s) => (
+                <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} />
+              ))}
+            </RailSection>
+            <RailSection title="Quiet tickets" count={quiet.length} defaultOpen={false} hint="Your tickets with nothing going on">
+              {quiet.map((s) => (
+                <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
+              ))}
+            </RailSection>
+            <footer className="rail-foot">
+              <Kbd>J</Kbd> <Kbd>K</Kbd> move · <Kbd>E</Kbd> done · <Kbd>R</Kbd> reply · <Kbd>N</Kbd> note · <Kbd>?</Kbd> more
+            </footer>
+          </nav>
+
+          <main className="main">
+            {!data.extensionInstalled && (
+              <p className="banner">
+                Run <code>pnpm install-extension</code> to get exact statuses and replies from here.
+              </p>
+            )}
+            {selected ? (
+              <Workspace
+                s={selected}
+                data={data}
+                now={now}
+                position={position}
+                snoozed={snoozed.isSnoozed(selected)}
+                onSnooze={snoozeAndAdvance}
+                onWake={() => snoozed.wake(selected)}
+                focusSignal={focusSignal}
+                noteSignal={noteSignal}
+                agentSignal={agentSignal}
+              />
+            ) : (
+              <div className="zero big">Nothing to show.</div>
+            )}
+          </main>
+        </div>
+      )}
       {help && <Help onClose={() => setHelp(false)} />}
     </div>
   );
