@@ -401,3 +401,14 @@ a.pr-group-title:hover { text-decoration: underline; text-underline-offset: 3px;
 /* The object that a link points at. */
 .flash { animation: flash 1.8s ease-out; }
 @keyframes flash { 0%, 30% { background: var(--waiting-bg); box-shadow: 0 0 0 2px var(--waiting); } 100% { box-shadow: 0 0 0 2px transparent; } }
+
+/* Live control: the tool that runs now, Stop and Steer, extension dialogs. */
+.activity { margin: 8px 0 0; color: var(--working); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity code { color: var(--ink-2); }
+.composer-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 9px; background: var(--hover); }
+.dialog-card { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--waiting); border-radius: 12px; background: var(--waiting-bg); }
+.dialog-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.dialog-message { margin: 6px 0 0; white-space: pre-wrap; }
+.dialog-actions { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px; margin-top: 8px; }
+.dialog-actions textarea { flex: 1 1 100%; font: 14px/1.5 var(--sans); padding: 6px 8px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); color: var(--ink); resize: vertical; }

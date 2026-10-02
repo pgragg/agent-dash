@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, renameSync, statSync, watch, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, statSync, watch, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
@@ -10,10 +10,11 @@ import { startConversation } from "./conversations.ts";
 import { buildHandoff, stepMessage } from "./handoff.ts";
 import { focusItermSession, piCommand, runInNewItermTab } from "./iterm.ts";
 import { buildDashboard, buildHistory, otherTicketKeys } from "./model.ts";
+import * as liveControl from "./routes/liveControl.ts";
 import { fetchMyPrs } from "./sources/github.ts";
 import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
 import { SessionIndex, transcriptTurns } from "./sources/sessions.ts";
-import { isAlive, readReportedStatuses } from "./sources/status.ts";
+import { isAlive, readReportedStatuses, takesControls } from "./sources/status.ts";
 import * as summaryDb from "./summaries/db.ts";
 import { reconcile, requestSummary } from "./summaries/runner.ts";
 
@@ -173,6 +174,7 @@ async function serveStatic(path: string, res: ServerResponse): Promise<void> {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   try {
+    if (await liveControl.handle(req, res, url)) return;
     if (url.pathname === "/api/dashboard") {
       const body = JSON.stringify(await dashboard(url.searchParams.has("refresh")));
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(body);
@@ -271,14 +273,11 @@ const server = createServer(async (req, res) => {
       if (!status?.inbox || status.state === "closed" || !isAlive(status.pid)) {
         return void res.writeHead(409, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "this session cannot take replies; open its tab" }));
       }
-      const { text } = JSON.parse((await readBody(req, 64_000)) || "{}") as { text?: string };
+      const { text, steer } = JSON.parse((await readBody(req, 64_000)) || "{}") as { text?: string; steer?: boolean };
       if (!text?.trim()) return void res.writeHead(400, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "empty reply" }));
-      const dir = join(config.inboxDir, sessionId);
-      mkdirSync(dir, { recursive: true });
-      const file = join(dir, `${Date.now()}-${process.pid}.txt`);
-      // The extension reads *.txt only, so the rename makes the reply appear whole.
-      writeFileSync(`${file}.tmp`, text.trim());
-      renameSync(`${file}.tmp`, file);
+      // An older extension reads *.txt only, and would never see a *.steer file.
+      if (steer && !takesControls(status)) return void res.writeHead(409, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "type /reload in the session to steer from here" }));
+      liveControl.writeInbox(sessionId, steer ? "steer" : "txt", text.trim());
       res.writeHead(202, { "Content-Type": "application/json" }).end(JSON.stringify({ ok: true }));
     } else if (url.pathname === "/api/focus" && req.method === "POST") {
       // A custom header forces a CORS preflight, which this server never answers,

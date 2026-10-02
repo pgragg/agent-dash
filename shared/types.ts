@@ -41,6 +41,31 @@ export interface Run {
   canReply: boolean;
   /** A live headless conversation: no terminal, so the dash page is where you talk to it. */
   headless: boolean;
+  /** The tool that runs now. Only while working, and only from an extension of version 2 or later. */
+  activity?: RunActivity | null;
+  /** An extension dialog waits for an answer. The page can answer it only in a headless run. */
+  dialog?: RunDialog | null;
+  /** The live session's extension takes Stop and Steer. Without it, the page asks for /reload. */
+  canControl?: boolean;
+}
+
+/** One tool call in progress, as the status extension reports it. */
+export interface RunActivity {
+  tool: string;
+  /** A short, one-line summary of the arguments: the command for bash, the path for read. */
+  summary: string;
+  since: string;
+}
+
+/** An open `ctx.ui` dialog in a live session. */
+export interface RunDialog {
+  method: "select" | "confirm" | "input" | "editor";
+  title: string;
+  message?: string;
+  options?: string[];
+  placeholder?: string;
+  prefill?: string;
+  since: string;
 }
 
 /** A run in the History view. The whole last message stays out, so the list of every chat stays small. */

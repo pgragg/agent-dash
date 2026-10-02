@@ -187,7 +187,7 @@ export function useWaitNotifications(data: Dashboard | null) {
 }
 
 /** The custom header makes the browser send a CORS preflight, which the server never answers. */
-async function post(path: string, body?: unknown, method = "POST"): Promise<string | null> {
+export async function post(path: string, body?: unknown, method = "POST"): Promise<string | null> {
   const res = await fetch(path, { method, headers: { "X-Agent-Dash": "1", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
   if (res.ok) return null;
   const json = await res.json().catch(() => ({}));

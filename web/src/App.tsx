@@ -5,6 +5,7 @@ import type { Action, ActionKind, AttentionItem, AttentionKind, Dashboard, Histo
 import { filterHistory, groupByDay } from "./history.ts";
 import { countPrs, groupOpenPrs } from "./prs.ts";
 import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, resumeCommand, runTitle, shortDate, stamp, useDashboard, useFlash, useNow, useWaitNotifications } from "./lib.tsx";
+import { Composer, LivePanel } from "./liveControl.tsx";
 import { href, humanAge, parseHash, resolveBoardRef, type Route } from "./routes.ts";
 
 /**
@@ -514,58 +515,6 @@ function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd:
   );
 }
 
-function Composer({ run, onError, focusSignal }: { run: HistoryRun; onError: (m: string | null) => void; focusSignal: number }) {
-  const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
-  const [sentAt, setSentAt] = useState<number | null>(null);
-  const ref = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
-    if (focusSignal) ref.current?.focus();
-  }, [focusSignal]);
-  const send = async () => {
-    if (!text.trim()) return;
-    setSending(true);
-    const err = await api.reply(run.sessionId, text);
-    setSending(false);
-    onError(err);
-    if (!err) {
-      setText("");
-      setSentAt(Date.now());
-    }
-  };
-  if (!run.canReply) {
-    return (
-      <div className="composer-off">
-        To reply from here, run <code>/reload</code> once in this session. Until then, reply in its tab.
-      </div>
-    );
-  }
-  return (
-    <div className="composer">
-      <textarea
-        ref={ref}
-        rows={3}
-        value={text}
-        placeholder={run.status === "working" ? "Queue a message for when the agent finishes…" : "Reply to the agent…"}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            send();
-          }
-          if (e.key === "Escape") (e.target as HTMLTextAreaElement).blur();
-        }}
-      />
-      <div className="composer-bar">
-        <span className="meta">{sentAt && Date.now() - sentAt < 20_000 ? "Sent. The agent has your message." : `to ${dirLabel(run.cwd)} · ${run.sessionId.slice(-6)}`}</span>
-        <button className="btn primary" onClick={send} disabled={sending || !text.trim()}>
-          {sending ? "Sending…" : run.status === "working" ? "Queue" : "Send"} <Kbd>⌘↵</Kbd>
-        </button>
-      </div>
-    </div>
-  );
-}
-
 /** "Resolve" with an optional reason: the thread stops counting for this ticket. */
 function ResolveButton({ ticket, run, onError, className = "btn ghost" }: { ticket: string; run: Run; onError: (m: string | null) => void; className?: string }) {
   const [open, setOpen] = useState(false);
@@ -625,6 +574,7 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket }: { run: R
         {ticket && <ResolveButton ticket={ticket} run={run} onError={onError} />}
         <OpenTab run={run} onError={onError} hotkey={primary} />
       </header>
+      <LivePanel run={run} now={now} onError={onError} />
       {run.lastMessage && (
         <div className={`agent-message ${long && !expanded ? "clamped" : ""}`}>
           <Markdown text={run.lastMessage} />
@@ -1294,7 +1244,7 @@ function ConversationView({ sessionId, data, now }: { sessionId: string; data: D
       {error && <div className="toast">{error}</div>}
       {/* The run shows once pi saved the first message; until then there is no chat to load. */}
       {run && <Chat sessionId={sessionId} refreshKey={run.lastActivityAt + run.status} />}
-      {run?.status === "working" && <p className="meta">The agent is working…</p>}
+      {run && <LivePanel run={run} now={now} onError={setError} working="The agent is working…" />}
       {run && run.status !== "finished" && <Composer run={run} onError={setError} focusSignal={0} />}
       {run?.status === "finished" && <p className="meta">This conversation ended. Copy resume continues it in a terminal.</p>}
       <div ref={end} />
