@@ -6,6 +6,8 @@ import { basename, dirname, extname, join, normalize } from "node:path";
 import type { Dashboard, PullRequest, SourceHealth, Ticket } from "../shared/types.ts";
 import { actionCandidates, keepWhenDown, toActions } from "./actions.ts";
 import { config } from "./config.ts";
+import { recordExit } from "./exits.ts";
+import * as exitRoutes from "./routes/exits.ts";
 import { startConversation } from "./conversations.ts";
 import { buildHandoff, stepMessage } from "./handoff.ts";
 import { focusItermSession, piCommand, runInNewItermTab } from "./iterm.ts";
@@ -173,6 +175,7 @@ async function serveStatic(path: string, res: ServerResponse): Promise<void> {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   try {
+    if (await exitRoutes.handle(req, res, url)) return;
     if (url.pathname === "/api/dashboard") {
       const body = JSON.stringify(await dashboard(url.searchParams.has("refresh")));
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(body);
@@ -289,6 +292,7 @@ const server = createServer(async (req, res) => {
       const tab = (await readReportedStatuses(config.statusDir)).get(sessionId)?.itermSessionId;
       if (!tab) return void res.writeHead(404, { "Content-Type": "application/json" }).end(JSON.stringify({ result: "missing" }));
       const out = await focusItermSession(tab);
+      if (out.result === "ok") recordExit({ kind: "iterm_focus", host: "iterm", view: null, section: null, ticket: null });
       const code = out.result === "ok" ? 200 : out.result === "missing" ? 404 : 500;
       res.writeHead(code, { "Content-Type": "application/json" }).end(JSON.stringify(out));
     } else if (url.pathname === "/api/history") {

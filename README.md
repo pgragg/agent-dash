@@ -89,6 +89,7 @@ Everything you write lives in SQLite at `~/.agent-dash/agent-dash.db`:
 | `next_steps` | One per numbered step of a finished summary: `summary_id`, `ticket`, `position`, `body`. Written when the summary is saved. |
 | `notes` | One per note: `ticket`, `created_at`, `body` |
 | `actions` | One per action on the Actions view: `key` (what it is about, such as `ci_failing pr:<url>`), `kind`, `ticket`, `created_at`, `cleared_at` (set when it goes away) |
+| `exits` | One per time you leave the dash for another tool: `at`, `kind`, `host`, `view`, `section`, `ticket`. Append-only. See [Exits](#exits). |
 | `PiConversationStatusChange` | One per change to a thread's relevance: `ticket`, `session_id`, `status` (`relevant` or `resolved`), `reason` (resolved only, optional), `created_at`. Append-only; the newest row per ticket and thread is the current state. |
 
 ## Reply to an agent
@@ -149,6 +150,30 @@ A live run shows **Open in iTerm** (`O` for the selected entry's main run). A li
 - The endpoint needs an `X-Agent-Dash: 1` header. That forces a CORS preflight, which the server never answers, so another web page cannot call it.
 - **macOS permission:** the app that started the server needs Automation access to iTerm2. If `dash` started it in iTerm, turn on **System Settings → Privacy & Security → Automation → iTerm → iTerm2**. Without it the button says so, and offers the resume command.
 - Runs that started before the extension was installed have no tab id until you type `/reload` in them.
+
+## Exits
+
+Each link out of the dash is a sign of a missing view or verb. The dash counts these exits, so the next work replaces the most-used ones. The data stays on this machine, in the `exits` table.
+
+| Kind | Counted when you |
+|---|---|
+| `github_pr` | open a GitHub PR link |
+| `jira` | open a Jira link |
+| `slack` | open a Slack link |
+| `other_url` | open any other external link |
+| `copy_resume` | click **Copy resume** |
+| `iterm_focus` | bring an iTerm tab to the front, with the button or `O` |
+
+- One capturing click listener in `web/src/exits.ts` sees every external link (`target="_blank"`), also a middle-click. It reads the view from the URL hash, and the section from the nearest known class (for example `workspace header`, `pr row`, `agent message`, `next steps`). The ticket is the selected ticket, else the key link of the area clicked, else the key in the link.
+- The page posts each exit to `POST /api/exits`. It needs the `X-Agent-Dash: 1` header, takes at most 2 KB, and refuses unknown kinds.
+- `POST /api/focus` records `iterm_focus` itself after a good focus, so the `O` key counts too. It has no section.
+- `GET /api/exits?days=7` returns the counts by kind and section, most used first.
+- `pnpm exits [days]` prints the same ranking from SQLite, also when the server is down:
+
+```
+jira · workspace header   · 23
+github_pr · agent message · 11
+```
 
 ## Queue ranking
 
