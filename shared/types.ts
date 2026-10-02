@@ -85,6 +85,8 @@ export interface AttentionItem {
   sessionId?: string;
   prUrl?: string;
   since: string;
+  /** When the thing behind the row last changed: the run's log, the PR, or the Jira ticket. */
+  updatedAt: string;
   /** The run to jump to from this row: the run itself, the run that opened the PR, or the ticket's latest run. */
   run?: Run;
 }

@@ -59,3 +59,16 @@ test("a reported status from a dead process means finished", () => {
   assert.equal(resolveReported(s, () => false).status, "finished");
   assert.equal(resolveReported({ ...s, state: "closed" }, () => true).status, "finished");
 });
+
+test("each row's updatedAt comes from its source: run log, PR, or Jira ticket", () => {
+  const items = rankAttention(
+    [run({ status: "awaiting_input", statusSince: minutesAgo(9), lastActivityAt: minutesAgo(8) })],
+    [pr({ checks: "failure", updatedAt: minutesAgo(30) })],
+    [ticket({ dueDate: "2026-09-01", updatedAt: minutesAgo(600) })],
+    NOW,
+  );
+  const at = Object.fromEntries(items.map((i) => [i.kind, i.updatedAt]));
+  assert.equal(at.awaiting_input, minutesAgo(8));
+  assert.equal(at.ci_failing, minutesAgo(30));
+  assert.equal(at.overdue, minutesAgo(600));
+});

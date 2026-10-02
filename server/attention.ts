@@ -28,7 +28,7 @@ function runItems(runs: Run[], now: number): Draft[] {
   for (const run of runs) {
     const waited = now - Date.parse(run.statusSince);
     const label = run.name ?? run.firstPrompt.slice(0, 60);
-    const base = { ticketKey: run.tickets[0] ?? null, sessionId: run.sessionId, since: run.statusSince };
+    const base = { ticketKey: run.tickets[0] ?? null, sessionId: run.sessionId, since: run.statusSince, updatedAt: run.lastActivityAt };
     if (run.status === "awaiting_input" && run.endedInError) {
       items.push({ ...base, kind: "run_error", score: 110, reason: `“${label}” stopped on an API error ${ago(waited)} ago — retry it` });
     } else if (run.status === "awaiting_input") {
@@ -52,7 +52,7 @@ function prItems(prs: PullRequest[]): Draft[] {
   const items: Draft[] = [];
   for (const pr of prs) {
     if (pr.state !== "open") continue;
-    const base = { ticketKey: pr.tickets[0] ?? null, prUrl: pr.url, since: pr.updatedAt };
+    const base = { ticketKey: pr.tickets[0] ?? null, prUrl: pr.url, since: pr.updatedAt, updatedAt: pr.updatedAt };
     const name = `${pr.repo.split("/")[1]}#${pr.number}${pr.isDraft ? " (draft)" : ""}`;
     // A draft is not asking anyone for anything yet, so its problems can wait.
     const weight = pr.isDraft ? 0.5 : 1;
@@ -72,7 +72,7 @@ function ticketItems(tickets: Ticket[], runs: Run[], prs: PullRequest[], now: nu
   for (const t of tickets) {
     if (!t.assignedToMe || t.statusCategory === "done") continue;
     const parked = PARKED.test(t.status) ? -25 : 0;
-    const base = { ticketKey: t.key, since: t.updatedAt };
+    const base = { ticketKey: t.key, since: t.updatedAt, updatedAt: t.updatedAt };
     if (t.dueDate && t.dueDate < today) {
       const late = Math.round((Date.parse(today) - Date.parse(t.dueDate)) / DAY);
       items.push({ ...base, kind: "overdue", score: 60 + Math.min(late, 20) + priorityBoost(t.priority) + parked, reason: `${t.key} was due ${late}d ago (${t.status})` });

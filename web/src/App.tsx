@@ -14,6 +14,28 @@ function ago(iso: string): string {
   return `${Math.round(ms / DAY)}d ago`;
 }
 
+/** "45s ago", "12m ago", "3h ago", "4d ago", "2w ago". */
+function sinceLabel(iso: string, now: number): string {
+  const ms = now - Date.parse(iso);
+  if (!Number.isFinite(ms)) return "";
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86_400) return `${Math.floor(s / 3600)}h ago`;
+  if (s < 14 * 86_400) return `${Math.floor(s / 86_400)}d ago`;
+  return `${Math.floor(s / (7 * 86_400))}w ago`;
+}
+
+/** Re-render on a timer, so relative times stay true between data updates. */
+function useNow(intervalMs: number): number {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
+
 function when(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
@@ -266,12 +288,15 @@ const KIND_LABEL: Record<AttentionItem["kind"], string> = {
   stalled: "stalled",
 };
 
-function FocusRow({ item }: { item: AttentionItem }) {
+function FocusRow({ item, now }: { item: AttentionItem; now: number }) {
   const [tabError, setTabError] = useState<string | null>(null);
   return (
     <li className={`focus-item kind-${item.kind}`}>
       <span className="focus-kind">{KIND_LABEL[item.kind]}</span>
       <span className="focus-reason">{item.reason}</span>
+      <span className="focus-cell focus-updated" title={item.updatedAt ? new Date(item.updatedAt).toLocaleString() : undefined}>
+        {item.updatedAt && sinceLabel(item.updatedAt, now)}
+      </span>
       {/* One cell per link, empty when there is none, so each link type lines up in a column. */}
       <span className="focus-cell">
         {item.ticketKey && (
@@ -296,6 +321,7 @@ function FocusRow({ item }: { item: AttentionItem }) {
 
 function FocusNext({ items }: { items: AttentionItem[] }) {
   const [all, setAll] = useState(false);
+  const now = useNow(10_000);
   if (items.length === 0) return <p className="muted">Nothing needs you. The agents are working or done.</p>;
   const shown = all ? items : items.slice(0, 10);
   return (
@@ -304,13 +330,14 @@ function FocusNext({ items }: { items: AttentionItem[] }) {
         <li className="focus-item focus-header" aria-hidden>
           <span />
           <span />
+          <span className="focus-cell">updated</span>
           <span className="focus-cell">ticket</span>
           <span className="focus-cell">PR</span>
           <span className="focus-cell">run</span>
           <span className="focus-cell">jump</span>
         </li>
         {shown.map((a, i) => (
-          <FocusRow key={`${a.kind}-${a.sessionId ?? a.prUrl ?? a.ticketKey}-${i}`} item={a} />
+          <FocusRow key={`${a.kind}-${a.sessionId ?? a.prUrl ?? a.ticketKey}-${i}`} item={a} now={now} />
         ))}
       </ol>
       {items.length > shown.length && (
