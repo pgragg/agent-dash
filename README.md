@@ -7,7 +7,7 @@ It answers one question: **what do I look at next?**
 
 It reads your pi session logs, your Jira tickets, and your GitHub PRs. You can act on the answer without leaving the page.
 
-The dashboard never writes to Jira or GitHub. The only thing it sends anywhere is a reply that you type to one of your own pi sessions.
+The dashboard never writes to Jira or GitHub. The only thing it sends anywhere is a reply that you type to one of your own pi sessions. A [verb button](#pr-verbs) starts an agent on one small task, and that agent does the write: the click is your approval.
 
 ## Run it
 
@@ -26,7 +26,7 @@ The navbar at the top switches between the views: **Board** (`#/`, the queue and
 ### Board
 
 - **Left: the queue.** One entry per ticket (or per ticket-less run or PR), ranked by its most urgent signal (see [Queue ranking](#queue-ranking)). Under it: **Waiting on others** (only context left, such as a PR out for review), **Done in Jira** (closed tickets that still have agents open, tagged green **done**; never in the queue), **Agents at work**, **Done for now**, and **Quiet tickets** (your tickets with nothing going on). An entry with several signals shows the most urgent one, with the others as tags: for example "Agent is waiting on you" with **in review**.
-- **Right: a workspace for the selected entry.** In order: why the entry is in the queue, the drafted [next steps](#next-steps-summaries), **Start a new agent**, your notes, each live agent's whole last message with a reply box, the PRs, and the run history.
+- **Right: a workspace for the selected entry.** In order: why the entry is in the queue (each PR signal with its [verb button](#pr-verbs)), the drafted [next steps](#next-steps-summaries), **Start a new agent**, your notes, each live agent's whole last message with a reply box, the PRs, and the run history.
 - **Done for now** (`E`) hides an entry until one of its signals changes, so the queue works like an inbox. It is saved in the browser's localStorage.
 - **Notes**: each ticket's workspace has a private, timestamped notes list (`N`). Notes are saved in SQLite (`notes` table: `ticket`, `created_at`, `body`) and never leave your machine, except that a next-steps draft reads them first and trusts them over older sources. A note newer than the draft marks it **out of date**.
 - **Resolve a thread**: **Resolve** on an agent card or a history row says "this pi thread no longer matters to this ticket", with an optional reason. A resolved thread moves to **Resolved** under the ticket's history, with its reason, and **Mark relevant** undoes it. A resolved thread no longer puts the ticket in the queue or shows as its agent, and next-steps drafts see only its name and reason. If it still waits for you and is resolved for all its tickets, it shows in the queue on its own.
@@ -44,13 +44,43 @@ One short list of what to do next, first to do first. It has two kinds of action
 - **Signals** from the queue that need you: an agent waits, CI is red, a ticket is overdue, and so on. Context only signals (a healthy PR out for review) are not actions.
 - **Drafted next steps** of each open ticket, from its newest finished summary. They come after the signals, and each ticket's first step comes before any second step.
 
-Each row shows the action, its ticket (which opens the ticket on the board), how long the action has been on the list ("added 3 hours ago"), and a button that opens the object to act on, in agent-dash: the agent card (`#/r:`), the step (`#/step:`), the ticket (`#/t:`), or the PR on the PRs view (`#/pr:`). The age is a link to the action itself (`#/a:<id>`).
+Each row shows the action, its ticket (which opens the ticket on the board), how long the action has been on the list ("added 3 hours ago"), and a button that opens the object to act on, in agent-dash: the agent card (`#/r:`), the step (`#/step:`), the ticket (`#/t:`), or the [PR panel](#pr-panel) (`#/pr:`). The age is a link to the action itself (`#/a:<id>`).
 
 Each action is a row in the SQLite `actions` table. The server syncs the table on each dashboard load: a new action gets a row, and an action that went away gets `cleared_at`. If it comes back later, it gets a new row, so its age starts again. A source that could not be read (for example a GitHub timeout) clears none of its actions. A next step's row dates from when its summary was saved.
 
 ### PRs
 
-Your open PRs, grouped by ticket. A PR links to a ticket as on the board, so a PR with no key in its title or branch takes the ticket of the run that opened it. A PR that names two tickets shows under both. The groups with the most urgent PR come first, in the [queue ranking](#queue-ranking) order, and PRs with no ticket come last. Under each PR, the signals that need you (for example "CI is red") show with the reason. The ticket title opens that ticket on the board. Only PRs updated in the last 14 days show, because the GitHub fetch uses that window. The keyboard shortcuts work only on the board.
+Your open PRs, grouped by ticket. A PR links to a ticket as on the board, so a PR with no key in its title or branch takes the ticket of the run that opened it. A PR that names two tickets shows under both. The groups with the most urgent PR come first, in the [queue ranking](#queue-ranking) order, and PRs with no ticket come last. Under each PR, the signals that need you (for example "CI is red: lint, test") show with the reason and a [verb button](#pr-verbs). The ticket title opens that ticket on the board. A click on a PR row, here or on the board, opens the [PR panel](#pr-panel); the small `↗` at the end of the row opens GitHub. The CI tag of a red PR names the failing checks. Only PRs updated in the last 14 days show, because the GitHub fetch uses that window. The keyboard shortcuts work only on the board.
+
+### PR panel
+
+`#/pr:<owner>/<repo>/<number>` shows one PR without GitHub. It shows:
+
+- The title, state, author, branches, review decision, and the PR's signals, each with its [verb button](#pr-verbs).
+- The tickets in the title or branch (each opens `#/t:KEY`), and the run that opened the PR with `gh pr create`.
+- Each unresolved review thread: the file and line, and each comment with its author.
+- Each check run and status context with its state, failures first. A failed GitHub Actions check shows the end of its job log, up to the last `##[error]` line (at most 40 lines, 4,000 characters, 3 logs).
+- The description (as markdown), the diffstat, and the changed files with their `+`/`−` counts (the first 100).
+
+The page loads it from `GET /api/pr?ref=<owner>/<repo>/<number>` (`server/routes/pr.ts`). The server checks that the ref is an owner, a repo and a number, and nothing else. It reads the PR with `gh api graphql` and the logs with `gh api`, with your `gh` login, and keeps each answer for 60 s. **Refresh** on the panel skips that cache. It is not part of `/api/dashboard`, so the board stays small.
+
+### PR verbs
+
+Each PR signal has one verb button: on the board's "why" list, under a PR on the PRs view, and on the PR panel. A verb starts an agent with a first message from `shared/prVerbs.ts`, which tells the agent to read the fresh state with `gh` and to do one small task. The click is the approval for that task. Hover over the button to read the message.
+
+| Signal | Verb | The agent… |
+|---|---|---|
+| CI is red | **Fix CI** | reads the failed log, checks out the PR branch in a clone of the repo, fixes it, runs the checks, and pushes a new commit. Never force-pushes. |
+| Changes requested | **Address review** | reads the unresolved threads, fixes each one, and pushes. Posts nothing on GitHub: it drafts a reply per thread and shows them to you. |
+| Merge conflict | **Rebase** | checks `git rev-parse --is-shallow-repository` first, merges the base branch in, resolves the conflicts, and pushes. |
+| Approved and green | **Merge** | checks the PR is still ready, then runs `gh pr merge` with the repo's default method. The button asks you to confirm first, because a merge cannot be undone. |
+| Stale review | **Draft a nudge** | drafts a one-paragraph reminder for the reviewers, and does not post it. |
+
+A PR with a ticket on the board starts a ticket agent (`POST /api/agents?ticket=KEY`, with the ticket's context file). A PR with no such ticket starts a [conversation on the page](#conversations-on-the-page) (`POST /api/conversations`). The folder is the one of the run that opened the PR, because that is the clone with the branch. If no run opened it, the folder is the ticket's newest one, as in **Start a new agent**, else `~`.
+
+### Links in agent messages
+
+A GitHub PR link in a message opens the PR panel, and a Jira link to a ticket on the board opens the ticket (`#/t:KEY`). A small `↗` next to each of these links still opens GitHub or Jira. Other links open as before, in a new tab.
 
 ## Addresses
 
@@ -62,7 +92,7 @@ Every object in agent-dash has an address in the URL hash. A link opens the obje
 | `#/r:<sessionId>` | The run: its agent card or history row, under its ticket. A run with no ticket is its own entry. |
 | `#/step:<id>` | A drafted next step, in its ticket's Next steps card |
 | `#/note:<id>` | A note, in its ticket's Notes card |
-| `#/pr:<owner>/<repo>/<number>` | The PR on the PRs view |
+| `#/pr:<owner>/<repo>/<number>` | The [PR panel](#pr-panel) |
 | `#/a:<id>` | The action on the Actions view |
 | `#/c:<sessionId>` | The conversation's page |
 
@@ -106,7 +136,7 @@ The server listens on `127.0.0.1` only, because the page shows prompts and repli
 | pi sessions | `~/.pi/agent/sessions/**/*.jsonl` | Re-parses only the files that changed. A cold scan of about 700 sessions takes about 1 s. |
 | Run status | `~/.agent-dash/status/<sessionId>.json`, written by `extension/agent-dash-status.ts` | Without it, status is a guess from the log, marked `?` |
 | Jira | `POST /rest/api/3/search/jql` with the token in `~/pi/secrets/jira/.env.personal` | Open tickets assigned to you, excluding the deprecated `FSM` project |
-| GitHub | `gh api graphql` with your `gh` login | Your PRs updated in the last 14 days, with CI, review, and merge state |
+| GitHub | `gh api graphql` with your `gh` login | Your PRs updated in the last 14 days, with CI (and the names of the failing checks), review, and merge state. The [PR panel](#pr-panel) reads one PR in full on demand. |
 
 Jira and GitHub answers are cached for 2 minutes. After the first load, a stale answer is shown at once and refreshed in the background. **refresh** forces a new fetch.
 

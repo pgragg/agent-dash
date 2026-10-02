@@ -10,6 +10,7 @@ import { startConversation } from "./conversations.ts";
 import { buildHandoff, stepMessage } from "./handoff.ts";
 import { focusItermSession, piCommand, runInNewItermTab } from "./iterm.ts";
 import { buildDashboard, buildHistory, otherTicketKeys } from "./model.ts";
+import * as prRoute from "./routes/pr.ts";
 import { fetchMyPrs } from "./sources/github.ts";
 import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
 import { SessionIndex, transcriptTurns } from "./sources/sessions.ts";
@@ -173,6 +174,7 @@ async function serveStatic(path: string, res: ServerResponse): Promise<void> {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   try {
+    if (await prRoute.handle(req, res, url)) return;
     if (url.pathname === "/api/dashboard") {
       const body = JSON.stringify(await dashboard(url.searchParams.has("refresh")));
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(body);

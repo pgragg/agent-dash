@@ -93,3 +93,10 @@ test("a waiting agent and a PR out for review are both listed for the ticket", (
   assert.deepEqual(kinds(items), ["awaiting_input", "in_review"]);
   assert.ok(items.every((i) => i.ticketKey === "FSDK-1"));
 });
+
+test("red CI names the failing checks, at most three", () => {
+  const reason = (failedChecks?: string[]) => rankAttention([], [pr({ checks: "failure", failedChecks })], [], NOW)[0].reason;
+  assert.equal(reason(), "r#1: CI is red");
+  assert.equal(reason(["lint", "test"]), "r#1: CI is red: lint, test");
+  assert.equal(reason(["a", "b", "c", "d", "e"]), "r#1: CI is red: a, b, c, +2 more");
+});

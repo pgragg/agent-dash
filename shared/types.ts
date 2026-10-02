@@ -73,6 +73,62 @@ export interface PullRequest {
   mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN";
   updatedAt: string;
   tickets: string[];
+  /** Names of the failing checks and status contexts on the head commit. */
+  failedChecks?: string[];
+}
+
+/** One check run or status context on a PR's head commit. */
+export interface PrCheck {
+  name: string;
+  /** "success", "failure", "pending", "skipped", "neutral"... lower case. */
+  state: string;
+  url: string | null;
+  /** For a failed GitHub Actions job: the end of its log, up to the last error. */
+  logTail?: string;
+}
+
+export interface PrReviewComment {
+  author: string;
+  body: string;
+  createdAt: string;
+  url: string;
+}
+
+export interface PrReviewThread {
+  path: string;
+  line: number | null;
+  isOutdated: boolean;
+  comments: PrReviewComment[];
+}
+
+/** One PR in full, for the PR panel. Fetched on demand from GET /api/pr, never part of the dashboard. */
+export interface PrDetail {
+  url: string;
+  repo: string;
+  number: number;
+  title: string;
+  state: "open" | "merged" | "closed";
+  isDraft: boolean;
+  author: string | null;
+  body: string;
+  baseRef: string;
+  headRef: string;
+  reviewDecision: PullRequest["reviewDecision"];
+  mergeable: PullRequest["mergeable"];
+  checks: CheckState;
+  checkRuns: PrCheck[];
+  /** Only threads that are not resolved. */
+  threads: PrReviewThread[];
+  reviewers: { login: string; state: string }[];
+  requestedReviewers: string[];
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  files: { path: string; additions: number; deletions: number }[];
+  updatedAt: string;
+  /** Ticket keys in the title or branch. */
+  tickets: string[];
+  fetchedAt: string;
 }
 
 export interface Ticket {

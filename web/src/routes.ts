@@ -9,7 +9,7 @@ import type { Dashboard } from "../../shared/types.ts";
  * | `#/r:SESSION`     | A run on the board, under its ticket if it has one |
  * | `#/step:ID`       | A drafted next step, on its ticket                |
  * | `#/note:ID`       | A note, on its ticket                             |
- * | `#/pr:OWNER/REPO/N` | A PR on the PRs view                            |
+ * | `#/pr:OWNER/REPO/N` | The PR panel (a view under PRs)                 |
  * | `#/a:ID`          | An action on the Actions view                     |
  * | `#/c:SESSION`     | A conversation's page                             |
  *

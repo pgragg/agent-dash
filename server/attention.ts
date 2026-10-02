@@ -1,3 +1,4 @@
+import { checkList } from "../shared/prVerbs.ts";
 import type { AttentionItem, PullRequest, Run, Ticket } from "../shared/types.ts";
 
 const MIN = 60_000;
@@ -60,7 +61,7 @@ function prItems(prs: PullRequest[], now: number): Draft[] {
     // A draft is not asking anyone for anything yet, so its problems can wait.
     const weight = pr.isDraft ? 0.5 : 1;
     if (pr.reviewDecision === "CHANGES_REQUESTED") items.push({ ...base, kind: "changes_requested", score: 95 * weight, reason: `${name}: a reviewer asked for changes` });
-    if (pr.checks === "failure") items.push({ ...base, kind: "ci_failing", score: 85 * weight, reason: `${name}: CI is red` });
+    if (pr.checks === "failure") items.push({ ...base, kind: "ci_failing", score: 85 * weight, reason: `${name}: CI is red${pr.failedChecks?.length ? `: ${checkList(pr.failedChecks)}` : ""}` });
     if (pr.mergeable === "CONFLICTING") items.push({ ...base, kind: "merge_conflict", score: 80 * weight, reason: `${name}: merge conflict` });
     if (pr.reviewDecision === "APPROVED" && !pr.isDraft && pr.checks !== "failure" && pr.checks !== "pending" && pr.mergeable !== "CONFLICTING") {
       items.push({ ...base, kind: "ready_to_merge", score: 70, reason: `${name}: approved and green — merge it` });
