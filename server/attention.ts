@@ -21,8 +21,10 @@ function priorityBoost(priority: string | null): number {
   return 0;
 }
 
-function runItems(runs: Run[], now: number): AttentionItem[] {
-  const items: AttentionItem[] = [];
+type Draft = Omit<AttentionItem, "ticketUrl">;
+
+function runItems(runs: Run[], now: number): Draft[] {
+  const items: Draft[] = [];
   for (const run of runs) {
     const waited = now - Date.parse(run.statusSince);
     const label = run.name ?? run.firstPrompt.slice(0, 60);
@@ -46,8 +48,8 @@ function runItems(runs: Run[], now: number): AttentionItem[] {
   return items;
 }
 
-function prItems(prs: PullRequest[]): AttentionItem[] {
-  const items: AttentionItem[] = [];
+function prItems(prs: PullRequest[]): Draft[] {
+  const items: Draft[] = [];
   for (const pr of prs) {
     if (pr.state !== "open") continue;
     const base = { ticketKey: pr.tickets[0] ?? null, prUrl: pr.url, since: pr.updatedAt };
@@ -64,8 +66,8 @@ function prItems(prs: PullRequest[]): AttentionItem[] {
   return items;
 }
 
-function ticketItems(tickets: Ticket[], runs: Run[], prs: PullRequest[], now: number): AttentionItem[] {
-  const items: AttentionItem[] = [];
+function ticketItems(tickets: Ticket[], runs: Run[], prs: PullRequest[], now: number): Draft[] {
+  const items: Draft[] = [];
   const today = new Date(now).toISOString().slice(0, 10);
   for (const t of tickets) {
     if (!t.assignedToMe || t.statusCategory === "done") continue;
@@ -90,6 +92,8 @@ function ticketItems(tickets: Ticket[], runs: Run[], prs: PullRequest[], now: nu
   return items;
 }
 
-export function rankAttention(runs: Run[], prs: PullRequest[], tickets: Ticket[], now: number): AttentionItem[] {
-  return [...runItems(runs, now), ...prItems(prs), ...ticketItems(tickets, runs, prs, now)].sort((a, b) => b.score - a.score);
+export function rankAttention(runs: Run[], prs: PullRequest[], tickets: Ticket[], now: number, jiraServer = ""): AttentionItem[] {
+  return [...runItems(runs, now), ...prItems(prs), ...ticketItems(tickets, runs, prs, now)]
+    .map((item) => ({ ...item, ticketUrl: item.ticketKey && jiraServer ? `${jiraServer}/browse/${item.ticketKey}` : null }))
+    .sort((a, b) => b.score - a.score);
 }

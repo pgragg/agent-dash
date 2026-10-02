@@ -119,7 +119,7 @@ export function buildDashboard(input: ModelInput): Dashboard {
   crossLink(runs, prs);
 
   const recentRuns = runs.filter((r) => r.status !== "finished" || isRecent(r.lastActivityAt, now, recentDays));
-  const attention = rankAttention(recentRuns, prs, input.myTickets, now);
+  const attention = rankAttention(recentRuns, prs, input.myTickets, now, input.jiraServer);
   attachRuns(attention, runs);
 
   // Tickets with the most urgent item come first, so the list reads in the same order as the queue.

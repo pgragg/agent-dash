@@ -273,7 +273,13 @@ function FocusRow({ item }: { item: AttentionItem }) {
       <span className="focus-kind">{KIND_LABEL[item.kind]}</span>
       <span className="focus-reason">{item.reason}</span>
       {/* One cell per link, empty when there is none, so each link type lines up in a column. */}
-      <span className="focus-cell">{item.ticketKey && <a href={`#ticket-${item.ticketKey}`}>{item.ticketKey}</a>}</span>
+      <span className="focus-cell">
+        {item.ticketKey && (
+          <a href={item.ticketUrl ?? undefined} target="_blank" rel="noreferrer" title="Open in Jira">
+            {item.ticketKey}
+          </a>
+        )}
+      </span>
       <span className="focus-cell">
         {item.prUrl && (
           <a href={item.prUrl} target="_blank" rel="noreferrer">

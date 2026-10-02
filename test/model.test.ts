@@ -116,4 +116,5 @@ test("every focus row gets a run: a PR row the run that opened it, a ticket row 
   const rows = Object.fromEntries(d.attention.map((a) => [a.kind, a.run?.sessionId]));
   assert.equal(rows.ci_failing, "opener");
   assert.equal(rows.overdue, "live");
+  assert.equal(d.attention.find((a) => a.kind === "overdue")?.ticketUrl, "https://jira/browse/FSDK-1");
 });

@@ -81,6 +81,7 @@ export interface AttentionItem {
   /** One line that says why this item is on the list. */
   reason: string;
   ticketKey: string | null;
+  ticketUrl: string | null;
   sessionId?: string;
   prUrl?: string;
   since: string;
