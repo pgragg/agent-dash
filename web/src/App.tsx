@@ -27,13 +27,14 @@ interface Subject {
   fingerprint: string;
 }
 
-const KIND: Record<AttentionKind, { title: string; tone: "waiting" | "bad" | "warn" | "good" | "muted" }> = {
+const KIND: Record<AttentionKind, { title: string; tone: "waiting" | "working" | "bad" | "warn" | "good" | "muted" }> = {
   run_error: { title: "Agent hit an error", tone: "bad" },
   awaiting_input: { title: "Agent is waiting on you", tone: "waiting" },
   changes_requested: { title: "Changes requested", tone: "bad" },
   ci_failing: { title: "CI is failing", tone: "bad" },
   merge_conflict: { title: "Merge conflict", tone: "bad" },
   ready_to_merge: { title: "Ready to merge", tone: "good" },
+  in_review: { title: "PR out for review", tone: "working" },
   overdue: { title: "Overdue", tone: "bad" },
   due_soon: { title: "Due soon", tone: "warn" },
   stalled: { title: "Stalled", tone: "muted" },
@@ -46,6 +47,7 @@ const SHORT: Record<AttentionKind, string> = {
   ci_failing: "CI red",
   merge_conflict: "conflict",
   ready_to_merge: "merge",
+  in_review: "in review",
   overdue: "overdue",
   due_soon: "due soon",
   stalled: "stalled",
@@ -66,6 +68,22 @@ function buildSubjects(d: Dashboard): Map<string, Subject> {
   }
   for (const s of out.values()) s.fingerprint = s.items.map((a) => `${a.kind}@${a.updatedAt}`).join("|");
   return out;
+}
+
+/** Something here needs you, not only someone else. */
+function actionable(s: Subject): boolean {
+  return s.items.some((a) => !a.info);
+}
+
+/** The item that leads: the most urgent one that needs you, else the first. */
+function lead(s: Subject): AttentionItem | undefined {
+  return s.items.find((a) => !a.info) ?? s.items[0];
+}
+
+/** The other kinds of signal on the subject, for tags next to the lead. */
+function otherKinds(s: Subject): AttentionKind[] {
+  const top = lead(s)?.kind;
+  return [...new Set(s.items.map((a) => a.kind))].filter((k) => k !== top);
 }
 
 function subjectTitle(s: Subject): string {
@@ -166,7 +184,7 @@ function runTone(run: Run): string {
 // ---- queue (left rail) --------------------------------------------------------------
 
 function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0 }: { s: Subject; selected: boolean; onSelect: () => void; now: number; summary?: TicketSummaryState; rank?: number; notes?: number }) {
-  const top = s.items[0];
+  const top = lead(s);
   const run = primaryRun(s);
   const ref = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -175,7 +193,7 @@ function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0 }: { s
   const headline = top ? KIND[top.kind].title : run ? statusText(run, now) : s.ticket?.ticket.status ?? "";
   const tone = top ? KIND[top.kind].tone : run ? runTone(run) : "muted";
   const when = top?.kind === "awaiting_input" && run ? age(run.statusSince, now) : age(top?.updatedAt ?? run?.lastActivityAt ?? s.ticket?.ticket.updatedAt, now);
-  const extra = [...new Set(s.items.slice(1).map((a) => a.kind))].filter((k) => k !== top?.kind);
+  const extra = otherKinds(s);
   return (
     <button ref={ref} className={`q-item ${selected ? "selected" : ""}`} onClick={onSelect} aria-current={selected}>
       <span className="q-rank">{rank ?? ""}</span>
@@ -600,7 +618,7 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
   const featured = live.length ? live : primary && !isResolved(s, primary) ? [primary] : relevant.length ? [relevant.at(-1)!] : [];
   const prs = s.ticket?.prs ?? [];
   const runs = s.ticket?.runs ?? (s.run ? [s.run] : []);
-  const top = s.items[0];
+  const top = lead(s);
 
   return (
     <article className="workspace" key={s.id}>
@@ -610,6 +628,11 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
             <>
               <Dot tone={KIND[top.kind].tone} />
               <span className={`tone-text-${KIND[top.kind].tone}`}>{KIND[top.kind].title}</span>
+              {otherKinds(s).map((k) => (
+                <span key={k} className={`tag tone-${KIND[k].tone}`}>
+                  {SHORT[k]}
+                </span>
+              ))}
             </>
           ) : (
             <span>{live.length ? "Agents at work" : "Quiet"}</span>
@@ -632,7 +655,7 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
             </a>
           )}
           <span className="grow" />
-          {s.items.length > 0 &&
+          {actionable(s) &&
             (snoozed ? (
               <button className="btn ghost" onClick={onWake}>
                 Back to the queue
@@ -752,12 +775,14 @@ export function App() {
 
   const subjects = useMemo(() => (data ? buildSubjects(data) : new Map<string, Subject>()), [data]);
   const all = [...subjects.values()];
-  const ranked = all.filter((s) => s.items.length).sort((a, b) => b.items[0].score - a.items[0].score);
+  const ranked = all.filter(actionable).sort((a, b) => lead(b)!.score - lead(a)!.score);
   const queue = ranked.filter((s) => !snoozed.isSnoozed(s));
   const done = ranked.filter((s) => snoozed.isSnoozed(s));
+  // Only context left, such as a PR out for review: the ball is with someone else.
+  const othersTurn = all.filter((s) => s.items.length && !actionable(s)).sort((a, b) => lead(b)!.score - lead(a)!.score);
   const working = all.filter((s) => !s.items.length && liveRuns(s).length);
   const quiet = data ? data.myTickets.map((g) => subjects.get(`t:${g.ticket.key}`)!).filter((s) => !s.items.length && !liveRuns(s).length) : [];
-  const order = [...queue, ...working, ...done, ...quiet];
+  const order = [...queue, ...othersTurn, ...working, ...done, ...quiet];
 
   const selected = (selectedId && subjects.get(selectedId)) || queue[0] || order[0] || null;
 
@@ -782,7 +807,7 @@ export function App() {
   );
 
   const snoozeAndAdvance = useCallback(() => {
-    if (!selected || !selected.items.length) return;
+    if (!selected || !actionable(selected)) return;
     const i = queue.findIndex((s) => s.id === selected.id);
     const next = queue[i + 1] ?? queue[i - 1];
     snoozed.snooze(selected);
@@ -879,6 +904,11 @@ export function App() {
               </p>
             </div>
           )}
+          <RailSection title="Waiting on others" count={othersTurn.length} hint="Someone else has the next move, such as a reviewer">
+            {othersTurn.map((s) => (
+              <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
+            ))}
+          </RailSection>
           <RailSection title="Agents at work" count={working.length} hint="Live runs that need nothing from you yet">
             {working.map((s) => (
               <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />

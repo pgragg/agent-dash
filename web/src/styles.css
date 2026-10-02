@@ -106,6 +106,7 @@ kbd {
   background: var(--hover); color: var(--ink-2); white-space: nowrap;
 }
 .tag.tone-waiting { background: var(--waiting-bg); color: var(--waiting); }
+.tag.tone-working { background: var(--working-bg); color: var(--working); }
 .tag.tone-bad { background: var(--bad-bg); color: var(--bad); }
 .tag.tone-warn { background: var(--warn-bg); color: var(--warn); }
 .tag.tone-good { background: var(--good-bg); color: var(--good); }
@@ -190,7 +191,7 @@ kbd {
 .workspace { max-width: 860px; margin: 0 auto; padding: 36px 40px 120px; display: flex; flex-direction: column; gap: 22px; animation: rise .18s ease-out; }
 @keyframes rise { from { opacity: 0; transform: translateY(4px); } }
 .ws-head { display: flex; flex-direction: column; gap: 10px; }
-.eyebrow { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; letter-spacing: .01em; }
+.eyebrow { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12.5px; font-weight: 600; letter-spacing: .01em; }
 .ws-head h1 { font: 650 27px/1.2 var(--display); letter-spacing: -.022em; margin: 0; text-wrap: balance; }
 .ws-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; }
 .key-link { font: 500 12.5px var(--mono); text-decoration: none; color: var(--ink-2); padding: 3px 8px; border-radius: 7px; background: var(--hover); }

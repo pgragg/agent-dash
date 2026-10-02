@@ -72,3 +72,24 @@ test("each row's updatedAt comes from its source: run log, PR, or Jira ticket", 
   assert.equal(at.ci_failing, minutesAgo(30));
   assert.equal(at.overdue, minutesAgo(600));
 });
+
+test("a healthy PR waiting for review is context, until it sits for 2 days", () => {
+  const [fresh] = rankAttention([], [pr({ reviewDecision: "REVIEW_REQUIRED", updatedAt: minutesAgo(60) })], [], NOW);
+  assert.equal(fresh.kind, "in_review");
+  assert.equal(fresh.info, true);
+  assert.match(fresh.reason, /out for review, CI green/);
+
+  const [stale] = rankAttention([], [pr({ reviewDecision: "REVIEW_REQUIRED", updatedAt: minutesAgo(3 * 24 * 60) })], [], NOW);
+  assert.equal(stale.info, undefined);
+  assert.match(stale.reason, /nudge the reviewer/);
+
+  // Red CI, a conflict, or a draft is not "out for review": those have their own items, or none.
+  assert.deepEqual(kinds(rankAttention([], [pr({ reviewDecision: "REVIEW_REQUIRED", checks: "failure" })], [], NOW)), ["ci_failing"]);
+  assert.deepEqual(kinds(rankAttention([], [pr({ reviewDecision: "REVIEW_REQUIRED", isDraft: true })], [], NOW)), []);
+});
+
+test("a waiting agent and a PR out for review are both listed for the ticket", () => {
+  const items = rankAttention([run({ status: "awaiting_input", tickets: ["FSDK-1"] })], [pr({ reviewDecision: "REVIEW_REQUIRED", tickets: ["FSDK-1"] })], [], NOW);
+  assert.deepEqual(kinds(items), ["awaiting_input", "in_review"]);
+  assert.ok(items.every((i) => i.ticketKey === "FSDK-1"));
+});

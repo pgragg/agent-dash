@@ -48,7 +48,10 @@ function runItems(runs: Run[], now: number): Draft[] {
   return items;
 }
 
-function prItems(prs: PullRequest[]): Draft[] {
+/** After this long with no activity, a PR out for review needs a nudge from you. */
+const REVIEW_NUDGE_MS = 2 * DAY;
+
+function prItems(prs: PullRequest[], now: number): Draft[] {
   const items: Draft[] = [];
   for (const pr of prs) {
     if (pr.state !== "open") continue;
@@ -61,6 +64,13 @@ function prItems(prs: PullRequest[]): Draft[] {
     if (pr.mergeable === "CONFLICTING") items.push({ ...base, kind: "merge_conflict", score: 80 * weight, reason: `${name}: merge conflict` });
     if (pr.reviewDecision === "APPROVED" && !pr.isDraft && pr.checks !== "failure" && pr.checks !== "pending" && pr.mergeable !== "CONFLICTING") {
       items.push({ ...base, kind: "ready_to_merge", score: 70, reason: `${name}: approved and green — merge it` });
+    }
+    // Healthy and waiting for a reviewer: the ball is with them, until it has sat too long.
+    if (pr.reviewDecision === "REVIEW_REQUIRED" && !pr.isDraft && pr.checks !== "failure" && pr.mergeable !== "CONFLICTING") {
+      const quiet = now - Date.parse(pr.updatedAt);
+      const ci = pr.checks === "success" ? ", CI green" : pr.checks === "pending" ? ", CI running" : "";
+      if (quiet > REVIEW_NUDGE_MS) items.push({ ...base, kind: "in_review", score: 45, reason: `${name}: no review activity for ${ago(quiet)} — nudge the reviewer` });
+      else items.push({ ...base, kind: "in_review", score: 15, info: true, reason: `${name} is out for review${ci} (last activity ${ago(quiet)} ago)` });
     }
   }
   return items;
@@ -93,7 +103,7 @@ function ticketItems(tickets: Ticket[], runs: Run[], prs: PullRequest[], now: nu
 }
 
 export function rankAttention(runs: Run[], prs: PullRequest[], tickets: Ticket[], now: number, jiraServer = ""): AttentionItem[] {
-  return [...runItems(runs, now), ...prItems(prs), ...ticketItems(tickets, runs, prs, now)]
+  return [...runItems(runs, now), ...prItems(prs, now), ...ticketItems(tickets, runs, prs, now)]
     .map((item) => ({ ...item, ticketUrl: item.ticketKey && jiraServer ? `${jiraServer}/browse/${item.ticketKey}` : null }))
     .sort((a, b) => b.score - a.score);
 }

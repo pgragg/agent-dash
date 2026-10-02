@@ -75,6 +75,7 @@ export type AttentionKind =
   | "ci_failing"
   | "merge_conflict"
   | "ready_to_merge"
+  | "in_review"
   | "overdue"
   | "due_soon"
   | "stalled";
@@ -84,6 +85,8 @@ export interface AttentionItem {
   score: number;
   /** One line that says why this item is on the list. */
   reason: string;
+  /** Context, not a call to act: the ball is with someone else. Alone, it does not put an entry in the queue. */
+  info?: boolean;
   ticketKey: string | null;
   ticketUrl: string | null;
   sessionId?: string;
