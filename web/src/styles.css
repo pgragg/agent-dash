@@ -19,6 +19,10 @@
   --bad-bg: #fdecea;
   --warn: #b7791f;
   --warn-bg: #fbf3e2;
+  /* A smoketest in progress: plain yellow, so it does not read as the amber of a warning. */
+  --running: #f5c400;
+  --running-bg: #fff6c2;
+  --running-ink: #4a3b00;
   --good: #12925b;
   --good-bg: #e6f5ee;
   --accent: #16161a;
@@ -54,6 +58,9 @@
     --bad-bg: #ff6b5e1a;
     --warn: #e0a84a;
     --warn-bg: #e0a84a1a;
+    --running: #f5d000;
+    --running-bg: #f5d0001f;
+    --running-ink: #f5d000;
     --good: #3ccf8e;
     --good-bg: #3ccf8e1a;
     --accent: #f2f2f3;
@@ -516,25 +523,28 @@ a.btn.verb { text-decoration: none; }
 /* SDLC progress bar: one segment per stage, at the top of every ticket. */
 .sdlc { display: flex; flex-direction: column; gap: 8px; }
 .sdlc-bar { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; }
-.sdlc-stage button { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; padding: 6px 2px 5px; border-radius: 8px; border-top: 3px solid var(--line-2); text-align: center; }
-.sdlc-stage button:hover, .sdlc-stage button:focus-visible { background: var(--hover); }
-.sdlc-stage.picked button { background: var(--hover); }
+.sdlc-stage > button, .sdlc-stage > a { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; padding: 6px 2px 5px; border-radius: 8px; border-top: 3px solid var(--line-2); text-align: center; }
+.sdlc-stage > :is(button, a):hover, .sdlc-stage > :is(button, a):focus-visible { background: var(--hover); }
+.sdlc-stage.picked > :is(button, a) { background: var(--hover); }
 .sdlc-dot { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; font-size: 11px; font-weight: 600; border: 1.5px solid var(--line-2); color: var(--muted); background: var(--surface); }
 .sdlc-label { font-size: 11.5px; line-height: 1.2; color: var(--muted); }
-.sdlc-stage.st-done button { border-top-color: var(--good); }
+.sdlc-stage.st-done > :is(button, a) { border-top-color: var(--good); }
 .sdlc-stage.st-done .sdlc-dot { background: var(--good); border-color: var(--good); color: #fff; }
 .sdlc-stage.st-done .sdlc-label { color: var(--ink-2); }
-.sdlc-stage.st-failed button { border-top-color: var(--bad); }
+.sdlc-stage.st-failed > :is(button, a) { border-top-color: var(--bad); }
 .sdlc-stage.st-failed .sdlc-dot { background: var(--bad); border-color: var(--bad); color: #fff; }
-.sdlc-stage.st-waiting button { border-top-color: var(--warn); }
+.sdlc-stage.st-waiting > :is(button, a) { border-top-color: var(--warn); }
 .sdlc-stage.st-waiting .sdlc-dot { border-color: var(--warn); color: var(--warn); }
-.sdlc-stage.st-skipped button { border-top-style: dashed; }
+.sdlc-stage.st-running > :is(button, a) { border-top-color: var(--running); }
+.sdlc-stage.st-running .sdlc-dot { background: var(--running); border-color: var(--running); color: #2a2200; }
+.sdlc-stage.st-skipped > :is(button, a) { border-top-style: dashed; }
 .sdlc-stage.st-skipped .sdlc-label { text-decoration: line-through; }
 .sdlc-stage.current .sdlc-label { color: var(--ink); font-weight: 600; }
 .sdlc-detail { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--ink-2); }
 .st-tag-done { background: var(--good-bg); color: var(--good); }
 .st-tag-failed { background: var(--bad-bg); color: var(--bad); }
 .st-tag-waiting { background: var(--warn-bg); color: var(--warn); }
+.st-tag-running, .tag.tone-running { background: var(--running-bg); color: var(--running-ink); }
 .st-tag-skipped, .st-tag-todo { background: var(--hover); color: var(--muted); }
 
 .smoke-form { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; padding: 12px; border-radius: 12px; background: var(--hover); }

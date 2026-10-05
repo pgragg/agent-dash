@@ -314,10 +314,12 @@ export interface SdlcEvent {
   eventType: SdlcEventType;
   startedAt: string;
   finishedAt: string | null;
-  /** No outcome counts as passed: the event exists. */
+  /** No outcome counts as passed: the event exists. A smoketest with no outcome and no finishedAt is still running. */
   outcome: "passed" | "failed" | null;
   testDetails: string | null;
   testResults: string | null;
+  /** The pi session that runs it, when agent-dash started that session. */
+  sessionId: string | null;
   environments: SdlcEnvironment[];
   tickets: string[];
   createdAt: string;

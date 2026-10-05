@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS SDLC_Event (
   outcome      TEXT CHECK (outcome IN ('passed', 'failed')),
   test_details TEXT,
   test_results TEXT,
+  -- The pi session that runs the smoketest, when agent-dash started it, so the page can link to it.
+  session_id   TEXT,
   created_at   TEXT NOT NULL
 );
 
@@ -157,6 +159,8 @@ export function open(path = DB_PATH): DatabaseSync {
   // WAL lets the server read while a summary run writes from its own process.
   db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
   db.exec(SCHEMA);
+  // CREATE TABLE IF NOT EXISTS does not add a column to a table that is already there.
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = 'session_id'").get()) db.exec("ALTER TABLE SDLC_Event ADD COLUMN session_id TEXT");
   // Summaries saved before steps were stored get their rows once.
   for (const r of db.prepare("SELECT id, ticket, summary FROM summaries WHERE status = 'done' AND id NOT IN (SELECT summary_id FROM next_steps)").all() as unknown as Row[]) {
     insertSteps(r.id, r.ticket, r.summary ?? "");
@@ -416,6 +420,7 @@ export interface NewSdlcEvent {
   outcome?: SdlcEvent["outcome"];
   testDetails?: string | null;
   testResults?: string | null;
+  sessionId?: string | null;
   environments: SdlcEnvironment[];
   tickets: string[];
 }
@@ -426,8 +431,8 @@ export function addSdlcEvent(e: NewSdlcEvent, now = new Date()): SdlcEvent {
   d.exec("BEGIN IMMEDIATE");
   try {
     const { id } = d
-      .prepare("INSERT INTO SDLC_Event (event_type, started_at, finished_at, outcome, test_details, test_results, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id")
-      .get(e.eventType, e.startedAt, e.finishedAt ?? null, e.outcome ?? null, e.testDetails ?? null, e.testResults ?? null, created) as { id: number };
+      .prepare("INSERT INTO SDLC_Event (event_type, started_at, finished_at, outcome, test_details, test_results, session_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
+      .get(e.eventType, e.startedAt, e.finishedAt ?? null, e.outcome ?? null, e.testDetails ?? null, e.testResults ?? null, e.sessionId ?? null, created) as { id: number };
     const env = d.prepare("INSERT OR IGNORE INTO SDLC_Event_Environment (sdlc_event_id, environment) VALUES (?, ?)");
     for (const x of e.environments) env.run(id, x);
     const link = d.prepare("INSERT OR IGNORE INTO SDLC_Event_Ticket (sdlc_event_id, ticket, created_at) VALUES (?, ?, ?)");
@@ -438,6 +443,25 @@ export function addSdlcEvent(e: NewSdlcEvent, now = new Date()): SdlcEvent {
     d.exec("ROLLBACK");
     throw err;
   }
+}
+
+export interface SdlcFinish {
+  finishedAt: string;
+  outcome: "passed" | "failed";
+  testDetails: string | null;
+  testResults: string | null;
+}
+
+/** Ends a running event. Null when there is no such event, or it already ended. */
+export function finishSdlcEvent(id: number, f: SdlcFinish): SdlcEvent | null {
+  const changed = open()
+    .prepare("UPDATE SDLC_Event SET finished_at = ?, outcome = ?, test_details = coalesce(?, test_details), test_results = coalesce(?, test_results) WHERE id = ? AND finished_at IS NULL AND outcome IS NULL")
+    .run(f.finishedAt, f.outcome, f.testDetails, f.testResults, id).changes;
+  return changed ? getSdlcEvent(id) : null;
+}
+
+export function getSdlcEvent(id: number): SdlcEvent | null {
+  return sdlcEvents("WHERE e.id = ?", id)[0] ?? null;
 }
 
 export function deleteSdlcEvent(id: number): boolean {
@@ -459,7 +483,7 @@ export function deleteSdlcEvent(id: number): boolean {
 function sdlcEvents(where = "", ...params: number[]): SdlcEvent[] {
   const rows = open()
     .prepare(
-      `SELECT e.id, e.event_type AS eventType, e.started_at AS startedAt, e.finished_at AS finishedAt, e.outcome, e.test_details AS testDetails, e.test_results AS testResults, e.created_at AS createdAt,
+      `SELECT e.id, e.event_type AS eventType, e.started_at AS startedAt, e.finished_at AS finishedAt, e.outcome, e.test_details AS testDetails, e.test_results AS testResults, e.session_id AS sessionId, e.created_at AS createdAt,
         (SELECT group_concat(environment) FROM SDLC_Event_Environment WHERE sdlc_event_id = e.id) AS envs,
         (SELECT group_concat(ticket) FROM SDLC_Event_Ticket WHERE sdlc_event_id = e.id) AS keys
        FROM SDLC_Event e ${where} ORDER BY e.started_at DESC, e.id DESC`,

@@ -26,6 +26,7 @@ function ev(over: Partial<SdlcEvent> = {}): SdlcEvent {
     outcome: "passed",
     testDetails: null,
     testResults: null,
+    sessionId: null,
     environments: ["localhost"],
     tickets: ["FSDK-1"],
     createdAt: "2026-10-02T10:00:00.000Z",
@@ -88,6 +89,19 @@ test("Done comes from Jira, and then there is no next stage", () => {
   assert.equal(states(p).prod_smoketest, "skipped");
 });
 
+test("a smoketest with a start and no end is running: the stage is yellow until its agent records the result", () => {
+  const running = ev({ outcome: null, finishedAt: null, sessionId: "s-1", startedAt: "2026-10-02T11:00:00.000Z" });
+  const p = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev({ outcome: "failed" }), running] });
+  assert.equal(states(p).local_smoketest, "running");
+  assert.equal(p.next?.id, "local_smoketest");
+  assert.equal(p.next?.events[0].sessionId, "s-1");
+  assert.match(p.hint!, /Smoketest running since 2026-10-02 11:00 UTC/);
+  // A running smoketest is not progress yet.
+  assert.equal(sdlcProgress({ ticket: ticket(), prs: [], events: [running] }).current, 0);
+  // A hand-recorded result with no end time is not running.
+  assert.equal(states(sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev({ finishedAt: null })] })).local_smoketest, "done");
+});
+
 test("an environment is an id or a label", () => {
   assert.equal(parseEnvironment("postman_beta"), "postman_beta");
   assert.equal(parseEnvironment("Postman Beta"), "postman_beta");
@@ -132,12 +146,31 @@ test("the script that agents call writes into the same database", () => {
   assert.throws(() => execFileSync("node", [script, "smoketest", "--ticket", "FSDK-30"], { env, stdio: "pipe" }));
 });
 
+test("the agent finishes its running event once, with the script", () => {
+  const script = new URL("../scripts/sdlc-event.ts", import.meta.url).pathname;
+  const env = { ...process.env, AGENT_DASH_DB: dbPath };
+  const running = db.addSdlcEvent({ eventType: "smoketest", startedAt: "2026-10-02T10:00:00.000Z", environments: ["localhost"], tickets: ["FSDK-31"], sessionId: "abc-123" });
+  assert.equal(running.sessionId, "abc-123");
+  assert.equal(running.finishedAt, null);
+  const out = JSON.parse(execFileSync("node", [script, "finish", "--id", String(running.id), "--outcome", "failed", "--results", "500 on /publish"], { env }).toString());
+  assert.equal(out.outcome, "failed");
+  assert.ok(out.finishedAt);
+  const saved = db.sdlcEventsByTicket()["FSDK-31"][0];
+  assert.equal(saved.testResults, "500 on /publish");
+  assert.equal(saved.sessionId, "abc-123");
+  // A second result does not overwrite the first, and a result needs an outcome.
+  assert.throws(() => execFileSync("node", [script, "finish", "--id", String(running.id), "--outcome", "passed"], { env, stdio: "pipe" }));
+  const other = db.addSdlcEvent({ eventType: "smoketest", startedAt: "2026-10-02T10:00:00.000Z", environments: ["localhost"], tickets: ["FSDK-31"] });
+  assert.throws(() => execFileSync("node", [script, "finish", "--id", String(other.id)], { env, stdio: "pipe" }));
+  assert.throws(() => execFileSync("node", [script, "finish", "--id", "999999", "--outcome", "passed"], { env, stdio: "pipe" }));
+});
+
 test("verb messages name the environment and the record command; the summary prompt carries the order", async () => {
-  const m = smoketestMessage("FSDK-1", "localhost", "/dash/scripts/sdlc-event.ts");
+  const m = smoketestMessage("FSDK-1", "localhost", "/dash/scripts/sdlc-event.ts", 12);
   assert.match(m, /^Run a smoketest of FSDK-1 on localhost\./);
   assert.match(m, /Local smoketesting\.md/);
-  assert.match(m, /node \/dash\/scripts\/sdlc-event\.ts smoketest --ticket FSDK-1 --env localhost/);
-  assert.match(smoketestMessage("FSDK-1", "postman_prod", "/s"), /real customer traffic/);
+  assert.match(m, /node \/dash\/scripts\/sdlc-event\.ts finish --id 12 --outcome passed\|failed/);
+  assert.match(smoketestMessage("FSDK-1", "postman_prod", "/s", 1), /real customer traffic/);
   const c = confirmDeployMessage("FSDK-1", "beta", ["https://github.com/postman-eng/cloud9-parcels-deployments/pull/7"], "/s");
   assert.match(c, /Do not sync, roll back, or change anything/);
   assert.match(c, /deploy --ticket FSDK-1 --env postman_beta/);

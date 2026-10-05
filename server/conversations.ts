@@ -10,6 +10,8 @@ export interface ConversationOptions {
   message?: string;
   /** The session display name; a ticket key in it links the run to the ticket. A resume keeps the file's name. */
   name?: string;
+  /** The id of a new run, when the caller needs it first. */
+  sessionId?: string;
   /** Continue this session file. pi keeps the id that the file holds. */
   resume?: { sessionId: string; sessionFile: string };
 }
@@ -36,7 +38,7 @@ export function isRunning(sessionId: string): boolean {
  * can open the conversation before pi has written anything.
  */
 export function startConversation(opts: ConversationOptions): string {
-  const sessionId = opts.resume?.sessionId ?? randomUUID();
+  const sessionId = opts.resume?.sessionId ?? opts.sessionId ?? randomUUID();
   if (opts.message) {
     const inbox = join(config.inboxDir, sessionId);
     mkdirSync(inbox, { recursive: true });
