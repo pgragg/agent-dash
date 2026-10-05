@@ -24,8 +24,10 @@ export const config = {
     /** FSM is deprecated and mirrored into FSDK, so its tickets would show twice. */
     excludeProjects: (env.AGENT_DASH_EXCLUDE_PROJECTS ?? "FSM").split(",").filter(Boolean),
   },
+  /** agent-dash's own tickets (`AD-<n>`): markdown files in one folder per status, not Jira issues. */
+  localTicketsDir: env.AGENT_DASH_LOCAL_TICKETS_DIR ?? join(home, "pi/projects/27_agent_dash/project_management"),
   /** Ticket keys that a run can link to. */
-  ticketPattern: new RegExp(`\\b${ignoredTickets ? `(?!(?:${ignoredTickets})\\b)` : ""}(?:${env.AGENT_DASH_PROJECTS ?? "FSDK|EFSUP"})-\\d+\\b`, "g"),
+  ticketPattern: new RegExp(`\\b${ignoredTickets ? `(?!(?:${ignoredTickets})\\b)` : ""}(?:${env.AGENT_DASH_PROJECTS ?? "FSDK|EFSUP|AD"})-\\d+\\b`, "g"),
   /** Runs and PRs older than this do not create "other ticket" groups or unlinked rows. */
   recentDays: Number(env.AGENT_DASH_RECENT_DAYS ?? 14),
   /** Jira and GitHub answers are cached this long, so a page refresh does not hit the APIs. */

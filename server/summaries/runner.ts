@@ -7,6 +7,7 @@ import { mergePrs, progressLines, sdlcProgress } from "../../shared/sdlc.ts";
 import type { Note, PullRequest, Run, SdlcEvent, ThreadStatusChange, Ticket } from "../../shared/types.ts";
 import { config } from "../config.ts";
 import { fetchTicketPrs } from "../sources/github.ts";
+import { isLocalKey } from "../sources/localTickets.ts";
 import { digestSession } from "../sources/sessions.ts";
 import { isAlive } from "../sources/status.ts";
 import * as db from "./db.ts";
@@ -53,7 +54,7 @@ export async function buildContext({ ticket, runs: allRuns, prs, notes = [], thr
   const out: string[] = [
     `# ${ticket.key}: ${ticket.summary}`,
     "",
-    `- Jira: ${ticket.url}`,
+    ticket.file ? `- Ticket file: ${ticket.file}` : `- Jira: ${ticket.url}`,
     `- Status: ${ticket.status} · Priority: ${ticket.priority ?? "-"} · Due: ${ticket.dueDate ?? "-"} · Updated: ${ticket.updatedAt || "-"}`,
     `- Assigned to Piper: ${ticket.assignedToMe ? "yes" : "no"}`,
     "",
@@ -112,7 +113,11 @@ export async function buildContext({ ticket, runs: allRuns, prs, notes = [], thr
 export function buildPrompt(key: string, id: number, workDir: string): string {
   const contextFile = join(workDir, "context.md");
   const summaryFile = join(workDir, "summary.md");
-  return `Write a next-steps summary for Jira ticket ${key}. Piper oversees several coding agents at once and reads it in a dashboard, so keep it very short.
+  const ticketStep = isLocalKey(key)
+    ? `2. ${key} is a local ticket, not a Jira issue. Read its file, named as "Ticket file" in the context file.`
+    : `2. Jira body and comments:
+   set -a; source ~/pi/secrets/jira/.env.personal; set +a; jira issue view ${key} --comments 20 --plain`;
+  return `Write a next-steps summary for ticket ${key}. Piper oversees several coding agents at once and reads it in a dashboard, so keep it very short.
 
 RULES
 - Read-only. Do not write to Jira, GitHub, Slack, or any repo: no comments, transitions, reviews, messages, reactions, commits, or pushes.
@@ -122,8 +127,7 @@ RULES
 
 STEPS
 1. Read ${contextFile}. agent-dash already put Piper's private notes, the ticket fields, linked PRs, and digests of the pi sessions about ${key} in it.
-2. Jira body and comments:
-   set -a; source ~/pi/secrets/jira/.env.personal; set +a; jira issue view ${key} --comments 20 --plain
+${ticketStep}
 3. For each open PR, and each PR merged in the last 7 days, read CI and review comments:
    gh pr view <url> --comments
 4. Slack, read-only. Search with this script only; do not drive the Slack UI:
