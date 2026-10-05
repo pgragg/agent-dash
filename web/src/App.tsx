@@ -2,9 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { splitSummary } from "../../shared/nextSteps.ts";
 import { prRef } from "../../shared/refs.ts";
 import type { Action, ActionKind, AttentionItem, AttentionKind, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState, Turn } from "../../shared/types.ts";
+import { conversationHash, launchAgent, ResumeHere, resuming } from "./agents.tsx";
 import { filterHistory, groupByDay } from "./history.ts";
+import { PrPanel, PrVerbButton } from "./prPanel.tsx";
+import { ciTag } from "./prView.ts";
 import { countPrs, groupOpenPrs } from "./prs.ts";
 import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, resumeCommand, runTitle, shortDate, stamp, useDashboard, useFlash, useNow, useWaitNotifications } from "./lib.tsx";
+import { Composer, LivePanel } from "./liveControl.tsx";
 import { href, humanAge, parseHash, resolveBoardRef, type Route } from "./routes.ts";
 import { FixLogin } from "./fixLogin.tsx";
 import { rowKey } from "./rowNav.ts";
@@ -183,7 +187,11 @@ function OpenTab({ run, onError, className = "btn ghost", label = "Open in iTerm
       </a>
     );
   }
-  if (!run.itermSessionId) return <CopyButton text={resumeCommand(run)} label="Copy resume" className={className} />;
+  if (!run.itermSessionId) {
+    const copy = <CopyButton text={resumeCommand(run)} label="Copy resume" className={className} />;
+    // Only a run with a status file is known to be closed; another one may still be open in a terminal.
+    return run.status === "finished" && run.statusSource === "extension" ? <><ResumeHere run={run} onError={onError} small={className.includes("small")} />{copy}</> : copy;
+  }
   return (
     <button className={className} title="Bring this session's iTerm tab to the front" onClick={async () => onError(await api.focusTab(run.sessionId))}>
       {label} {hotkey && <Kbd>O</Kbd>}
@@ -265,18 +273,24 @@ const STALE_MS = 30 * 60_000;
 /** One drafted step, with a button that starts a pi agent on it, with the same context as "Start a new agent". */
 function StepRow({ ticket, step, cwd, onError }: { ticket: string; step: NextStep; cwd: string; onError: (m: string | null) => void }) {
   const [state, setState] = useState<"idle" | "starting" | "started">("idle");
-  const start = async () => {
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const start = async (terminal: boolean) => {
     setState("starting");
-    const err = await api.startStep(ticket, step.id, cwd);
-    onError(err);
-    setState(err ? "idle" : "started");
+    try {
+      setSessionId(await launchAgent(ticket, { step: step.id, cwd, terminal }));
+      onError(null);
+      setState("started");
+    } catch (err) {
+      onError((err as Error).message);
+      setState("idle");
+    }
   };
   return (
     <li className="step" id={`step:${step.id}`}>
       <span className="step-body">{inline(step.body)}</span>
-      <button className="btn ghost small" onClick={start} disabled={state !== "idle" || !cwd.trim()} title={`Start a pi agent in ${cwd} on this step, with this page as context`}>
+      {sessionId ? <a className="btn ghost small" href={conversationHash(sessionId)}>Started ✓ Open</a> : <button className="btn ghost small" onClick={(e) => start(e.altKey)} disabled={state !== "idle" || !cwd.trim()} title={`Start a pi agent in ${cwd} on this step, with this page as context. ⌥-click opens it in a new iTerm tab.`}>
         {state === "starting" ? "Starting…" : state === "started" ? "Started ✓" : "Start agent"}
-      </button>
+      </button>}
     </li>
   );
 }
@@ -454,7 +468,8 @@ function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd:
   const folders = workFolders(s);
   const [message, setMessage] = useState("");
   const [starting, setStarting] = useState(false);
-  const [started, setStarted] = useState<number | null>(null);
+  const [started, setStarted] = useState<{ at: number; sessionId: string | null } | null>(null);
+  const [terminal, setTerminal] = useState(false);
   const [context, setContext] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -463,19 +478,21 @@ function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd:
   const start = async () => {
     if (!message.trim()) return;
     setStarting(true);
-    const err = await api.startAgent(key, message, cwd);
-    setStarting(false);
-    onError(err);
-    if (!err) {
+    try {
+      const sessionId = await launchAgent(key, { message, cwd, terminal });
+      onError(null);
       setMessage("");
-      setStarted(Date.now());
+      setStarted({ at: Date.now(), sessionId });
+    } catch (err) {
+      onError((err as Error).message);
     }
+    setStarting(false);
   };
   return (
     <section className="card start-agent">
       <header className="card-head">
         <h3>Start a new agent</h3>
-        <span className="meta">opens pi in a new iTerm tab, with this page as context</span>
+        <span className="meta">starts pi with this page as context; you talk to it here</span>
       </header>
       <div className="composer">
         <textarea
@@ -502,12 +519,19 @@ function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd:
               ))}
             </datalist>
           </label>
+          <label className="meta" title="Open pi in a new iTerm tab instead of on this page">
+            <input type="checkbox" checked={terminal} onChange={(e) => setTerminal(e.target.checked)} /> in iTerm
+          </label>
           <button className="btn primary" onClick={start} disabled={starting || !message.trim() || !cwd.trim()}>
             {starting ? "Starting…" : "Start agent"} <Kbd>⌘↵</Kbd>
           </button>
         </div>
       </div>
-      {started && Date.now() - started < 30_000 && <p className="meta started">Started in a new iTerm tab. It shows under Agents once it is running.</p>}
+      {started && Date.now() - started.at < 30_000 && (
+        <p className="meta started">
+          {started.sessionId ? <>Started. It shows under Agents once pi saves the first message, or <a href={conversationHash(started.sessionId)}>open its page</a>.</> : "Started in a new iTerm tab. It shows under Agents once it is running."}
+        </p>
+      )}
       <details
         className="context-preview"
         onToggle={async (e) => {
@@ -518,58 +542,6 @@ function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd:
         {context === null ? <span className="shimmer" /> : <pre>{context}</pre>}
       </details>
     </section>
-  );
-}
-
-function Composer({ run, onError, focusSignal }: { run: HistoryRun; onError: (m: string | null) => void; focusSignal: number }) {
-  const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
-  const [sentAt, setSentAt] = useState<number | null>(null);
-  const ref = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
-    if (focusSignal) ref.current?.focus();
-  }, [focusSignal]);
-  const send = async () => {
-    if (!text.trim()) return;
-    setSending(true);
-    const err = await api.reply(run.sessionId, text);
-    setSending(false);
-    onError(err);
-    if (!err) {
-      setText("");
-      setSentAt(Date.now());
-    }
-  };
-  if (!run.canReply) {
-    return (
-      <div className="composer-off">
-        To reply from here, run <code>/reload</code> once in this session. Until then, reply in its tab.
-      </div>
-    );
-  }
-  return (
-    <div className="composer">
-      <textarea
-        ref={ref}
-        rows={3}
-        value={text}
-        placeholder={run.status === "working" ? "Queue a message for when the agent finishes…" : "Reply to the agent…"}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            send();
-          }
-          if (e.key === "Escape") (e.target as HTMLTextAreaElement).blur();
-        }}
-      />
-      <div className="composer-bar">
-        <span className="meta">{sentAt && Date.now() - sentAt < 20_000 ? "Sent. The agent has your message." : `to ${dirLabel(run.cwd)} · ${run.sessionId.slice(-6)}`}</span>
-        <button className="btn primary" onClick={send} disabled={sending || !text.trim()}>
-          {sending ? "Sending…" : run.status === "working" ? "Queue" : "Send"} <Kbd>⌘↵</Kbd>
-        </button>
-      </div>
-    </div>
   );
 }
 
@@ -617,6 +589,7 @@ function ResolveButton({ ticket, run, onError, className = "btn ghost" }: { tick
 
 function AgentCard({ run, now, onError, focusSignal, primary, ticket }: { run: Run; now: number; onError: (m: string | null) => void; focusSignal: number; primary: boolean; ticket?: string }) {
   const [expanded, setExpanded] = useState(false);
+  const [chat, setChat] = useState(false);
   const long = run.lastMessage.length > 900;
   return (
     <section className={`card agent tone-border-${runTone(run)}`} id={`r:${run.sessionId}`}>
@@ -632,7 +605,11 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket }: { run: R
         {ticket && <ResolveButton ticket={ticket} run={run} onError={onError} />}
         <OpenTab run={run} onError={onError} hotkey={primary} />
       </header>
-      {run.lastMessage && (
+      <LivePanel run={run} now={now} onError={onError} />
+      {/* The whole chat ends with the last message, so it replaces it. */}
+      {/* A working agent writes its log on every tool call; reload on a new prompt or when it stops, not on each write. */}
+      {chat && <Chat sessionId={run.sessionId} refreshKey={run.status === "working" ? run.userMessageCount : run.lastActivityAt + run.status} />}
+      {!chat && run.lastMessage && (
         <div className={`agent-message ${long && !expanded ? "clamped" : ""}`}>
           <Markdown text={run.lastMessage} />
           {long && (
@@ -642,6 +619,7 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket }: { run: R
           )}
         </div>
       )}
+      <button className="btn ghost small chat-toggle" aria-expanded={chat} onClick={() => setChat(!chat)}>{chat ? "Show only the last message" : "Show the conversation"}</button>
       {run.status !== "finished" && <Composer run={run} onError={onError} focusSignal={primary ? focusSignal : 0} />}
     </section>
   );
@@ -650,16 +628,22 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket }: { run: R
 function PrRow({ pr, now }: { pr: PullRequest; now: number }) {
   const open = pr.state === "open";
   const review = pr.reviewDecision === "APPROVED" ? ["approved", "good"] : pr.reviewDecision === "CHANGES_REQUESTED" ? ["changes requested", "bad"] : pr.reviewDecision === "REVIEW_REQUIRED" ? ["needs review", "muted"] : null;
+  const ci = open ? ciTag(pr) : null;
   return (
-    <a className={`pr-row ${open ? "" : "closed"}`} href={pr.url} target="_blank" rel="noreferrer">
-      <span className={`pr-state state-${pr.isDraft && open ? "draft" : pr.state}`}>{pr.isDraft && open ? "draft" : pr.state}</span>
-      <span className="pr-name">{prName(pr.url)}</span>
-      <span className="pr-title">{pr.title}</span>
-      {open && pr.checks !== "none" && <span className={`tag tone-${pr.checks === "success" ? "good" : pr.checks === "failure" ? "bad" : "warn"}`}>CI {pr.checks}</span>}
-      {open && review && <span className={`tag tone-${review[1]}`}>{review[0]}</span>}
-      {open && pr.mergeable === "CONFLICTING" && <span className="tag tone-bad">conflict</span>}
-      <span className="meta">{age(pr.updatedAt, now)}</span>
-    </a>
+    <div className="pr-line">
+      <a className={`pr-row ${open ? "" : "closed"}`} href={href(prRef(pr.url) ?? "prs")} title="Open the PR panel">
+        <span className={`pr-state state-${pr.isDraft && open ? "draft" : pr.state}`}>{pr.isDraft && open ? "draft" : pr.state}</span>
+        <span className="pr-name">{prName(pr.url)}</span>
+        <span className="pr-title">{pr.title}</span>
+        {ci && <span className={`tag tone-${ci.tone}`} title={ci.title}>{ci.text}</span>}
+        {open && review && <span className={`tag tone-${review[1]}`}>{review[0]}</span>}
+        {open && pr.mergeable === "CONFLICTING" && <span className="tag tone-bad">conflict</span>}
+        <span className="meta">{age(pr.updatedAt, now)}</span>
+      </a>
+      <a className="ext-link pr-ext" href={pr.url} target="_blank" rel="noreferrer" title="Open on GitHub" aria-label="Open on GitHub">
+        ↗
+      </a>
+    </div>
   );
 }
 
@@ -814,9 +798,14 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
           {t?.priority && <span className="meta">{t.priority}</span>}
           {due && <span className={`tone-text-${due.tone}`}>{due.text}</span>}
           {s.prUrl && !t && (
-            <a className="key-link" href={s.prUrl} target="_blank" rel="noreferrer">
-              {prName(s.prUrl)} ↗
-            </a>
+            <>
+              <a className="key-link" href={href(prRef(s.prUrl) ?? "prs")} title="Open the PR panel">
+                {prName(s.prUrl)}
+              </a>
+              <a className="ext-link" href={s.prUrl} target="_blank" rel="noreferrer" title="Open on GitHub" aria-label="Open on GitHub">
+                ↗
+              </a>
+            </>
           )}
           <span className="grow" />
           {actionable(s) &&
@@ -833,9 +822,11 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
         {s.items.length > 0 && (
           <ul className="why">
             {s.items.map((a, i) => (
-              <li key={i}>
+              // A stable key: the verb button keeps its "Started" state when the list changes order.
+              <li key={`${a.kind}:${a.prUrl ?? a.sessionId ?? a.ticketKey ?? i}`}>
                 <Dot tone={KIND[a.kind].tone} />
                 <span>{a.reason}</span>
+                <PrVerbButton item={a} data={data} />
                 {t && (a.kind === "overdue" || a.kind === "due_soon") && <DueDateVerb ticket={t} cwd={cwd} onError={setError} compact />}
               </li>
             ))}
@@ -898,10 +889,8 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
 
 // ---- PRs view -----------------------------------------------------------------------
 
-function PrsView({ data, now, focus }: { data: Dashboard; now: number; focus: string | null }) {
-  useFlash(focus);
+function PrsView({ data, now }: { data: Dashboard; now: number }) {
   const groups = useMemo(() => groupOpenPrs(data), [data]);
-  const missing = focus && !groups.some((g) => g.prs.some((e) => prRef(e.pr.url) === focus)) ? focus.slice(3) : null;
   const total = countPrs(groups);
   const ticketCount = groups.filter((g) => g.ticket).length;
   return (
@@ -914,14 +903,6 @@ function PrsView({ data, now, focus }: { data: Dashboard; now: number; focus: st
           </span>
         </div>
       </header>
-      {missing && (
-        <div className="toast">
-          {missing} is not an open PR of yours from the last 14 days.{" "}
-          <a href={`https://github.com/${missing.replace(/\/(\d+)$/, "/pull/$1")}`} target="_blank" rel="noreferrer">
-            Open it on GitHub ↗
-          </a>
-        </div>
-      )}
       {groups.length === 0 && <div className="zero big">You have no open PRs.</div>}
       {groups.map((g) => {
         const t = g.ticket;
@@ -958,6 +939,7 @@ function PrsView({ data, now, focus }: { data: Dashboard; now: number; focus: st
                           <li key={a.kind}>
                             <Dot tone={KIND[a.kind].tone} />
                             <span>{a.reason}</span>
+                            <PrVerbButton item={a} data={data} />
                           </li>
                         ))}
                       </ul>
@@ -1289,7 +1271,7 @@ function ConversationView({ sessionId, data, now }: { sessionId: string; data: D
                 {statusText(run, now)} · {dirLabel(run.cwd)} · {plural(run.userMessageCount, "prompt")}
               </span>
               {run.headless ? (
-                <button className="btn ghost small" title="Stop this pi process. Copy resume continues it in a terminal." onClick={async () => setError(await api.endConversation(sessionId))}>
+                <button className="btn ghost small" title="Stop this pi process. Resume here continues it later." onClick={async () => setError(await api.endConversation(sessionId))}>
                   End conversation
                 </button>
               ) : (
@@ -1304,9 +1286,9 @@ function ConversationView({ sessionId, data, now }: { sessionId: string; data: D
       {error && <div className="toast">{error}</div>}
       {/* The run shows once pi saved the first message; until then there is no chat to load. */}
       {run && <Chat sessionId={sessionId} refreshKey={run.lastActivityAt + run.status} />}
-      {run?.status === "working" && <p className="meta">The agent is working…</p>}
+      {run && <LivePanel run={run} now={now} onError={setError} working="The agent is working…" />}
       {run && run.status !== "finished" && <Composer run={run} onError={setError} focusSignal={0} />}
-      {run?.status === "finished" && <p className="meta">This conversation ended. Copy resume continues it in a terminal.</p>}
+      {run?.status === "finished" && <p className="meta">{resuming(sessionId) ? "Starting pi…" : "This conversation ended. Resume here (at the top) continues it on this page, and Copy resume in a terminal."}</p>}
       <div ref={end} />
     </article>
   );
@@ -1516,7 +1498,7 @@ export function App() {
         </main>
       ) : route.view === "prs" ? (
         <main className="main">
-          <PrsView data={data} now={now} focus={route.pr} />
+          {route.pr ? <PrPanel key={route.pr} refId={route.pr} data={data} now={now} /> : <PrsView data={data} now={now} />}
         </main>
       ) : view === "history" ? (
         <main className="main">

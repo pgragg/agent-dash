@@ -1,7 +1,7 @@
 import type { AttentionItem, Dashboard, HistoryRun, PullRequest, Run, RunStatus, ThreadStatusChange, Ticket, TicketGroup } from "../shared/types.ts";
 import { rankAttention } from "./attention.ts";
 import { heuristicStatus, type ParsedSession } from "./sources/sessions.ts";
-import { resolveReported, type ReportedStatus } from "./sources/status.ts";
+import { resolveReported, type ReportedStatus, takesControls } from "./sources/status.ts";
 
 export interface ModelInput {
   sessions: ParsedSession[];
@@ -41,7 +41,7 @@ export function toRuns(sessions: ParsedSession[], reported: Map<string, Reported
         status,
         statusSource: r ? "extension" : "heuristic",
         statusSince: since,
-        askedQuestion: s.askedQuestion,
+        askedQuestion: s.askedQuestion || Boolean(r?.dialog && status !== "finished"),
         endedInError: !s.midRun && s.lastStopReason === "error",
         stoppedByUser: !s.midRun && s.lastStopReason === "aborted",
         tickets: [...s.tickets],
@@ -51,6 +51,9 @@ export function toRuns(sessions: ParsedSession[], reported: Map<string, Reported
         itermSessionId: r && status !== "finished" ? (r.itermSessionId ?? null) : null,
         canReply: Boolean(r?.inbox) && status !== "finished",
         headless: r?.mode === "rpc" && status !== "finished",
+        activity: status === "working" ? (r?.activity ?? null) : null,
+        dialog: status !== "finished" ? (r?.dialog ?? null) : null,
+        canControl: takesControls(r) && status !== "finished",
       } satisfies Run;
     });
 }

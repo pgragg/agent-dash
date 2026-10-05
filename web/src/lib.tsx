@@ -1,5 +1,6 @@
 import { Fragment, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import type { Dashboard, HistoryRun, Transcript } from "../../shared/types.ts";
+import type { Dashboard, HistoryRun, PrDetail, Transcript } from "../../shared/types.ts";
+import { internalHref, JIRA_BROWSE, splitTrailing } from "./links.ts";
 import { boardHash, newlyWaiting, runsOf, type Seen, snapshot } from "./notify.ts";
 
 // ---- time ---------------------------------------------------------------------------
@@ -96,6 +97,9 @@ export function plural(n: number, word: string): string {
 
 // ---- data ---------------------------------------------------------------------------
 
+/** Ticket keys on the board, so a Jira link in a message can open the ticket here. */
+let knownTickets: ReadonlySet<string> = new Set();
+
 export function useDashboard() {
   const [data, setData] = useState<Dashboard | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -110,9 +114,10 @@ export function useDashboard() {
     try {
       const res = await fetch(`/api/dashboard${refresh ? "?refresh" : ""}`);
       if (!res.ok) throw new Error(await res.text());
-      const body = await res.json();
+      const body: Dashboard = await res.json();
       if (seq < applied.current) return;
       applied.current = seq;
+      knownTickets = new Set([...body.myTickets, ...body.otherTickets].map((g) => g.ticket.key));
       setData(body);
       setError(null);
     } catch (err) {
@@ -187,7 +192,7 @@ export function useWaitNotifications(data: Dashboard | null) {
 }
 
 /** The custom header makes the browser send a CORS preflight, which the server never answers. */
-async function post(path: string, body?: unknown, method = "POST"): Promise<string | null> {
+export async function post(path: string, body?: unknown, method = "POST"): Promise<string | null> {
   const res = await fetch(path, { method, headers: { "X-Agent-Dash": "1", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
   if (res.ok) return null;
   const json = await res.json().catch(() => ({}));
@@ -202,7 +207,8 @@ const FOCUS_ERRORS: Record<string, string> = {
 export const api = {
   focusTab: (sessionId: string) => post(`/api/focus?session=${encodeURIComponent(sessionId)}`),
   summarize: (ticket: string, force: boolean) => post(`/api/summaries?ticket=${encodeURIComponent(ticket)}${force ? "&force" : ""}`),
-  reply: (sessionId: string, text: string) => post(`/api/reply?session=${encodeURIComponent(sessionId)}`, { text }),
+  /** A steer goes in after the current tool calls; a plain reply waits until the agent finishes. */
+  reply: (sessionId: string, text: string, steer = false) => post(`/api/reply?session=${encodeURIComponent(sessionId)}`, { text, steer }),
   addNote: (ticket: string, body: string) => post(`/api/notes?ticket=${encodeURIComponent(ticket)}`, { body }),
   deleteNote: (id: number) => post(`/api/notes?id=${id}`, undefined, "DELETE"),
   /** Starts a headless pi with the first message; resolves to its session id, or throws the reason. */
@@ -225,6 +231,13 @@ export const api = {
     if (!res.ok) throw new Error(`could not load the history (${res.status})`);
     return res.json();
   },
+  /** One PR in full. The server caches it for a minute; `refresh` skips the cache. */
+  prDetail: async (ref: string, refresh = false): Promise<PrDetail> => {
+    const res = await fetch(`/api/pr?ref=${encodeURIComponent(ref)}${refresh ? "&refresh" : ""}`, { headers: { "X-Agent-Dash": "1" } });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error ?? `could not load the PR (${res.status})`);
+    return json;
+  },
   transcript: async (sessionId: string): Promise<Transcript> => {
     const res = await fetch(`/api/transcript?session=${encodeURIComponent(sessionId)}`);
     if (!res.ok) throw new Error(`could not load the chat (${res.status})`);
@@ -237,12 +250,33 @@ export const api = {
 // ---- markdown -----------------------------------------------------------------------
 
 const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\(https?:\/\/[^)\s]+\))|(https?:\/\/[^\s)<>\]]+)/g;
-const JIRA = /atlassian\.net\/browse\/([A-Z]+-\d+)/;
 
 function linkLabel(url: string): string {
   if (/github\.com\/.+\/pull\/\d+/.test(url)) return prName(url);
-  const jira = url.match(JIRA);
+  const jira = url.match(JIRA_BROWSE);
   return jira ? jira[1] : url.replace(/^https?:\/\//, "");
+}
+
+/** A PR or a known ticket opens in agent-dash; the small ↗ still opens GitHub or Jira. */
+function Link({ url, label }: { url: string; label: ReactNode }) {
+  const internal = internalHref(url, knownTickets);
+  if (!internal) {
+    return (
+      <a href={url} target="_blank" rel="noreferrer" title={url}>
+        {label}
+      </a>
+    );
+  }
+  return (
+    <>
+      <a href={internal} title={`Open in agent-dash · ${url}`}>
+        {label}
+      </a>
+      <a className="ext-link" href={url} target="_blank" rel="noreferrer" title={`Open ${url}`} aria-label={`Open ${url}`}>
+        ↗
+      </a>
+    </>
+  );
 }
 
 export function inline(text: string): ReactNode[] {
@@ -255,9 +289,12 @@ export function inline(text: string): ReactNode[] {
     else if (m[2]) out.push(<strong key={m.index}>{inline(tok.slice(2, -2))}</strong>);
     else if (m[3]) {
       const [, label, url] = tok.match(/^\[([^\]]+)\]\((.+)\)$/)!;
-      out.push(<a key={m.index} href={url} target="_blank" rel="noreferrer">{label}</a>);
+      out.push(<Link key={m.index} url={url} label={label} />);
     } else {
-      out.push(<a key={m.index} href={tok} target="_blank" rel="noreferrer" title={tok}>{linkLabel(tok)}</a>);
+      const { url } = splitTrailing(tok);
+      out.push(<Link key={m.index} url={url} label={linkLabel(url)} />);
+      last = m.index + url.length;
+      continue;
     }
     last = m.index + tok.length;
   }

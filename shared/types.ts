@@ -41,6 +41,33 @@ export interface Run {
   canReply: boolean;
   /** A live headless conversation: no terminal, so the dash page is where you talk to it. */
   headless: boolean;
+  /** The tool that runs now. Only while working, and only from an extension of version 2 or later. */
+  activity?: RunActivity | null;
+  /** An extension dialog waits for an answer. The page can answer it only in a headless run. */
+  dialog?: RunDialog | null;
+  /** The live session's extension takes Stop and Steer. Without it, the page asks for /reload. */
+  canControl?: boolean;
+}
+
+/** One tool call in progress, as the status extension reports it. */
+export interface RunActivity {
+  tool: string;
+  /** A short, one-line summary of the arguments: the command for bash, the path for read. */
+  summary: string;
+  since: string;
+}
+
+/** An open `ctx.ui` dialog in a live session. */
+export interface RunDialog {
+  method: "select" | "confirm" | "input" | "editor";
+  title: string;
+  message?: string;
+  options?: string[];
+  placeholder?: string;
+  prefill?: string;
+  /** The prefill was too long for the status file: sending the page's copy back would lose text. */
+  prefillCut?: boolean;
+  since: string;
 }
 
 /** A run in the History view. The whole last message stays out, so the list of every chat stays small. */
@@ -73,6 +100,62 @@ export interface PullRequest {
   mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN";
   updatedAt: string;
   tickets: string[];
+  /** Names of the failing checks and status contexts on the head commit. */
+  failedChecks?: string[];
+}
+
+/** One check run or status context on a PR's head commit. */
+export interface PrCheck {
+  name: string;
+  /** "success", "failure", "pending", "skipped", "neutral"... lower case. */
+  state: string;
+  url: string | null;
+  /** For a failed GitHub Actions job: the end of its log, up to the last error. */
+  logTail?: string;
+}
+
+export interface PrReviewComment {
+  author: string;
+  body: string;
+  createdAt: string;
+  url: string;
+}
+
+export interface PrReviewThread {
+  path: string;
+  line: number | null;
+  isOutdated: boolean;
+  comments: PrReviewComment[];
+}
+
+/** One PR in full, for the PR panel. Fetched on demand from GET /api/pr, never part of the dashboard. */
+export interface PrDetail {
+  url: string;
+  repo: string;
+  number: number;
+  title: string;
+  state: "open" | "merged" | "closed";
+  isDraft: boolean;
+  author: string | null;
+  body: string;
+  baseRef: string;
+  headRef: string;
+  reviewDecision: PullRequest["reviewDecision"];
+  mergeable: PullRequest["mergeable"];
+  checks: CheckState;
+  checkRuns: PrCheck[];
+  /** Only threads that are not resolved. */
+  threads: PrReviewThread[];
+  reviewers: { login: string; state: string }[];
+  requestedReviewers: string[];
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  files: { path: string; additions: number; deletions: number }[];
+  updatedAt: string;
+  /** Ticket keys in the title or branch. */
+  tickets: string[];
+  fetchedAt: string;
 }
 
 export interface Ticket {

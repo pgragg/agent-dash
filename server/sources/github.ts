@@ -11,17 +11,44 @@ const QUERY = `query($q: String!) {
       ... on PullRequest {
         url number title state isDraft headRefName reviewDecision mergeable updatedAt
         repository { nameWithOwner }
-        commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+        commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 50) { nodes { ... on CheckRun { name conclusion } ... on StatusContext { context state } } } } } } }
       }
     }
   }
 }`;
 
-function checkState(rollup: string | undefined): CheckState {
+export function checkState(rollup: string | undefined): CheckState {
   if (!rollup) return "none";
   if (rollup === "SUCCESS") return "success";
   if (rollup === "FAILURE" || rollup === "ERROR") return "failure";
   return "pending";
+}
+
+/** One check run or status context, as GraphQL returns it. */
+export interface RawContext {
+  name?: string;
+  conclusion?: string | null;
+  status?: string;
+  context?: string;
+  state?: string;
+}
+
+const FAILED = new Set(["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "STARTUP_FAILURE", "ACTION_REQUIRED"]);
+
+/** "failure", "success", "pending", "skipped", "neutral": lower case, the same for both kinds of check. */
+export function contextState(c: RawContext): string {
+  const v = c.context !== undefined ? c.state : c.conclusion;
+  if (!v) return "pending";
+  if (FAILED.has(v)) return "failure";
+  if (v === "EXPECTED" || v === "PENDING") return "pending";
+  return v.toLowerCase();
+}
+
+export const contextName = (c: RawContext): string => c.name ?? c.context ?? "?";
+
+/** The failing check names, once each: a re-run job shows up again with the same name. */
+export function failedCheckNames(contexts: RawContext[]): string[] {
+  return [...new Set(contexts.filter((c) => contextState(c) === "failure").map(contextName))];
 }
 
 /** My PRs updated in the window. Uses the `gh` login, so no token is stored here. */
@@ -45,6 +72,7 @@ export async function fetchMyPrs(sinceDays: number, ticketPattern: RegExp): Prom
       headRef: n.headRefName,
       reviewDecision: n.reviewDecision ?? null,
       checks: checkState(n.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state),
+      failedChecks: failedCheckNames(n.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts?.nodes ?? []),
       mergeable: n.mergeable ?? "UNKNOWN",
       updatedAt: n.updatedAt,
       tickets: extractTickets(`${n.title} ${n.headRefName}`, ticketPattern),

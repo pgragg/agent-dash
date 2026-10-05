@@ -123,6 +123,7 @@ kbd {
   border: 1px solid var(--line-2); background: var(--surface);
   font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;
   transition: background .12s, border-color .12s, transform .06s;
+  text-decoration: none;
 }
 .btn:hover { border-color: var(--muted); }
 .btn:active { transform: translateY(1px); }
@@ -268,6 +269,9 @@ kbd {
 .agent .card-head { align-items: flex-start; }
 .agent .card-head .dot { margin-top: 7px; }
 .agent-title { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+/* The title shortens before the buttons wrap under it. */
+.agent .agent-title { flex: 1 1 220px; }
+.chat-toggle { margin: 0 0 6px -9px; }
 .agent-title h3 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .agent-message { position: relative; padding: 2px 0 6px; }
 .agent-message.clamped { max-height: 340px; overflow: hidden; }
@@ -402,6 +406,47 @@ a.pr-group-title:hover { text-decoration: underline; text-underline-offset: 3px;
 .flash { animation: flash 1.8s ease-out; }
 @keyframes flash { 0%, 30% { background: var(--waiting-bg); box-shadow: 0 0 0 2px var(--waiting); } 100% { box-shadow: 0 0 0 2px transparent; } }
 
+/* Live control: the tool that runs now, Stop and Steer, extension dialogs. */
+.activity { margin: 8px 0 0; color: var(--working); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity code { color: var(--ink-2); }
+.composer-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 9px; background: var(--hover); }
+.dialog-card { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--waiting); border-radius: 12px; background: var(--waiting-bg); }
+.dialog-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.dialog-message { margin: 6px 0 0; white-space: pre-wrap; }
+.dialog-actions { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px; margin-top: 8px; }
+.dialog-actions textarea { flex: 1 1 100%; font: 14px/1.5 var(--sans); padding: 6px 8px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); color: var(--ink); resize: vertical; }
+/* PR panel: a row opens it, and a small ↗ next to an in-dash link still opens GitHub or Jira. */
+.ext-link { font-size: 11.5px; color: var(--muted); text-decoration: none; margin-left: 3px; }
+.ext-link:hover { color: var(--ink); }
+.pr-line { display: flex; align-items: center; border-bottom: 1px solid var(--line); }
+.pr-line:last-child, .pr-entry .pr-line { border-bottom: 0; }
+.pr-line .pr-row { flex: 1; min-width: 0; border-bottom: 0; color: inherit; }
+.pr-ext { flex: none; padding: 10px 16px 10px 4px; margin: 0; }
+.why li .verb-wrap, .why li .verb, .why li .verb-confirm, .why li .verb-done, .pr-why li .verb-wrap, .pr-why li .verb, .pr-why li .verb-confirm, .pr-why li .verb-done { margin-left: auto; flex: none; }
+.verb-wrap { display: inline-flex; align-items: center; gap: 8px; }
+.verb-confirm { display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; font-size: 12.5px; color: var(--ink-2); }
+/* The confirm step takes its own line, so the reason keeps its width. */
+.why li:has(.verb-confirm), .pr-why li:has(.verb-confirm) { flex-wrap: wrap; }
+.why li .verb-confirm, .pr-why li .verb-confirm { flex-basis: 100%; }
+.verb-error { font-size: 12px; max-width: 320px; }
+a.btn.verb { text-decoration: none; }
+.pr-panel .card { margin-top: 0; }
+.pr-panel .mono, .pr-check-name, .pr-file { font-family: var(--mono); font-size: 12.5px; }
+.pr-links { display: flex; flex-direction: column; gap: 6px; }
+.pr-links > div { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+.pr-opener { margin: 10px 0 0; font-size: 13.5px; }
+.pr-checks, .pr-threads, .pr-files { list-style: none; margin: 0; padding: 0; }
+.pr-checks > li { padding: 5px 0; border-bottom: 1px solid var(--line); }
+.pr-checks > li:last-child { border-bottom: 0; }
+.pr-check-row { display: flex; align-items: center; gap: 8px; }
+.pr-log { margin: 6px 0 4px 18px; max-height: 320px; overflow: auto; font: 11.5px/1.45 var(--mono); background: var(--hover); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pr-threads > li { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.pr-threads > li:last-child { border-bottom: 0; }
+.pr-thread-head { display: flex; align-items: center; gap: 8px; color: var(--ink-2); margin-bottom: 6px; }
+.pr-comment { margin: 6px 0 0 12px; padding-left: 10px; border-left: 2px solid var(--line); }
+.pr-files > li { display: flex; gap: 10px; align-items: baseline; padding: 3px 0; font-size: 12.5px; }
+.pr-files .pr-file { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 /* Ticket section: Jira's description and comments, read when it opens, and the Jira verbs. */
 .ticket-panel:not(.open) { padding-top: 10px; padding-bottom: 10px; }
 .ticket-panel:not(.open) .card-head { margin-bottom: 0; }
