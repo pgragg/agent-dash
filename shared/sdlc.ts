@@ -229,8 +229,8 @@ export function smoketestMessage(key: string, env: SdlcEnvironment, script: stri
 Work out from the context what the change does, and test that it works on ${label} from a user's point of view. ${how}
 
 agent-dash shows this smoketest as running (SDLC event ${eventId}) until you record the result. When you finish, record the result:
-node ${script} finish --id ${eventId} --outcome passed|failed|blocked --details-file <file> --results-file <file>
-Use blocked, not failed, when you could not run the test or could not see the result (no access, no test data, the environment is down): failed means the change does not work. The details file says what you tested and how (stack, commands, URLs, versions). The results file says what you saw, with the evidence, or what blocked you. Then reply with the outcome and a short summary.`;
+node ${script} finish --id ${eventId} --outcome passed|failed|blocked --summary "<one line>" --details-file <file> --results-file <file>
+Write the summary after the test is done: one line of at most 120 characters that says what the test showed, for example "Publish flow works end to end" or "Docs page 500s after publish: missing FDR token". The page shows only the outcome and this line until Piper clicks it. Use blocked, not failed, when you could not run the test or could not see the result (no access, no test data, the environment is down): failed means the change does not work. The details file says what you tested and how (stack, commands, URLs, versions). The results file says what you saw, with the evidence, or what blocked you. Then reply with the outcome and a short summary.`;
 }
 
 /** The first message of an agent that confirms a deploy in Argo, read-only, and records it. */

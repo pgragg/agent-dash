@@ -329,6 +329,8 @@ export interface SdlcEvent {
   sessionId: string | null;
   /** Set on a smoketest that Piper chose to skip. It has no outcome. */
   skippedAt: string | null;
+  /** One short line from the agent that ran the smoketest: what it showed. The collapsed row shows it. */
+  summary: string | null;
   /** A review request's PR, Slack channel id, message text and message permalink. Null on other events. */
   prUrl: string | null;
   channel: string | null;
