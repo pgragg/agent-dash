@@ -7,7 +7,7 @@ It answers one question: **what do I look at next?**
 
 It reads your pi session logs, your Jira tickets, and your GitHub PRs. You can act on the answer without leaving the page.
 
-The dashboard never writes to Jira or GitHub. The only things it sends anywhere go to your own pi sessions: a reply that you type, a Stop, and the answer to an extension dialog. A verb button (a [PR verb](#pr-verbs), or **Move to** on the [Ticket](#the-ticket-section) section) starts an agent on one small task, and that agent does the write: the click is your approval.
+The dashboard writes one thing to Jira itself: a due date that you set on the [Ticket](#the-ticket-section) section. It never writes to GitHub. The other things it sends go to your own pi sessions: a reply that you type, a Stop, and the answer to an extension dialog. A verb button (a [PR verb](#pr-verbs), or **Move to** on the [Ticket](#the-ticket-section) section) starts an agent on one small task, and that agent does the write: the click is your approval.
 
 ## Run it
 
@@ -98,10 +98,10 @@ A GitHub PR link in a message opens the PR panel, and a Jira link to a ticket on
 
 The **Ticket** section under the workspace header is closed at first. A click or `T` opens it, and the page then reads the ticket from Jira: the description and the 10 newest comments. `GET /api/ticket?key=KEY` (with the `X-Agent-Dash` guard, because each call can reach Jira with your token) makes three read-only GETs (`/rest/api/3/issue/KEY`, its `/comment` list, and its `/transitions`), turns Jira's rich text (ADF) into markdown (`shared/adf.ts`), and caches the answer for 2 minutes. **Reload** reads it again. The `KEY ↗` link and the `↗` in the section still open the ticket in Jira.
 
-The section also has two **Jira verbs**. The page itself never writes to Jira: each verb starts a new agent (`POST /api/agents?ticket=KEY`, as **Start a new agent** does) with a first message from `shared/jiraVerbs.ts`. The message tells the agent to use the `jira-tickets` skill and to make that one change and nothing else. Your click is the approval.
+The section also has two **Jira verbs**. Your click is the approval of that one change.
 
-- **Move to**: the statuses that Jira's transitions list offers now. A status transition needs no further approval, so the agent applies it.
-- **Set due date**: the date picker starts two weeks out. On a ticket with no due date, the agent sets it. On a ticket that already has one, the agent shows you the change and asks you first.
+- **Move to**: the statuses that Jira's transitions list offers now. The click starts a new agent (`POST /api/agents?ticket=KEY`, as **Start a new agent** does) with a first message from `shared/jiraVerbs.ts`, which tells the agent to use the `jira-tickets` skill and to make that one change and nothing else. A status transition needs no further approval, so the agent applies it.
+- **Set due date**: the date picker starts two weeks out. **Set** changes the due date in Jira at once, with no agent: `POST /api/ticket/due?key=KEY` (body `{date, from}`, with the `X-Agent-Dash` guard) reads the ticket's due date, and makes one `PUT /rest/api/3/issue/KEY` with only `duedate`. `from` is the due date that the page showed. If Jira holds another one now, the server changes nothing and answers 409, because your click did not approve replacing a date that you did not see. The board shows the new date at once, without a new Jira search.
 
 An **Overdue** or **Due soon** line in the "why" list has a **New due date…** button that does the same as **Set due date**.
 

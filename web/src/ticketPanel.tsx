@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { defaultDueDate, dueDateMessage, moveMessage } from "../../shared/jiraVerbs.ts";
+import { defaultDueDate, isDate, moveMessage } from "../../shared/jiraVerbs.ts";
 import type { Ticket, TicketDetail } from "../../shared/types.ts";
 import { age, api, Markdown, plural, stamp } from "./lib.tsx";
 
 /**
  * The ticket's description and newest comments, read from Jira when the section opens, and
- * verb buttons that start an agent on one Jira change. The page itself never writes to Jira.
+ * verb buttons for one Jira change: "Move to" starts an agent, "Set due date" asks the server.
  */
 
 const TTL_MS = 2 * 60_000;
@@ -62,27 +62,36 @@ function useStart(key: string, cwd: string, onError: (m: string | null) => void)
 
 const LABEL: Record<StartState, string> = { idle: "Start agent", starting: "Starting…", started: "Started ✓" };
 
-/** "Set due date": pick a date, then start an agent that sets it, or asks first if one exists. */
-export function DueDateVerb({ ticket, cwd, onError, compact = false }: { ticket: Ticket; cwd: string; onError: (m: string | null) => void; compact?: boolean }) {
+/** "Set due date": the server sets it in Jira. The click is Piper's approval of that one change. */
+export function DueDateVerb({ ticket, onError, onSet, compact = false }: { ticket: Ticket; onError: (m: string | null) => void; onSet?: () => void; compact?: boolean }) {
   const [open, setOpen] = useState(!compact);
   const [date, setDate] = useState(() => defaultDueDate(new Date()));
-  const { state, start } = useStart(ticket.key, cwd, onError);
+  const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
   if (!open) {
     return (
-      <button className="btn ghost small" onClick={() => setOpen(true)} title={`Start an agent that sets a new due date on ${ticket.key}`}>
+      <button className="btn ghost small" onClick={() => setOpen(true)} title={`Set a new due date on ${ticket.key}`}>
         New due date…
       </button>
     );
   }
-  const message = /^\d{4}-\d{2}-\d{2}$/.test(date) ? dueDateMessage(ticket.key, date, ticket.dueDate) : null;
+  const save = async () => {
+    setState("saving");
+    const err = await api.setDueDate(ticket.key, date, ticket.dueDate);
+    onError(err);
+    setState(err ? "idle" : "saved");
+    if (err) return;
+    cache.delete(ticket.key);
+    onSet?.();
+    setTimeout(() => setState("idle"), 4_000);
+  };
   return (
     <span className="verb">
       <span className="meta">Set due date</span>
       <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-      <button className="btn small" disabled={!message || state !== "idle" || !cwd.trim()} onClick={() => message && start(message)} title={message ?? ""}>
-        {LABEL[state]}
+      <button className="btn small" disabled={!isDate(date) || date === ticket.dueDate || state !== "idle"} onClick={save} title={`Set ${ticket.key} due ${date} in Jira`}>
+        {state === "saving" ? "Saving…" : state === "saved" ? "Saved ✓" : "Set"}
       </button>
-      {ticket.dueDate && <span className="meta">changes {ticket.dueDate}: the agent asks you first</span>}
+      {ticket.dueDate && <span className="meta">changes {ticket.dueDate}</span>}
       {compact && state === "idle" && (
         <button className="btn ghost small" onClick={() => setOpen(false)}>
           Cancel
@@ -189,9 +198,9 @@ export function TicketPanel({ ticket, cwd, onError }: { ticket: Ticket; cwd: str
           )}
           <div className="verbs">
             <MoveVerb ticket={ticket} detail={detail} cwd={cwd} onError={onError} />
-            <DueDateVerb ticket={{ ...ticket, dueDate: detail.dueDate }} cwd={cwd} onError={onError} />
+            <DueDateVerb ticket={{ ...ticket, dueDate: detail.dueDate }} onError={onError} onSet={reload} />
           </div>
-          <p className="meta">Each button starts an agent in {cwd} that makes that one change with the jira-tickets skill. The page itself never writes to Jira.</p>
+          <p className="meta">Move to starts an agent in {cwd} that makes that one change with the jira-tickets skill. Set due date changes Jira at once.</p>
         </>
       )}
     </section>

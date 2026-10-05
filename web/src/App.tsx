@@ -893,7 +893,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
                 <Dot tone={KIND[a.kind].tone} />
                 <span>{a.reason}</span>
                 <PrVerbButton item={a} data={data} />
-                {t && (a.kind === "overdue" || a.kind === "due_soon") && <DueDateVerb ticket={t} cwd={cwd} onError={setError} compact />}
+                {t && (a.kind === "overdue" || a.kind === "due_soon") && <DueDateVerb ticket={t} onError={setError} compact />}
               </li>
             ))}
           </ul>
