@@ -27,7 +27,7 @@ import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
 import { SessionIndex, transcriptTurns } from "./sources/sessions.ts";
 import { isAlive, readReportedStatuses } from "./sources/status.ts";
 import * as summaryDb from "./summaries/db.ts";
-import { reconcile, requestSummary } from "./summaries/runner.ts";
+import { reconcile, redraftAfterNewEvents, requestSummary } from "./summaries/runner.ts";
 
 const WEB_DIST = new URL("../web/dist/", import.meta.url).pathname;
 /** Agents record smoketests and deploys with this script, into this dash's database. */
@@ -137,6 +137,7 @@ async function dashboard(force: boolean) {
   await syncDiagrams(parsed, (s) => runTicket.get(s.sessionId) ?? s.tickets[0] ?? null, new Date(now));
   d.diagrams = summaryDb.listDiagrams();
   d.sdlcEvents = summaryDb.sdlcEventsByTicket();
+  redraftAfterNewEvents([...d.myTickets, ...d.otherTickets], broadcast);
   return d;
 }
 
@@ -163,9 +164,13 @@ function broadcast(): void {
 mkdirSync(config.statusDir, { recursive: true });
 watch(config.sessionsDir, { recursive: true }, broadcast);
 watch(config.statusDir, broadcast);
+let redraftLoad: Promise<unknown> | null = null;
 // A summary run saves into SQLite from its own process; WAL writes touch agent-dash.db-wal.
 watch(dirname(summaryDb.DB_PATH), (_e, file) => {
-  if (file?.startsWith(basename(summaryDb.DB_PATH)) && !wroteRecently()) broadcast();
+  if (!file?.startsWith(basename(summaryDb.DB_PATH))) return;
+  if (!wroteRecently()) broadcast();
+  // An agent records an SDLC event from its own process; draft its next steps without waiting for the page.
+  if (!redraftLoad && summaryDb.hasNewEventTickets()) redraftLoad = dashboard(false).catch(() => {}).finally(() => (redraftLoad = null));
 });
 // Time alone changes a status: a pid dies, or a wait crosses a threshold.
 setInterval(broadcast, 30_000).unref();
