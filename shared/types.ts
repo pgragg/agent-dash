@@ -337,12 +337,14 @@ export interface SdlcEvent {
   plannedAt: string | null;
   /** On a plan: the Beta or Prod writes that the test needs, one per line. Null: it changes no Beta or Prod state. */
   stateChanges: string | null;
+  /** On a plan: a short summary of its Beta or Prod writes, by environment. Null: none, or a plan from before this field. */
+  writesSummary: string | null;
   /** On a plan: when it was accepted, and by whom. "auto": it changes no Beta or Prod state. */
   confirmedAt: string | null;
   confirmedBy: "piper" | "auto" | null;
   /** On an execution: the plan that it runs. */
   planId: number | null;
-  /** One short line from the agent that ran the smoketest: what it showed. The collapsed row shows it. */
+  /** One short line from the agent that ran the smoketest: what it showed. The collapsed row shows it. On a plan: a very short summary of the plan. */
   summary: string | null;
   /** A review request's PR, Slack channel id, message text and message permalink. Null on other events. */
   prUrl: string | null;

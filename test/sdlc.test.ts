@@ -36,6 +36,7 @@ function ev(over: Partial<SdlcEvent> = {}): SdlcEvent {
     messageUrl: null,
     plannedAt: null,
     stateChanges: null,
+    writesSummary: null,
     confirmedAt: null,
     confirmedBy: null,
     planId: null,
@@ -317,7 +318,8 @@ test("verb messages name the environment and the record command; the summary pro
   const m = planMessage("FSDK-1", "localhost", "/dash/scripts/sdlc-event.ts", 12);
   assert.match(m, /^Plan a smoketest of FSDK-1 on localhost\. Write the plan only: do not run the test yet\./);
   assert.match(m, /Local smoketesting\.md/);
-  assert.match(m, /node \/dash\/scripts\/sdlc-event\.ts plan --id 12 --plan-file <file> --state-changes none/);
+  assert.match(m, /node \/dash\/scripts\/sdlc-event\.ts plan --id 12 --summary "<plan summary>" --plan-file <file> --state-changes none/);
+  assert.match(m, /--writes-summary "<writes summary>" --plan-file <file> --state-changes-file <file>/);
   assert.match(m, /--state-changes-file <file>/);
   assert.match(m, /change no state on Postman Beta, Postman Prod, Fern Dev and Fern Prod/);
   assert.match(planMessage("FSDK-1", "postman_prod", "/s", 1), /real customer traffic/);
@@ -451,11 +453,18 @@ test("a plan's changes start no next-steps draft; the run's result does", () => 
 });
 
 test("the plan text and the state changes are checked; none means no state change", () => {
-  assert.equal(validateSdlcPlan({ plan: "x", stateChanges: "None" }).stateChanges, null);
-  assert.equal(validateSdlcPlan({ plan: "x", stateChanges: "" }).stateChanges, null);
-  assert.equal(validateSdlcPlan({ plan: "x", stateChanges: "POST /a on Beta\n" }).stateChanges, "POST /a on Beta");
-  assert.throws(() => validateSdlcPlan({ plan: " ", stateChanges: "none" }), /empty/);
-  assert.throws(() => validateSdlcPlan({ plan: "x" }), /none/);
+  const s = { summary: "Load the page" };
+  assert.equal(validateSdlcPlan({ plan: "x", stateChanges: "None", ...s }).stateChanges, null);
+  assert.equal(validateSdlcPlan({ plan: "x", stateChanges: "", ...s }).stateChanges, null);
+  const beta = validateSdlcPlan({ plan: "x", stateChanges: "POST /a on Beta\n", summary: " Load the page ", writesSummary: "Postman Beta: one project" });
+  assert.deepEqual([beta.stateChanges, beta.summary, beta.writesSummary], ["POST /a on Beta", "Load the page", "Postman Beta: one project"]);
+  assert.throws(() => validateSdlcPlan({ plan: " ", stateChanges: "none", ...s }), /empty/);
+  assert.throws(() => validateSdlcPlan({ plan: "x", ...s }), /none/);
+  // Piper reads the summaries first, so a plan without them is refused.
+  assert.throws(() => validateSdlcPlan({ plan: "x", stateChanges: "none" }), /--summary/);
+  assert.throws(() => validateSdlcPlan({ plan: "x", stateChanges: "POST /a on Beta", ...s }), /--writes-summary/);
+  // With no state changes there is nothing to summarise.
+  assert.equal(validateSdlcPlan({ plan: "x", stateChanges: "none", writesSummary: "y", ...s }).writesSummary, null);
 });
 
 test("the agent records its plan with the script: no state changes runs at once, with the plan's session; others wait", () => {
@@ -464,17 +473,18 @@ test("the agent records its plan with the script: no state changes runs at once,
   const planFile = join(dir, "plan.md");
   writeFileSync(planFile, "1. Open the docs page.\n");
   const local = db.addSdlcEvent({ eventType: "smoketest_plan", startedAt: new Date().toISOString(), environments: ["localhost"], tickets: ["FSDK-72"], sessionId: "plan-73" });
-  const out = execFileSync("node", [script, "plan", "--id", String(local.id), "--plan-file", planFile, "--state-changes", "none"], { env }).toString();
+  const out = execFileSync("node", [script, "plan", "--id", String(local.id), "--summary", "Open the docs page", "--plan-file", planFile, "--state-changes", "none"], { env }).toString();
   const run = db.sdlcEventsByTicket()["FSDK-72"].find((e) => e.eventType === "smoketest_execution")!;
   assert.deepEqual([run.planId, run.sessionId, run.finishedAt], [local.id, "plan-73", null]);
   assert.match(out, new RegExp(`because it changes no state[\\s\\S]*finish --id ${run.id} `));
-  assert.equal(db.getSdlcEvent(local.id)!.testDetails, "1. Open the docs page.");
+  assert.deepEqual([db.getSdlcEvent(local.id)!.testDetails, db.getSdlcEvent(local.id)!.summary], ["1. Open the docs page.", "Open the docs page"]);
 
   const changes = join(dir, "changes.md");
   writeFileSync(changes, "POST /api/projects on Postman Beta\n");
   const beta = db.addSdlcEvent({ eventType: "smoketest_plan", startedAt: new Date().toISOString(), environments: ["postman_beta"], tickets: ["FSDK-73"], sessionId: "plan-74" });
-  const wait = execFileSync("node", [script, "plan", "--id", String(beta.id), "--plan-file", planFile, "--state-changes-file", changes], { env }).toString();
+  const wait = execFileSync("node", [script, "plan", "--id", String(beta.id), "--summary", "Make a project", "--writes-summary", "Postman Beta: one project", "--plan-file", planFile, "--state-changes-file", changes], { env }).toString();
   assert.match(wait, /waits for Piper's confirmation/);
+  assert.equal(db.getSdlcEvent(beta.id)!.writesSummary, "Postman Beta: one project");
   assert.equal(db.sdlcEventsByTicket()["FSDK-73"].filter((e) => e.eventType === "smoketest_execution").length, 0);
   // No state changes named at all is refused, and so is a plan that is already accepted.
   assert.throws(() => execFileSync("node", [script, "plan", "--id", String(beta.id), "--plan-file", planFile], { env, stdio: "pipe" }));

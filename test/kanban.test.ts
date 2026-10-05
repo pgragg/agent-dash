@@ -23,6 +23,7 @@ const smoketest = (over: Partial<SdlcEvent> = {}): SdlcEvent => ({
   messageUrl: null,
   plannedAt: null,
   stateChanges: null,
+  writesSummary: null,
   confirmedAt: null,
   confirmedBy: null,
   planId: null,

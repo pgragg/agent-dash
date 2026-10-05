@@ -577,14 +577,19 @@ a.btn.verb { text-decoration: none; }
 .smoke-results summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
 /* A plan that waits for Piper: its approval is the point, so the row stands out. */
 .plan-row.open { padding: 10px 12px; border-radius: 12px; border-left: 3px solid var(--warn); background: var(--hover); }
-.plan-changes { margin: 6px 0; padding: 8px 10px; border-radius: 8px; background: var(--warn-bg); font-size: 13px; }
+.plan-summary { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; }
+.plan-section { padding: 8px 10px; border-radius: 8px; background: var(--bg); font-size: 13px; }
+.plan-section > b { display: block; margin-bottom: 2px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.plan-section > p { margin: 0; }
+.plan-changes { background: var(--warn-bg); }
 .plan-confirm { margin: 8px 0; }
 .plan-chat { margin-top: 8px; }
-.smoke-item > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; font-size: 13px; }
+.smoke-item > summary { display: flex; align-items: baseline; gap: 8px; cursor: pointer; list-style: none; font-size: 13px; }
 .smoke-item > summary::-webkit-details-marker { display: none; }
 .smoke-item > summary::before { content: "▸"; color: var(--muted); font-size: 11px; }
 .smoke-item[open] > summary::before { content: "▾"; }
-.smoke-item > summary .smoke-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+/* The whole summary shows, on as many lines as it needs. */
+.smoke-item > summary .smoke-summary { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--ink); }
 .smoke-item > summary .meta { flex-shrink: 0; font-size: 12px; }
 .smoke-full { margin-top: 8px; }
 .smoketests select, .smoke-form select, .smoke-form input[type="datetime-local"] { height: 26px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--bg); font: 12.5px var(--sans); color: var(--ink); }

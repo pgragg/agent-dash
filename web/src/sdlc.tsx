@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { prRef } from "../../shared/refs.ts";
-import { ENV_LABEL, ENVIRONMENTS, isPlanRunning, isPlanStage, isPlanWaiting, isSmoketestRunning, mergePrs, newestPlan, SMOKETEST_ENV, sdlcProgress, type Stage, type StageState } from "../../shared/sdlc.ts";
+import { ENV_LABEL, ENVIRONMENTS, isPlanRunning, isPlanStage, isPlanWaiting, isSmoketestRunning, mergePrs, newestPlan, SHARED_ENVS, SMOKETEST_ENV, sdlcProgress, type Stage, type StageState } from "../../shared/sdlc.ts";
 import type { PullRequest, Run, SdlcEnvironment, SdlcEvent, SmoketestOutcome, TicketGroup } from "../../shared/types.ts";
 import { conversationHash, launchAgent, type LaunchBody, ResumeHere } from "./agents.tsx";
 import { Chat } from "./chat.tsx";
@@ -398,7 +398,7 @@ function RecordForm({ ticket, onError, onDone }: { ticket: string; onError: (m: 
 /** The first prose line of a markdown text: no heading, no list or quote marker, no emphasis. */
 function firstLine(md: string | null): string | null {
   const line = md?.split("\n").find((l) => l.trim() && !/^\s*(#|```|---|\|)/.test(l));
-  return line?.replace(/^[>*\-\s\d.]+/, "").replace(/[*_`]/g, "").slice(0, 160) || null;
+  return line?.replace(/^[>*\-\s\d.]+/, "").replace(/[*_`]/g, "") || null;
 }
 
 /** The one line on a finished smoketest's collapsed row. Rows from before summaries show the first line of their results. */
@@ -492,21 +492,47 @@ function PlanConversation({ sessionId, runs, now, onError }: { sessionId: string
   );
 }
 
+/**
+ * The two things Piper decides Confirm on, first: what the plan writes where, and what it does.
+ * A plan from before the summaries shows its state changes and its full text instead.
+ */
+function PlanSummary({ e, waiting }: { e: SdlcEvent; waiting: boolean }) {
+  const full = (
+    <details className="smoke-results" open={waiting && !e.summary}>
+      <summary>The full plan</summary>
+      <Markdown text={e.testDetails ?? ""} />
+    </details>
+  );
+  return (
+    <div className="plan-summary">
+      <div className={`plan-section ${e.stateChanges ? "plan-changes" : ""}`}>
+        <b>Writes</b>
+        {e.stateChanges ? (
+          <>
+            {e.writesSummary && <Markdown text={e.writesSummary} />}
+            <details className="smoke-results" open={waiting && !e.writesSummary}>
+              <summary>The exact state changes that Confirm approves</summary>
+              <Markdown text={e.stateChanges} />
+            </details>
+          </>
+        ) : (
+          <p>None: no state changes on {SHARED_ENVS}.</p>
+        )}
+      </div>
+      <div className="plan-section">
+        <b>Plan</b>
+        {e.summary && <Markdown text={e.summary} />}
+        {full}
+      </div>
+    </div>
+  );
+}
+
 function PlanRow({ e, now, runs, cwd, onError }: { e: SdlcEvent; now: number; runs: Run[]; cwd: string; onError: (m: string | null) => void }) {
-  const open = isPlanRunning(e) || isPlanWaiting(e);
+  const waiting = isPlanWaiting(e);
+  const open = isPlanRunning(e) || waiting;
   const [chat, setChat] = useState(open);
   const status = planStatus(e);
-  const body = (
-    <>
-      {e.stateChanges && (
-        <div className="plan-changes">
-          <b>State changes that Confirm approves</b>
-          <Markdown text={e.stateChanges} />
-        </div>
-      )}
-      <Markdown text={e.testDetails ?? ""} />
-    </>
-  );
   return (
     <li id={`sdlc:${e.id}`} className={`plan-row ${open ? "open" : ""}`}>
       <div className="note-meta">
@@ -529,22 +555,13 @@ function PlanRow({ e, now, runs, cwd, onError }: { e: SdlcEvent; now: number; ru
           Delete
         </button>
       </div>
-      {e.plannedAt &&
-        (open ? (
-          body
-        ) : (
-          <details className="smoke-results">
-            <summary>The plan</summary>
-            {body}
-          </details>
-        ))}
-      {isPlanWaiting(e) && (
+      {waiting && (
         <div className="smoke-row plan-confirm">
-          <span className="meta">Confirm counts as your approval for the state changes above. To change the plan, write to the agent below.</span>
-          <span className="grow" />
           <RunPlan plan={e} cwd={cwd} onError={onError} />
+          <span className="meta">Confirm approves the state changes under Writes, and only those. To change the plan, write to the agent below.</span>
         </div>
       )}
+      {e.plannedAt && <PlanSummary e={e} waiting={waiting} />}
       {e.sessionId &&
         (chat ? (
           <PlanConversation sessionId={e.sessionId} runs={runs} now={now} onError={onError} />
