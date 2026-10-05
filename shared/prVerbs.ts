@@ -83,7 +83,7 @@ export function merge(pr: VerbPr): string {
     "",
     `I approve: merge ${pr.url} now.`,
     "",
-    `1. Check that it is still approved, green, and mergeable: \`gh pr view ${pr.url} --json reviewDecision,mergeStateStatus,statusCheckRollup\`. If it is not, stop and tell me why.`,
+    `1. Check that it can still merge: \`gh pr view ${pr.url} --json reviewDecision,mergeStateStatus,statusCheckRollup\`. \`mergeStateStatus\` must be \`CLEAN\`, and \`reviewDecision\` must be \`APPROVED\` or empty (the repo requires no review). If it is not, stop and tell me why.`,
     `2. Get the repo's default merge method: \`gh repo view ${pr.repo} --json viewerDefaultMergeMethod\`.`,
     `3. Run \`gh pr merge ${pr.url}\` with that method (\`--merge\`, \`--squash\` or \`--rebase\`). Do not use \`--admin\` or \`--auto\`.`,
     "4. Report the result. Do nothing else.",

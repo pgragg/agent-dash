@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { cleanSummary, draftPrompt, fallbackMessage, reviewMessage } from "../shared/reviewRequest.ts";
+import { cleanSummary, draftPrompt, fallbackMessage, reviewMessage, wantsReviewRequest } from "../shared/reviewRequest.ts";
 import type { PullRequest } from "../shared/types.ts";
 import * as db from "./summaries/db.ts";
 
@@ -45,7 +45,7 @@ export async function draftOne(pr: PullRequest): Promise<string> {
  * with the PRs it took. Each finished draft calls `onChange`, so the page shows it.
  */
 export function requestReviewDrafts(prs: PullRequest[], onChange: () => void, draft = draftOne, now = new Date()): string[] {
-  const open = prs.filter((p) => p.state === "open");
+  const open = prs.filter(wantsReviewRequest);
   const claimed = new Set(db.claimReviewDrafts([...new Set(open.map((p) => p.url))], new Date(now.getTime() - RETRY_MS).toISOString(), now));
   const queue = open.filter((p) => claimed.has(p.url));
   const started = queue.map((p) => p.url);

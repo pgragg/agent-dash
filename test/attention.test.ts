@@ -42,6 +42,12 @@ test("approved and green is ready to merge; a draft's problems weigh half", () =
   assert.equal(items[1].score, 40);
 });
 
+test("a green PR in a repo that requires no review is ready to merge; a blocked or unknown one is not", () => {
+  const items = rankAttention([], [pr({ mergeStateStatus: "CLEAN" }), pr({ url: "u2", mergeStateStatus: "BLOCKED" }), pr({ url: "u3", mergeStateStatus: "UNKNOWN" }), pr({ url: "u4", isDraft: true, mergeStateStatus: "CLEAN" })], [], NOW);
+  assert.deepEqual(kinds(items), ["ready_to_merge"]);
+  assert.match(items[0].reason, /needs no review/);
+});
+
 test("an in-progress ticket with no recent run and no open PR is stalled; a parked one is not", () => {
   const items = rankAttention(
     [run({ tickets: ["FSDK-1"], lastActivityAt: minutesAgo(5 * 24 * 60) })],
