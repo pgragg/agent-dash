@@ -12,6 +12,8 @@ import type { Dashboard } from "../../shared/types.ts";
  * | `#/pr:OWNER/REPO/N` | The PR panel (a view under PRs)                 |
  * | `#/a:ID`          | An action on the Actions view                     |
  * | `#/c:SESSION`     | A conversation's page                             |
+ * | `#/d:ID`          | A diagram's page                                  |
+ * | `#/diagrams`      | Every diagram                                     |
  *
  * On the page, the element of a run, step, note, PR, or action has its ref as its DOM id.
  */
@@ -21,7 +23,9 @@ export type Route =
   | { view: "actions"; action: string | null }
   | { view: "prs"; pr: string | null }
   | { view: "history" }
-  | { view: "conversation"; id: string | null };
+  | { view: "conversation"; id: string | null }
+  | { view: "diagrams" }
+  | { view: "diagram"; id: number };
 
 export function parseHash(hash: string): Route {
   const path = decodeURIComponent(hash.replace(/^#\/?/, ""));
@@ -30,6 +34,8 @@ export function parseHash(hash: string): Route {
   if (path === "prs") return { view: "prs", pr: null };
   if (path.startsWith("pr:")) return { view: "prs", pr: path };
   if (path === "history") return { view: "history" };
+  if (path === "diagrams") return { view: "diagrams" };
+  if (/^d:\d+$/.test(path)) return { view: "diagram", id: Number(path.slice(2)) };
   if (path === "c" || path.startsWith("c:")) return { view: "conversation", id: path.slice(2) || null };
   return { view: "board", ref: path || null };
 }

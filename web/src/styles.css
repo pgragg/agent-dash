@@ -468,3 +468,43 @@ a.btn.verb { text-decoration: none; }
 /* The selected row on the PRs and History views (J/K). */
 [data-nav-selected] { box-shadow: inset 3px 0 0 var(--waiting); background: var(--hover); }
 .login-toast { position: fixed; top: 64px; right: 24px; z-index: 20; max-width: 460px; }
+
+/* Diagrams: mermaid in messages, the cards on the board, and the diagram page. */
+.mermaid { overflow-x: auto; text-align: center; }
+.mermaid svg { max-width: 100%; height: auto; }
+.mermaid.loading { min-height: 80px; display: grid; place-items: center; }
+.mermaid-error pre { margin-top: 6px; }
+.md-diagram { margin: 10px 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.md-diagram figcaption { margin-top: 6px; text-align: right; font-size: 12px; }
+.md-diagram figcaption a { color: var(--muted); text-decoration: none; }
+.md-diagram figcaption a:hover { color: var(--ink); }
+.md-image img { display: block; max-width: 100%; max-height: 480px; margin: 8px 0; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+
+.diagram-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.diagram-card { display: flex; flex-direction: column; min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.diagram-card-preview { display: block; text-decoration: none; color: inherit; }
+.diagram-preview { height: 170px; display: flex; align-items: center; justify-content: center; padding: 12px; overflow: hidden; }
+.diagram-preview .mermaid { width: 100%; height: 100%; overflow: hidden; }
+.diagram-preview .mermaid svg, .diagram-preview img { max-width: 100%; max-height: 146px; object-fit: contain; }
+.diagram-card-meta { padding: 10px 12px; border-top: 1px solid var(--line); }
+.diagram-card-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; font-size: 13.5px; text-decoration: none; }
+.diagram-card-title:hover { text-decoration: underline; }
+.diagram-card-tags { display: flex; align-items: center; gap: 8px; margin-top: 6px; white-space: nowrap; }
+.diagram-card-tags > * { flex: none; }
+.diagram-preview .mermaid-error { font-size: 12.5px; text-align: center; }
+.diagram-preview .mermaid-error pre { display: none; }
+
+.diagram-links { flex-wrap: wrap; }
+.diagram-links .sep { color: var(--line-2); }
+.diagram-full { padding: 24px; overflow: auto; }
+.diagram-full img { display: block; max-width: 100%; margin: 0 auto; background: #fff; border-radius: 8px; }
+.diagram-source { max-height: 420px; overflow: auto; }
+
+/* Five views: the top bar keeps one line, and drops the least useful text first. */
+.headline, .headline span, .sources { white-space: nowrap; }
+@media (max-width: 1520px) {
+  .topbar > .meta, .headline .sep { display: none; }
+}
+@media (max-width: 1360px) {
+  .sources { font-size: 0; gap: 0; }
+}

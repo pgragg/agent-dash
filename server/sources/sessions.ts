@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { RunStatus, Turn } from "../../shared/types.ts";
+import { type Found, findInReply, findInWrite } from "../diagrams.ts";
 import { stripHandoff } from "../handoff.ts";
 
 /** Everything the log says about one pi session. Status is decided later, in status.ts. */
@@ -25,6 +26,8 @@ export interface ParsedSession {
   createdPrs: string[];
   mentionedPrs: string[];
   userMessageCount: number;
+  /** Diagrams the agent made in this session, oldest first. */
+  diagrams?: Found[];
 }
 
 const PR_URL = /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/g;
@@ -98,6 +101,7 @@ export function parseSession(raw: string, sessionFile: string, mtime: Date, tick
   const created = new Set<string>();
   const mentioned = new Set<string>();
   const prCreateCalls = new Set<string>();
+  const diagrams: Found[] = [];
 
   const added = new Map<string, number>();
   const score = (text: string, source: keyof typeof WEIGHT) => {
@@ -138,6 +142,7 @@ export function parseSession(raw: string, sessionFile: string, mtime: Date, tick
         model = msg.model ?? model;
         const text = textOf(msg.content);
         if (text.trim()) lastReplyText = text;
+        if (text.includes("```") || text.includes("![")) diagrams.push(...findInReply(text, header?.cwd ?? "", entry.timestamp ?? null));
         score(text, "assistant");
         mention(text);
         for (const part of (msg.content ?? []) as ContentPart[]) {
@@ -146,6 +151,7 @@ export function parseSession(raw: string, sessionFile: string, mtime: Date, tick
           score(args, "toolCall");
           mention(args);
           if (part.name === "bash" && args.includes("gh pr create") && part.id) prCreateCalls.add(part.id);
+          if (part.name === "write") diagrams.push(...findInWrite(part.arguments, entry.timestamp ?? null));
         }
         // An abort during a tool call is logged as an error; it is a stop, not an API failure.
         lastStopReason = msg.stopReason === "error" && msg.errorMessage === "This operation was aborted" ? "aborted" : (msg.stopReason ?? null);
@@ -181,6 +187,7 @@ export function parseSession(raw: string, sessionFile: string, mtime: Date, tick
     createdPrs: [...created],
     mentionedPrs: [...mentioned],
     userMessageCount,
+    diagrams,
   };
 }
 

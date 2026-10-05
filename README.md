@@ -21,7 +21,7 @@ pnpm build && pnpm start # http://127.0.0.1:7777
 
 ## The page
 
-The navbar at the top switches between the views: **Board** (`#/`, the queue and workspace below), **Actions** (`#/actions`), **PRs** (`#/prs`) and **History** (`#/history`). A conversation has its own page (`#/c:<sessionId>`). Each object has its own [address](#addresses).
+The navbar at the top switches between the views: **Board** (`#/`, the queue and workspace below), **Actions** (`#/actions`), **PRs** (`#/prs`), **History** (`#/history`) and **Diagrams** (`#/diagrams`). A conversation has its own page (`#/c:<sessionId>`), and so does each diagram (`#/d:<id>`). Each object has its own [address](#addresses).
 
 ### Board
 
@@ -106,9 +106,29 @@ Every object in agent-dash has an address in the URL hash. A link opens the obje
 | `#/note:<id>` | A note, in its ticket's Notes card |
 | `#/pr:<owner>/<repo>/<number>` | The [PR panel](#pr-panel) |
 | `#/a:<id>` | The action on the Actions view |
-| `#/c:<sessionId>` | The conversation's page |
+| `#/c:<sessionId>` | The conversation's page. A conversation that is older than the board's window shows its chat from the log. |
+| `#/d:<id>` | The [diagram's](#diagrams) page |
+| `#/diagrams` | Every diagram |
 
 An object that is not on the page any more (an old run, a merged PR, a cleared action) shows a note that says so.
+
+## Diagrams
+
+The page shows the diagrams and charts that agents make. Three things count, because each one is an agent that shows you a picture on purpose:
+
+| In the log | Diagram |
+|---|---|
+| A ` ```mermaid ` fence in a reply | Mermaid |
+| A `write` of a `.mmd` or `.mermaid` file, or of a markdown file with mermaid fences in it | Mermaid, one per fence |
+| A `write` of an `.svg` file | SVG |
+| `![title](path)` in a reply, where the path is a local PNG, JPEG, GIF, WebP or SVG file | That image |
+
+A file that the agent only names (a screenshot it read, for example) does not count.
+
+- **Each diagram is a row** in the SQLite `diagrams` table, with a copy of its source (raster images as base64, up to 5 MB). The row has the conversation (`session_id`) and that conversation's main ticket. Its page (`#/d:<id>`) reads only the row, so a diagram opens when its log, its file, or its ticket is gone. If the conversation gets another main ticket later (for example, through a PR), its diagrams move to that ticket.
+- **Where it shows**: in each message, a mermaid fence renders as a chart with a "Diagram N" link, and an embedded image shows from its stored copy. A ticket's workspace and a conversation's page have a **Diagrams** section with previews. The **Diagrams** view lists all of them, newest first, with a search box. The diagram page links to its ticket and its conversation, shows its source, and opens its stored file.
+- **How it is found**: the session parser collects diagrams with the rest of the log, so it re-reads only the logs that changed. The server reads an embedded image once per change to its file, and checks its first bytes, so a file that is not an image is never stored. The same diagram twice in one conversation is one row (the key is the session id and the SHA-1 of the source).
+- **Safety**: mermaid renders with `securityLevel: "strict"`, and loads only when a diagram shows. `GET /api/diagram/raw?id=N` serves the stored file with `Content-Security-Policy: default-src 'none'; sandbox`, so an SVG that an agent wrote runs no script, even when you open it on its own.
 
 ## Conversations on the page
 
@@ -134,6 +154,7 @@ Everything you write lives in SQLite at `~/.agent-dash/agent-dash.db`:
 | `notes` | One per note: `ticket`, `created_at`, `body` |
 | `actions` | One per action on the Actions view: `key` (what it is about, such as `ci_failing pr:<url>`), `kind`, `ticket`, `created_at`, `cleared_at` (set when it goes away) |
 | `exits` | One per time you leave the dash for another tool: `at`, `kind`, `host`, `view`, `section`, `ticket`. Append-only. See [Exits](#exits). |
+| `diagrams` | One per diagram an agent made: `key` (session id and source hash), `session_id`, `ticket`, `kind`, `title`, `origin` (`reply`, or the file path as the agent wrote it), `hash`, `source`, `created_at` (when the agent wrote it) |
 | `PiConversationStatusChange` | One per change to a thread's relevance: `ticket`, `session_id`, `status` (`relevant` or `resolved`), `reason` (resolved only, optional), `created_at`. Append-only; the newest row per ticket and thread is the current state. |
 
 ## Reply to an agent

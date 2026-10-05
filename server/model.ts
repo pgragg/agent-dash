@@ -207,6 +207,7 @@ export function buildDashboard(input: ModelInput): Dashboard {
     notes: input.notes ?? {},
     // Filled by the server, which keeps each action's row in SQLite.
     actions: [],
+    diagrams: [],
     sources: input.sources,
     extensionInstalled: input.extensionInstalled,
   };

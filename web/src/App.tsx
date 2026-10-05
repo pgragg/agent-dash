@@ -14,6 +14,8 @@ import { FixLogin } from "./fixLogin.tsx";
 import { rowKey } from "./rowNav.ts";
 import { SlackQuotes } from "./slackQuotes.tsx";
 import { DueDateVerb, TicketPanel } from "./ticketPanel.tsx";
+import { DiagramCards, DiagramsView, DiagramView } from "./diagrams.tsx";
+import { SessionScope } from "./mermaid.tsx";
 
 /**
  * agent-dash answers one question: "what do I work on next?".
@@ -611,7 +613,9 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket }: { run: R
       {chat && <Chat sessionId={run.sessionId} refreshKey={run.status === "working" ? run.userMessageCount : run.lastActivityAt + run.status} />}
       {!chat && run.lastMessage && (
         <div className={`agent-message ${long && !expanded ? "clamped" : ""}`}>
-          <Markdown text={run.lastMessage} />
+          <SessionScope sessionId={run.sessionId}>
+            <Markdown text={run.lastMessage} />
+          </SessionScope>
           {long && (
             <button className="btn ghost small expand" onClick={() => setExpanded(!expanded)}>
               {expanded ? "Show less" : "Show the whole message"}
@@ -689,7 +693,9 @@ function History({ runs: allRuns, now, onError, ticket, threads = {}, focus = nu
           </div>
           {open === r.sessionId && r.lastMessage && (
             <div className="h-message">
-              <Markdown text={r.lastMessage} />
+              <SessionScope sessionId={r.sessionId}>
+                <Markdown text={r.lastMessage} />
+              </SessionScope>
             </div>
           )}
         </li>
@@ -758,6 +764,8 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
   const featured = live.length ? live : primary && !isResolved(s, primary) ? [primary] : relevant.length ? [relevant.at(-1)!] : [];
   const prs = s.ticket?.prs ?? [];
   const runs = s.ticket?.runs ?? (s.run ? [s.run] : []);
+  // A ticket's diagrams, or a run's when the entry is a run with no ticket.
+  const diagrams = data.diagrams.filter((d) => (s.ticket ? d.ticket === s.ticket.ticket.key : d.sessionId === s.run?.sessionId));
   const top = lead(s);
 
   return (
@@ -870,6 +878,13 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
                 <PrRow key={p.url} pr={p} now={now} />
               ))}
           </div>
+        </div>
+      )}
+
+      {diagrams.length > 0 && (
+        <div className="stack">
+          <h2 className="section-title">Diagrams · {diagrams.length}</h2>
+          <DiagramCards diagrams={diagrams} now={now} showConversation />
         </div>
       )}
 
@@ -1064,23 +1079,25 @@ function Chat({ sessionId, refreshKey }: { sessionId: string; refreshKey: unknow
   const turns: Turn[] = value.turns;
   const shown = all ? turns : turns.slice(-TURNS_SHOWN);
   return (
-    <div className="chat">
-      {turns.length > shown.length && (
-        <button className="btn ghost small" onClick={() => setAll(true)}>
-          Show {plural(turns.length - shown.length, "earlier message")}
-        </button>
-      )}
-      {shown.length === 0 && <p className="meta">This chat has no text yet.</p>}
-      {shown.map((t, i) => (
-        <div key={turns.length - shown.length + i} className={`turn ${t.role}`}>
-          <div className="turn-head">
-            <b>{t.role === "user" ? "You" : "Agent"}</b>
-            {t.at && <span className="meta">{stamp(t.at)}</span>}
+    <SessionScope sessionId={sessionId}>
+      <div className="chat">
+        {turns.length > shown.length && (
+          <button className="btn ghost small" onClick={() => setAll(true)}>
+            Show {plural(turns.length - shown.length, "earlier message")}
+          </button>
+        )}
+        {shown.length === 0 && <p className="meta">This chat has no text yet.</p>}
+        {shown.map((t, i) => (
+          <div key={turns.length - shown.length + i} className={`turn ${t.role}`}>
+            <div className="turn-head">
+              <b>{t.role === "user" ? "You" : "Agent"}</b>
+              {t.at && <span className="meta">{stamp(t.at)}</span>}
+            </div>
+            <Markdown text={t.text} />
           </div>
-          <Markdown text={t.text} />
-        </div>
-      ))}
-    </div>
+        ))}
+      </div>
+    </SessionScope>
   );
 }
 
@@ -1253,6 +1270,9 @@ function NewConversationForm() {
 function ConversationView({ sessionId, data, now }: { sessionId: string; data: Dashboard; now: number }) {
   const run = useMemo(() => [...data.myTickets, ...data.otherTickets].flatMap((g) => g.runs).concat(data.unlinkedRuns).find((r) => r.sessionId === sessionId), [data, sessionId]);
   const [error, setError] = useState<string | null>(null);
+  // A conversation older than the board's window still has a log: a diagram links here from any age.
+  const old = useLoad(() => (run ? Promise.resolve(null) : api.transcript(sessionId)), run ? "live" : `${sessionId} ${data.generatedAt}`);
+  const diagrams = data.diagrams.filter((d) => d.sessionId === sessionId);
   const end = useRef<HTMLDivElement>(null);
   // New turns land at the bottom, next to the reply box.
   // A block body: Chrome's scrollIntoView returns a Promise, which React would call as a cleanup.
@@ -1262,7 +1282,7 @@ function ConversationView({ sessionId, data, now }: { sessionId: string; data: D
   return (
     <article className="workspace">
       <header className="ws-head">
-        <h1>{run ? runTitle(run) : "New conversation"}</h1>
+        <h1>{run ? runTitle(run) : old.value ? "Conversation" : "New conversation"}</h1>
         <div className="ws-meta">
           {run ? (
             <>
@@ -1278,6 +1298,8 @@ function ConversationView({ sessionId, data, now }: { sessionId: string; data: D
                 <OpenTab run={run} onError={setError} className="btn ghost small" />
               )}
             </>
+          ) : old.value ? (
+            <span className="meta">An older conversation, from its log</span>
           ) : (
             <span className="meta">Starting pi…</span>
           )}
@@ -1285,7 +1307,14 @@ function ConversationView({ sessionId, data, now }: { sessionId: string; data: D
       </header>
       {error && <div className="toast">{error}</div>}
       {/* The run shows once pi saved the first message; until then there is no chat to load. */}
+      {diagrams.length > 0 && (
+        <div className="stack">
+          <h2 className="section-title">Diagrams · {diagrams.length}</h2>
+          <DiagramCards diagrams={diagrams} now={now} showTicket />
+        </div>
+      )}
       {run && <Chat sessionId={sessionId} refreshKey={run.lastActivityAt + run.status} />}
+      {!run && old.value && <Chat sessionId={sessionId} refreshKey="old" />}
       {run && <LivePanel run={run} now={now} onError={setError} working="The agent is working…" />}
       {run && run.status !== "finished" && <Composer run={run} onError={setError} focusSignal={0} />}
       {run?.status === "finished" && <p className="meta">{resuming(sessionId) ? "Starting pi…" : "This conversation ended. Resume here (at the top) continues it on this page, and Copy resume in a terminal."}</p>}
@@ -1458,6 +1487,9 @@ export function App() {
             <a href="#/history" className={view === "history" ? "active" : ""} aria-current={view === "history" ? "page" : undefined}>
               History
             </a>
+            <a href="#/diagrams" className={view === "diagrams" || view === "diagram" ? "active" : ""} aria-current={view === "diagrams" ? "page" : undefined}>
+              Diagrams {data.diagrams.length > 0 && <span className="count">{data.diagrams.length}</span>}
+            </a>
           </nav>
         </div>
         <div className="headline">
@@ -1503,6 +1535,14 @@ export function App() {
       ) : view === "history" ? (
         <main className="main">
           <HistoryView data={data} now={now} />
+        </main>
+      ) : route.view === "diagrams" ? (
+        <main className="main">
+          <DiagramsView data={data} now={now} />
+        </main>
+      ) : route.view === "diagram" ? (
+        <main className="main">
+          <DiagramView key={route.id} id={route.id} data={data} now={now} />
         </main>
       ) : route.view === "conversation" ? (
         <main className="main">
