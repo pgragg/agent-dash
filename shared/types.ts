@@ -236,7 +236,8 @@ export interface Note {
   body: string;
 }
 
-export type ThreadStatus = "relevant" | "resolved";
+/** "unlinked" takes the thread off the ticket, as if it never named it. */
+export type ThreadStatus = "relevant" | "resolved" | "unlinked";
 
 /** One change to whether a pi thread still matters to a ticket. The newest change is the current state. */
 export interface ThreadStatusChange {

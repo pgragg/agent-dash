@@ -7,6 +7,18 @@ import type { Diagram, DiagramKind, NextStep, Note, SdlcEnvironment, SdlcEvent, 
 
 export const DB_PATH = process.env.AGENT_DASH_DB ?? join(homedir(), ".agent-dash/agent-dash.db");
 
+const THREAD_TABLE = `
+CREATE TABLE IF NOT EXISTS PiConversationStatusChange (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket     TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  status     TEXT NOT NULL CHECK (status IN ('relevant', 'resolved', 'unlinked')),
+  reason     TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS pi_conversation_status_by_thread ON PiConversationStatusChange (ticket, session_id, id);
+`;
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS summaries (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,15 +52,7 @@ CREATE TABLE IF NOT EXISTS notes (
 CREATE INDEX IF NOT EXISTS notes_by_ticket ON notes (ticket, id);
 
 -- Append-only: each row is one change; the newest row per (ticket, session_id) is the current state.
-CREATE TABLE IF NOT EXISTS PiConversationStatusChange (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  ticket     TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  status     TEXT NOT NULL CHECK (status IN ('relevant', 'resolved')),
-  reason     TEXT,
-  created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS pi_conversation_status_by_thread ON PiConversationStatusChange (ticket, session_id, id);
+${THREAD_TABLE}
 
 -- One row per action on the Actions view, from it first showing to it going away.
 -- key names what the action is about ("ci_failing pr:<url>"), so the same action keeps its row and age.
@@ -167,6 +171,17 @@ export function open(path = DB_PATH): DatabaseSync {
   for (const c of ["edited_at", "deleted_at"]) if (!diagramColumns.has(c)) db.exec(`ALTER TABLE diagrams ADD COLUMN ${c} TEXT`);
   // CREATE TABLE IF NOT EXISTS does not add a column to a table that is already there.
   if (!(db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = 'skipped_at'").get())) db.exec("ALTER TABLE SDLC_Event ADD COLUMN skipped_at TEXT");
+  // SQLite cannot change a CHECK, so an older table is copied into one that allows 'unlinked'.
+  const threadTable = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'PiConversationStatusChange'").get() as { sql: string };
+  if (!threadTable.sql.includes("'unlinked'")) {
+    db.exec(`BEGIN IMMEDIATE;
+      ALTER TABLE PiConversationStatusChange RENAME TO PiConversationStatusChange_old;
+      DROP INDEX pi_conversation_status_by_thread;
+      ${THREAD_TABLE}
+      INSERT INTO PiConversationStatusChange SELECT * FROM PiConversationStatusChange_old;
+      DROP TABLE PiConversationStatusChange_old;
+      COMMIT;`);
+  }
   // Summaries saved before steps were stored get their rows once.
   for (const r of db.prepare("SELECT id, ticket, summary FROM summaries WHERE status = 'done' AND id NOT IN (SELECT summary_id FROM next_steps)").all() as unknown as Row[]) {
     insertSteps(r.id, r.ticket, r.summary ?? "");

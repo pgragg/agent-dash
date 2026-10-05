@@ -321,7 +321,7 @@ const server = createServer(async (req, res) => {
       if (!new RegExp(`^${config.ticketPattern.source}$`).test(ticket)) return json(400, { error: `not a ticket key: ${ticket}` });
       if (!/^[\w-]{8,64}$/.test(session)) return json(400, { error: "not a session id" });
       const { status, reason } = JSON.parse((await readBody(req, 16_000)) || "{}") as { status?: string; reason?: string };
-      if (status !== "resolved" && status !== "relevant") return json(400, { error: "status must be resolved or relevant" });
+      if (status !== "resolved" && status !== "relevant" && status !== "unlinked") return json(400, { error: "status must be resolved, relevant or unlinked" });
       const change = summaryDb.setThreadStatus(ticket, session, status, reason?.trim() || null);
       broadcast();
       json(201, change);
@@ -339,7 +339,7 @@ const server = createServer(async (req, res) => {
       res.writeHead(code, { "Content-Type": "application/json" }).end(JSON.stringify(out));
     } else if (url.pathname === "/api/history") {
       const [parsed, reported, pulls] = await Promise.all([sessions.scan(), readReportedStatuses(config.statusDir), prs.get(false)]);
-      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify(buildHistory(parsed, reported, pulls, Date.now())));
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify(buildHistory(parsed, reported, pulls, Date.now(), undefined, summaryDb.currentThreadStatuses())));
     } else if (url.pathname === "/api/transcript") {
       const sessionId = url.searchParams.get("session") ?? "";
       const file = sessions.fileFor(sessionId) ?? ((await sessions.scan()) && sessions.fileFor(sessionId));
