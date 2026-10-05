@@ -310,8 +310,8 @@ export interface TicketGroup {
 /** An environment under test. A tag names what the event tested, not every system it touched. */
 export type SdlcEnvironment = "localhost" | "fern_dev" | "fern_prod" | "postman_beta" | "postman_prod";
 
-/** "deploy" is a deploy that Argo or Piper confirmed: the In Beta and In Prod stages. */
-export type SdlcEventType = "smoketest" | "deploy";
+/** "deploy" is a deploy that Argo or Piper confirmed: the In Beta and In Prod stages. "review_request": a Slack message that asked for a PR review. */
+export type SdlcEventType = "smoketest" | "deploy" | "review_request";
 
 export type SmoketestOutcome = "passed" | "failed" | "blocked";
 
@@ -329,9 +329,28 @@ export interface SdlcEvent {
   sessionId: string | null;
   /** Set on a smoketest that Piper chose to skip. It has no outcome. */
   skippedAt: string | null;
+  /** One short line from the agent that ran the smoketest: what it showed. The collapsed row shows it. */
+  summary: string | null;
+  /** A review request's PR, Slack channel id, message text and message permalink. Null on other events. */
+  prUrl: string | null;
+  channel: string | null;
+  message: string | null;
+  messageUrl: string | null;
+  /** Empty on a review request. */
   environments: SdlcEnvironment[];
+  /** Can be empty on a review request for a PR with no ticket. */
   tickets: string[];
   createdAt: string;
+}
+
+/** A drafted Slack review request for one open PR, from a cheap model. One `review_drafts` row. */
+export interface ReviewDraft {
+  prUrl: string;
+  status: "in_progress" | "done" | "failed";
+  /** The whole message: "PR: <what it does> <url>". */
+  text: string | null;
+  error: string | null;
+  requestedAt: string;
 }
 
 export interface SourceHealth {
@@ -366,6 +385,10 @@ export interface Dashboard {
   diagrams: Diagram[];
   /** SDLC events (smoketests, confirmed deploys) by ticket key, newest first. */
   sdlcEvents: Record<string, SdlcEvent[]>;
+  /** Drafted Slack review requests by PR URL. */
+  reviewDrafts: Record<string, ReviewDraft>;
+  /** Review requests sent from agent-dash by PR URL, newest first. Also for PRs with no ticket. */
+  reviewRequests: Record<string, SdlcEvent[]>;
   sources: { jira: SourceHealth; github: SourceHealth; sessions: SourceHealth };
   extensionInstalled: boolean;
 }

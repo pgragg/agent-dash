@@ -3,6 +3,8 @@ import { join } from "node:path";
 
 const home = homedir();
 const env = process.env;
+/** Real keys that our own code uses as sample data. A run that touches that code does not link to them. */
+const ignoredTickets = (env.AGENT_DASH_IGNORE_TICKETS ?? "FSDK-1").split(",").filter(Boolean).join("|");
 
 export const config = {
   port: Number(env.AGENT_DASH_PORT ?? 7777),
@@ -23,7 +25,7 @@ export const config = {
     excludeProjects: (env.AGENT_DASH_EXCLUDE_PROJECTS ?? "FSM").split(",").filter(Boolean),
   },
   /** Ticket keys that a run can link to. */
-  ticketPattern: new RegExp(`\\b(?:${env.AGENT_DASH_PROJECTS ?? "FSDK|EFSUP"})-\\d+\\b`, "g"),
+  ticketPattern: new RegExp(`\\b${ignoredTickets ? `(?!(?:${ignoredTickets})\\b)` : ""}(?:${env.AGENT_DASH_PROJECTS ?? "FSDK|EFSUP"})-\\d+\\b`, "g"),
   /** Runs and PRs older than this do not create "other ticket" groups or unlinked rows. */
   recentDays: Number(env.AGENT_DASH_RECENT_DAYS ?? 14),
   /** Jira and GitHub answers are cached this long, so a page refresh does not hit the APIs. */

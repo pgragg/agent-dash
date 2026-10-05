@@ -21,6 +21,7 @@ import * as slackRoute from "./routes/slack.ts";
 import * as ticketRoute from "./routes/ticket.ts";
 import * as diagramRoute from "./routes/diagrams.ts";
 import * as sdlcRoute from "./routes/sdlc.ts";
+import * as reviewRoute from "./routes/reviewRequests.ts";
 import { confirmDeployMessage, deployStageOf, parseEnvironment, smoketestMessage } from "../shared/sdlc.ts";
 import { syncDiagrams } from "./diagramSync.ts";
 import { fetchMyPrs } from "./sources/github.ts";
@@ -139,6 +140,8 @@ async function dashboard(force: boolean) {
   await syncDiagrams(parsed, (s) => runTicket.get(s.sessionId) ?? s.tickets[0] ?? null, new Date(now));
   d.diagrams = summaryDb.listDiagrams();
   d.sdlcEvents = summaryDb.sdlcEventsByTicket();
+  d.reviewDrafts = summaryDb.reviewDrafts();
+  d.reviewRequests = summaryDb.reviewRequestsByPr();
   redraftAfterNewEvents([...d.myTickets, ...d.otherTickets], broadcast);
   return d;
 }
@@ -218,6 +221,8 @@ const server = createServer(async (req, res) => {
     if (await ticketRoute.handle(req, res, url, onDueDate)) return;
     if (await diagramRoute.handle(req, res, url, sessions, broadcast)) return;
     if (await sdlcRoute.handle(req, res, url, broadcast)) return;
+    // The dashboard's PRs carry the tickets that cross-linking gave them.
+    if (await reviewRoute.handle(req, res, url, { prs: async () => (await dashboard(false)).prs, onChange: broadcast })) return;
     if (await loginRoute.handle(req, res, url)) return;
     if (await slackRoute.handle(req, res, url)) return;
     if (url.pathname === "/api/dashboard") {

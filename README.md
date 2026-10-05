@@ -7,7 +7,7 @@ It answers one question: **what do I look at next?**
 
 It reads your pi session logs, your Jira tickets, and your GitHub PRs. You can act on the answer without leaving the page.
 
-The dashboard writes one thing to Jira itself: a due date that you set on the [Ticket](#the-ticket-section) section. It never writes to GitHub. The other things it sends go to your own pi sessions: a reply that you type, a Stop, and the answer to an extension dialog. A verb button (a [PR verb](#pr-verbs), or **Move to** on the [Ticket](#the-ticket-section) section) starts an agent on one small task, and that agent does the write: the click is your approval.
+The dashboard writes one thing to Jira itself: a due date that you set on the [Ticket](#the-ticket-section) section. It posts one thing to Slack as you: a [review request](#prs) when you click its **Post to Slack**. It never writes to GitHub. The other things it sends go to your own pi sessions: a reply that you type, a Stop, and the answer to an extension dialog. A verb button (a [PR verb](#pr-verbs), or **Move to** on the [Ticket](#the-ticket-section) section) starts an agent on one small task, and that agent does the write: the click is your approval.
 
 ## Run it
 
@@ -39,7 +39,7 @@ The navbar at the top switches between the views: **Board** (`#/`, the queue and
 - **New conversation** (`C`), at the top of the queue, opens a new page (`#/c`). Type the first message and pick the folder (default `~`), and **Start** runs a plain pi with no ticket and no context file. That pi has no terminal: the page goes to `#/c:<sessionId>`, and you talk to the agent there (see [Conversations on the page](#conversations-on-the-page)).
 - **Keyboard**: `J`/`K` move, `E` done for now, `Z` snooze, `R` reply, `N` note, `A` new agent, `C` new conversation, `O` open the iTerm tab (or the page of a conversation), `S` draft next steps, `T` show or hide the ticket section, `V` queue or kanban, `⌘↵` send, `?` help. On the PRs and History views, `J`/`K` select a row and `↵` opens it (the PR, or the chat).
 - **Fix login**: when Jira or GitHub is down, the top bar shows **Fix Jira login** or **Fix GitHub login**. It runs `~/pi/auth/pi-auth ensure <target>` on the server (`POST /api/login?source=jira|github`, with the `X-Agent-Dash` guard), then refreshes. The target comes from a fixed list, never from the request. pi-auth can open your Chrome; it changes nothing remote. If pi-auth has no target for the source, the button tells you how to log in by hand.
-- `#/t:FSDK-123` or `#/r:<sessionId>` in the URL selects an entry. See [Addresses](#addresses) for the other objects.
+- `#/t:ABC-123` or `#/r:<sessionId>` in the URL selects an entry. See [Addresses](#addresses) for the other objects.
 
 ### Needs you
 
@@ -65,6 +65,11 @@ Each action is a row in the SQLite `actions` table. The server syncs the table o
 ### PRs
 
 Your open PRs, grouped by ticket. A PR links to a ticket as on the board, so a PR with no key in its title or branch takes the ticket of the run that opened it. A PR that names two tickets shows under both. The groups of starred tickets come first. Then the groups with the most urgent PR come first, in the [queue ranking](#queue-ranking) order, and PRs with no ticket come last. Under each PR, the signals that need you (for example "CI is red: lint, test") show with the reason and a [verb button](#pr-verbs). The ticket title opens that ticket on the board. A click on a PR row, here or on the board, opens the [PR panel](#pr-panel); the small `↗` at the end of the row opens GitHub. The CI tag of a red PR names the failing checks. Only PRs updated in the last 14 days show, because the GitHub fetch uses that window. `J`/`K` select a PR, and `↵` opens it.
+
+**Review requests.** Under each PR is a drafted Slack message in the team's format, for example `PR: bind slack token env vars https://github.com/postman-eng/cloud9-parcels-production-deployments/pull/13612`. You can edit it. **Post to Slack** (or `⌘↵` in the message) posts it to #proj-fern-aws-migration-devs as you, and the click is your approval. After Slack takes the message, the server records a `review_request` [SDLC event](#sdlc-progress-and-smoketests) with the PR, the text and the permalink, on the PR's tickets, so the ticket's **Review requested** stage turns done. The PR then shows "Review requested … Open in Slack", and **Post again** opens the draft again. If the post fails, nothing is recorded, and the PR shows Slack's reason.
+
+- **Drafts.** When the PRs view loads, it calls `POST /api/review-drafts`. The server takes each open PR from its own list that has no draft, marks it in progress, and drafts at most 6 at once in the background: it reads the PR body and files with `gh pr view`, then runs one tool-less `pi -p --no-session` turn with a cheap model (`AGENT_DASH_DRAFT_MODEL`, default `anthropic/claude-haiku-4-5`). The model writes only the phrase; the server adds `PR:` and the link. Each finished draft reloads the page. A failed or stuck draft is tried again on a page load after 5 minutes; meanwhile the message starts from the PR title. **Redraft** (`POST /api/review-drafts?pr=<url>`) asks for a new draft.
+- **Posting.** `POST /api/review-requests` with `{prUrl, text}`, with the `X-Agent-Dash` guard. The PR must be one of the dashboard's PRs. The server runs `scripts/slack-post.ts`, which posts through Slack's hosted MCP with your own OAuth grant from pi-mcp-adapter (`~/pi/slack/README.md`), because copied Slack cookies get the session revoked. The grant needs the `chat:write` scope. The adapter config hides the send tool from pi agents (`excludeTools`), so only this button posts. If the grant has no `chat:write`, the PR shows how to sign in again: `node ~/pi/slack/bin/mcp-slack-login.mjs --force` (it asks Slack again even with a good token), then click Allow in Chrome.
 
 ### PR panel
 
@@ -116,34 +121,36 @@ A progress bar at the top of each ticket shows where its change is on the way to
 | 1. Ideation | Always | — |
 | 2. PR exists | An open or merged PR names the key | GitHub |
 | 3. Local smoketest | The newest smoketest tagged `localhost` passed (skipped if it is a skip) | SQLite |
-| 4. In Beta | A deploy event tagged Postman Beta or Fern Dev | SQLite: an agent confirmed it in Argo, or you checked it off |
-| 5. Beta smoketest | The newest smoketest tagged Postman Beta or Fern Dev passed | SQLite |
-| 6. In Prod | A deploy event tagged Postman Prod or Fern Prod | SQLite, as In Beta |
-| 7. Prod smoketest | The newest smoketest tagged Postman Prod or Fern Prod passed | SQLite |
-| 8. Ticket done | The Jira status category is Done | Jira |
+| 4. Review requested | A review request event exists for one of the ticket's PRs | SQLite: you posted it from the [PRs](#prs) view |
+| 5. In Beta | A deploy event tagged Postman Beta or Fern Dev | SQLite: an agent confirmed it in Argo, or you checked it off |
+| 6. Beta smoketest | The newest smoketest tagged Postman Beta or Fern Dev passed | SQLite |
+| 7. In Prod | A deploy event tagged Postman Prod or Fern Prod | SQLite, as In Beta |
+| 8. Prod smoketest | The newest smoketest tagged Postman Prod or Fern Prod passed | SQLite |
+| 9. Ticket done | The Jira status category is Done | Jira |
 
 - **A smoketest has one of three outcomes.** **passed** (green): the change works. **failed** (red): the change does not work. **blocked** (grey): the test could not run, or could not see the result, for example with no access or no test data on that environment. A blocked smoketest is not a failure and not progress: the stage shows grey with a `?`, it stays the next stage, and the hint says to remove the blocker, then run it again or skip it. The newest smoketest decides, so a later pass makes the stage done. An event with no outcome counts as passed.
 - **The PRs** are the ticket's PRs on the board, plus `GET /api/ticket-prs?key=KEY` (with the `X-Agent-Dash` guard): a GitHub search for PRs by anyone, of any age, with the key in the title, cached for 2 minutes. A PR in `postman-eng/cloud9-parcels-deployments` is a Beta deploy PR, and one in `postman-eng/cloud9-parcels-production-deployments` is a Prod deploy PR. When a deploy PR merged and no deploy event exists, the stage shows **waiting**.
 - **A click on a stage** shows its state and its actions. At first it shows the next stage, with the hint of what to do: for example, a local smoketest comes before a PR review, and a Beta smoketest comes before the prod chart version update PR.
   - A smoketest stage: **Run smoketest on <environment>** starts an agent (`POST /api/agents?ticket=KEY` with `{sdlc: {kind: "smoketest", env}}`). The server writes the first message (`smoketestMessage` in `shared/sdlc.ts`), because it names the server's own script path. At the click, the server also saves a smoketest event with a start time, no end time, and the agent's session id, so the stage turns **yellow** (running) at once. While it runs, the stage in the bar and **Open the smoketest** link to the agent: its card in the ticket view (`#/r:<sessionId>`), or its page until pi writes its log. The agent runs the smoketest, then finishes that event with `scripts/sdlc-event.ts finish`. If the agent stops without a result, the stage stays yellow: **Delete** the event on the Smoketests card. **Skip smoketest** (until the stage is done or skipped) records a smoketest event with `skippedAt` set to now and no outcome. The stage then shows **skipped**, and the next stage comes after it. Delete the event on the Smoketests card to undo the skip.
+  - Review requested: **Request review** opens the PRs view, where each open PR has a drafted Slack message. When it is done, **Open in Slack** opens the message.
   - In Beta and In Prod: **Confirm in Argo** (in any state until the stage is done, also when no deploy PR or earlier stage is seen) starts an agent that checks the Argo app read-only and records a deploy event. **Check off by hand** records it at once, for a change with no Argo deploy. **Undo** removes the newest deploy event.
-- **The Smoketests card** lists the ticket's smoketests, newest first, with the time, how long each ran, the environment tags, the outcome, the test details, and the results (closed at first). Pick an environment, then **Run smoketest on …** starts the same agent as on the bar, and **Skip smoketest** records a skip for that environment. **Record by hand** saves a smoketest that you ran yourself. **Delete** removes one.
+- **The Smoketests card** lists the ticket's smoketests, newest first. A finished smoketest shows one line: its outcome, the summary that its agent wrote at the end, the environments, and its age. A row from before summaries shows the first line of its results. A click on the line shows the full row: the time, how long it ran, the environment tags, the outcome, the test details, and the results (closed at first). A running or skipped smoketest always shows the full row. Pick an environment, then **Run smoketest on …** starts the same agent as on the bar, and **Skip smoketest** records a skip for that environment. **Record by hand** saves a smoketest that you ran yourself. **Delete** removes one.
 - **A tag is the environment under test**, not every system that the test touched. A local frontend against the Postman Beta backend tests Beta, so its tag is Postman Beta. Two tags are for the rare test where both sides are under test. The tags are `localhost`, `fern_dev`, `fern_prod`, `postman_beta` and `postman_prod` (or their labels: "Fern Dev" and so on).
 - **The next-steps summary and the context of a new agent** both get the progress, one line per stage. The summary prompt tells the run to follow the order, to name the environment when the next stage is a smoketest, and to plan no step for a skipped stage.
-- **A new or changed event redrafts the next steps.** When a smoketest, a skip, or a deploy is recorded or changed (on the page or with the script), the server starts a new [next-steps](#next-steps-summaries) draft for each ticket of the event, because the old steps can name a stage that is now done. A change is any `UPDATE` of its `SDLC_Event` row: a SQLite trigger marks the event's tickets for a new draft, so it works for every writer. A draft that is in progress and started before the event was made or changed is stopped and replaced. A ticket that is not on the board gets no draft. A delete does not start a draft.
+- **A new or changed event redrafts the next steps.** When a smoketest, a skip, a deploy, or a review request is recorded or changed (on the page or with the script), the server starts a new [next-steps](#next-steps-summaries) draft for each ticket of the event, because the old steps can name a stage that is now done. A change is any `UPDATE` of its `SDLC_Event` row: a SQLite trigger marks the event's tickets for a new draft, so it works for every writer. A draft that is in progress and started before the event was made or changed is stopped and replaced. A smoketest that only started (from **Run smoketest**) does not start a draft, because it moves no stage yet; its result does. A ticket that is not on the board gets no draft. A delete does not start a draft.
 
-`POST /api/sdlc-events` (body `{eventType, tickets, environments, startedAt, finishedAt, outcome, testDetails, testResults, skippedAt}`, where `outcome` is `passed`, `failed` or `blocked`; only a smoketest with no outcome can have `skippedAt`) and `DELETE /api/sdlc-events?id=N` write the events, with the `X-Agent-Dash` guard. An agent uses the script, which writes into the same database:
+`POST /api/sdlc-events` (body `{eventType, tickets, environments, startedAt, finishedAt, outcome, summary, testDetails, testResults, skippedAt}`, where `summary` is one line of at most 200 characters, and `outcome` is `passed`, `failed` or `blocked`; only a smoketest with no outcome can have `skippedAt`) and `DELETE /api/sdlc-events?id=N` write the events, with the `X-Agent-Dash` guard. An agent uses the script, which writes into the same database:
 
 ```bash
-node scripts/sdlc-event.ts smoketest --ticket FSDK-1 --env localhost \
+node scripts/sdlc-event.ts smoketest --ticket ABC-123 --env localhost \
   --started 2026-10-05T10:00:00Z --finished 2026-10-05T10:20:00Z --outcome passed \
-  --details-file details.md --results-file results.md
-node scripts/sdlc-event.ts deploy --ticket FSDK-1 --env postman_beta --details "<Argo app>: Synced, Healthy, 1.2.3"
+  --summary "Publish flow works end to end" --details-file details.md --results-file results.md
+node scripts/sdlc-event.ts deploy --ticket ABC-123 --env postman_beta --details "<Argo app>: Synced, Healthy, 1.2.3"
 # A smoketest that agent-dash started: record the result on its running event.
-node scripts/sdlc-event.ts finish --id 12 --outcome passed --details-file details.md --results-file results.md
+node scripts/sdlc-event.ts finish --id 12 --outcome passed --summary "Publish flow works end to end" --details-file details.md --results-file results.md
 ```
 
-`--ticket` and `--env` can repeat. With no `--started`, the time is now.
+`--ticket` and `--env` can repeat. With no `--started`, the time is now. The smoketest agent's first message tells it to write `--summary` after the test: one line of at most 120 characters that says what the test showed.
 
 ## Addresses
 
@@ -151,7 +158,7 @@ Every object in agent-dash has an address in the URL hash. A link opens the obje
 
 | Hash | Opens |
 |---|---|
-| `#/t:FSDK-123` | The ticket on the board |
+| `#/t:ABC-123` | The ticket on the board |
 | `#/r:<sessionId>` | The run: its agent card or history row, under its ticket. A run with no ticket is its own entry. |
 | `#/step:<id>` | A drafted next step, in its ticket's Next steps card |
 | `#/note:<id>` | A note, in its ticket's Notes card |
@@ -206,10 +213,11 @@ Everything you write lives in SQLite at `~/.agent-dash/agent-dash.db`:
 | `next_steps` | One per numbered step of a finished summary: `summary_id`, `ticket`, `position`, `body`. Written when the summary is saved. |
 | `notes` | One per note: `ticket`, `created_at`, `body` |
 | `tickets` | One per ticket with local state: `key`, `snoozed_until` (when a snoozed ticket comes back to the board) |
+| `review_drafts` | One per open PR: `pr_url`, `status` (`in_progress`, `done` or `failed`), `text` (the drafted Slack message), `error`, `requested_at` |
 | `actions` | One per action on the Actions view: `key` (what it is about, such as `ci_failing pr:<url>`), `kind`, `ticket`, `created_at`, `cleared_at` (set when it goes away) |
 | `exits` | One per time you leave the dash for another tool: `at`, `kind`, `host`, `view`, `section`, `ticket`. Append-only. See [Exits](#exits). |
 | `diagrams` | One per diagram an agent made: `key` (session id and source hash), `session_id`, `ticket`, `kind`, `title`, `origin` (`reply`, or the file path as the agent wrote it), `hash`, `source`, `created_at` (when the agent wrote it) |
-| `SDLC_Event` | One per smoketest or confirmed deploy: `event_type` (`smoketest` or `deploy`), `started_at`, `finished_at`, `outcome` (`passed`, `failed`, `blocked`, or empty), `test_details`, `test_results`, `skipped_at` (set on a smoketest that you skipped), `session_id` (the agent that runs it, when agent-dash started it), `created_at`. A smoketest with a `session_id`, no `finished_at` and no `outcome` is running. |
+| `SDLC_Event` | One per smoketest, confirmed deploy, or review request: `event_type` (`smoketest`, `deploy` or `review_request`), `pr_url`, `channel`, `message` and `message_url` (the Slack permalink) on a review request, `started_at`, `finished_at`, `outcome` (`passed`, `failed`, `blocked`, or empty), `test_details`, `test_results`, `skipped_at` (set on a smoketest that you skipped), `session_id` (the agent that runs it, when agent-dash started it), `created_at`. A smoketest with a `session_id`, no `finished_at` and no `outcome` is running. |
 | `SDLC_Event_Environment` | One per environment under test of an event: `sdlc_event_id`, `environment` |
 | `SDLC_Event_Ticket` | One per ticket of an event: `sdlc_event_id`, `ticket`, `created_at` (when the link was made), `summary_requested_at` (when the server started the next-steps draft for it; empty until then, set at once for a smoketest that only started, and empty again when the event changes), `changed_at` (when the event last changed; set by the `sdlc_event_changed` trigger) |
 | `PiConversationStatusChange` | One per change to a thread's relevance: `ticket`, `session_id`, `status` (`relevant` or `resolved`), `reason` (resolved only, optional), `created_at`. Append-only; the newest row per ticket and thread is the current state. |
@@ -252,11 +260,13 @@ A ticket key (`FSDK-123`, `EFSUP-45`, any case) is scored by where it appears in
 |---|---|
 | Session name | 5 |
 | Your prompts | 3 |
-| Tool-call arguments (branch names, `gh pr create --title`) | 1 |
+| Tool-call arguments (branch names, `gh pr create --title`) | 1, but not file content: only the path of a write or edit, and a bash command without its heredocs |
 | Assistant text | 1, at most once per session |
 | Tool results | ignored: one `board` call prints every open ticket |
 
 A run links to its strongest keys: at most 3, each with a score of at least 3 and at least a third of the top score.
+
+A key in `AGENT_DASH_IGNORE_TICKETS` (comma-separated, default `FSDK-1`) never links. Use it for a real key that code uses as sample data. Examples in this repo use `ABC-123`, which no project pattern matches.
 
 PRs link to tickets by the key in their title or branch. Then two rules cross the gap:
 - A run that opened a PR (`gh pr create` in the log) takes the PR's tickets.
@@ -357,7 +367,7 @@ Optional: `AGENT_DASH_SUMMARY_MODEL` and `AGENT_DASH_SUMMARY_THINKING` choose th
 
 ## Configuration
 
-Environment variables, all optional: `AGENT_DASH_PORT`, `AGENT_DASH_SESSIONS_DIR`, `AGENT_DASH_STATUS_DIR`, `AGENT_DASH_INBOX_DIR`, `AGENT_DASH_CONVERSATIONS_DIR`, `AGENT_DASH_PROJECTS` (default `FSDK|EFSUP`), `AGENT_DASH_EXCLUDE_PROJECTS` (default `FSM`), `AGENT_DASH_RECENT_DAYS` (default 14), `JIRA_SERVER`, `JIRA_LOGIN`, `JIRA_API_TOKEN`, `AGENT_DASH_PI_AUTH` (default `~/pi/auth/pi-auth`).
+Environment variables, all optional: `AGENT_DASH_PORT`, `AGENT_DASH_SESSIONS_DIR`, `AGENT_DASH_STATUS_DIR`, `AGENT_DASH_INBOX_DIR`, `AGENT_DASH_CONVERSATIONS_DIR`, `AGENT_DASH_PROJECTS` (default `FSDK|EFSUP`), `AGENT_DASH_EXCLUDE_PROJECTS` (default `FSM`), `AGENT_DASH_IGNORE_TICKETS` (default `FSDK-1`), `AGENT_DASH_RECENT_DAYS` (default 14), `JIRA_SERVER`, `JIRA_LOGIN`, `JIRA_API_TOKEN`, `AGENT_DASH_PI_AUTH` (default `~/pi/auth/pi-auth`).
 
 ## Develop
 

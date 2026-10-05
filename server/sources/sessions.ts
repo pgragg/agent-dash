@@ -53,6 +53,19 @@ const REPORT_SKILL_INVOKED = new RegExp(`<skill name="(?:${REPORT_SKILLS.join("|
 const REPORT_SKILL_READ = new RegExp(`/skills/(?:${REPORT_SKILLS.join("|")})/SKILL\\.md`);
 const LAST_MESSAGE_MAX = 6_000;
 
+const HEREDOC = /<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\s*\2(?=\s|$)/g;
+
+/**
+ * The part of a tool call that says what the agent acts on. A key inside file content (a
+ * write, an edit, a heredoc) is part of the repo, such as sample data in a test, not the run's ticket.
+ */
+export function toolCallIntent(name: string | undefined, args: unknown): string {
+  const a = (args ?? {}) as { path?: unknown; command?: unknown };
+  if (name === "write" || name === "edit") return String(a.path ?? "");
+  if (name === "bash") return String(a.command ?? "").replace(HEREDOC, "");
+  return JSON.stringify(a);
+}
+
 interface ContentPart {
   type?: string;
   text?: string;
@@ -161,7 +174,7 @@ export function parseSession(raw: string, sessionFile: string, mtime: Date, tick
           if (part?.type !== "toolCall") continue;
           const args = JSON.stringify(part.arguments ?? {});
           if (part.name === "read" && REPORT_SKILL_READ.test(args)) usedReportSkill = true;
-          score(args, "toolCall");
+          score(toolCallIntent(part.name, part.arguments), "toolCall");
           mention(args);
           if (part.name === "bash" && args.includes("gh pr create") && part.id) prCreateCalls.add(part.id);
           if (part.name === "write") {
