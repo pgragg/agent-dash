@@ -97,7 +97,7 @@ function tagged(events: SdlcEvent[], type: SdlcEvent["eventType"], envs: SdlcEnv
   return newestFirst(events.filter((e) => e.eventType === type && e.environments.some((x) => envs.includes(x))));
 }
 
-/** A smoketest that agent-dash started, with no result yet. A hand record with no outcome still counts as passed. */
+/** Needs a session id: a hand record with no outcome still counts as passed. */
 export function isSmoketestRunning(e: SdlcEvent): boolean {
   return e.eventType === "smoketest" && !!e.sessionId && !e.finishedAt && !e.outcome;
 }

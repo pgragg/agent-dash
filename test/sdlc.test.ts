@@ -98,7 +98,7 @@ test("a smoketest with a start and no end is running: the stage is yellow until 
   assert.match(p.hint!, /Smoketest running since 2026-10-02 11:00 UTC/);
   // A running smoketest is not progress yet.
   assert.equal(sdlcProgress({ ticket: ticket(), prs: [], events: [running] }).current, 0);
-  // Only a smoketest that agent-dash started can be running; a hand record with no outcome counts as passed.
+  // A hand record with no outcome has no session id, so it counts as passed.
   assert.equal(states(sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev({ finishedAt: null })] })).local_smoketest, "done");
   assert.equal(states(sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev({ outcome: null, finishedAt: null })] })).local_smoketest, "done");
 });
