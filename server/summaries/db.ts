@@ -78,6 +78,13 @@ CREATE TABLE IF NOT EXISTS diagrams (
 );
 CREATE INDEX IF NOT EXISTS diagrams_by_ticket ON diagrams (ticket, id);
 CREATE INDEX IF NOT EXISTS diagrams_by_session ON diagrams (session_id, id);
+
+-- Local state per ticket. Jira stays the source of truth for everything else about it.
+-- snoozed_until hides the ticket from the board until that time.
+CREATE TABLE IF NOT EXISTS tickets (
+  key           TEXT PRIMARY KEY,
+  snoozed_until TEXT
+);
 `;
 
 interface Row {
@@ -217,6 +224,22 @@ export function notesByTicket(): Record<string, Note[]> {
   for (const n of open().prepare("SELECT id, ticket, created_at AS createdAt, body FROM notes ORDER BY id").all() as unknown as Note[]) {
     (out[n.ticket] ??= []).push({ ...n });
   }
+  return out;
+}
+
+// ---- snooze: hide a ticket from the board until a time ---------------------------------
+
+/** `until` null wakes the ticket. */
+export function setSnoozedUntil(ticket: string, until: Date | null): void {
+  open()
+    .prepare("INSERT INTO tickets (key, snoozed_until) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET snoozed_until = excluded.snoozed_until")
+    .run(ticket, until?.toISOString() ?? null);
+}
+
+/** Every ticket's snooze, past ones too: the page compares them with its own clock. */
+export function snoozedUntilByTicket(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const r of open().prepare("SELECT key, snoozed_until AS until FROM tickets WHERE snoozed_until IS NOT NULL").all() as { key: string; until: string }[]) out[r.key] = r.until;
   return out;
 }
 

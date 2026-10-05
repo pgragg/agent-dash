@@ -324,6 +324,8 @@ export interface Dashboard {
   summaries: Record<string, TicketSummaryState>;
   /** Private notes by ticket key, oldest first. */
   notes: Record<string, Note[]>;
+  /** When each snoozed ticket comes back to the board, by ticket key. It can be in the past. */
+  snoozedUntil: Record<string, string>;
   /** Open actions, first to do first. */
   actions: Action[];
   /** Every diagram an agent made, newest first, without its source. */

@@ -142,3 +142,12 @@ test("saving a summary stores each next step as its own row", () => {
   db.markDone(rec.id, "**Next steps:**\n1. late");
   assert.equal(db.get(rec.id)!.steps.length, 2);
 });
+
+test("a ticket's snoozedUntil is saved, replaced, and cleared", () => {
+  db.setSnoozedUntil("FSDK-20", new Date("2026-10-05T09:00:00Z"));
+  db.setSnoozedUntil("FSDK-20", new Date("2026-10-06T09:00:00Z"));
+  db.setSnoozedUntil("FSDK-21", new Date("2026-10-07T09:00:00Z"));
+  assert.equal(db.snoozedUntilByTicket()["FSDK-20"], "2026-10-06T09:00:00.000Z");
+  db.setSnoozedUntil("FSDK-21", null);
+  assert.equal("FSDK-21" in db.snoozedUntilByTicket(), false);
+});

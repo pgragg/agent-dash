@@ -120,6 +120,7 @@ async function dashboard(force: boolean) {
     extensionInstalled: existsSync(EXTENSION_PATH),
     summaries,
     notes: summaryDb.notesByTicket(),
+    snoozedUntil: summaryDb.snoozedUntilByTicket(),
     threads: summaryDb.currentThreadStatuses(),
     jiraServer: config.jira.server,
   });
@@ -229,6 +230,17 @@ const server = createServer(async (req, res) => {
       const note = summaryDb.addNote(ticket, body.trim());
       broadcast();
       json(201, note);
+    } else if (url.pathname === "/api/snooze" && req.method === "POST") {
+      if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
+      const json = (code: number, body: unknown) => void res.writeHead(code, { "Content-Type": "application/json" }).end(JSON.stringify(body));
+      const ticket = url.searchParams.get("ticket") ?? "";
+      if (!new RegExp(`^${config.ticketPattern.source}$`).test(ticket)) return json(400, { error: `not a ticket key: ${ticket}` });
+      const { until } = JSON.parse((await readBody(req, 4_000)) || "{}") as { until?: string | null };
+      const at = until == null ? null : new Date(until);
+      if (at && !(at.getTime() > Date.now())) return json(400, { error: "pick a time in the future" });
+      summaryDb.setSnoozedUntil(ticket, at);
+      broadcast();
+      json(200, { ok: true, snoozedUntil: at?.toISOString() ?? null });
     } else if (url.pathname === "/api/agents/context" || (url.pathname === "/api/agents" && req.method === "POST")) {
       // A new pi agent that starts with the ticket's context. The context route is a preview.
       if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
