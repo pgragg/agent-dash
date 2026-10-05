@@ -126,7 +126,7 @@ async function dashboard(force: boolean) {
   const candidates = actionCandidates(d);
   d.actions = toActions(candidates, summaryDb.syncActions(candidates, keepWhenDown(d.sources), new Date(now)), d);
 
-  // A recent run's main ticket includes the one its PR gave it; an older log has only its own.
+  // A recent run's ticket can come from its PR; an older log has only its own.
   const runTicket = new Map<string, string>();
   for (const g of [...d.myTickets, ...d.otherTickets]) for (const r of g.runs) if (r.tickets[0]) runTicket.set(r.sessionId, r.tickets[0]);
   await syncDiagrams(parsed, (s) => runTicket.get(s.sessionId) ?? s.tickets[0] ?? null, new Date(now));

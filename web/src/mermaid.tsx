@@ -2,10 +2,7 @@ import { createContext, type ReactNode, useContext, useEffect, useState } from "
 import type { Diagram } from "../../shared/types.ts";
 import { href } from "./routes.ts";
 
-/**
- * Mermaid rendering, and the diagrams that a message on the page belongs to. Mermaid is big,
- * so it loads the first time a diagram shows.
- */
+/** Mermaid is big, so it loads the first time a diagram shows. */
 
 type MermaidApi = (typeof import("mermaid"))["default"];
 let loader: Promise<MermaidApi> | null = null;
@@ -96,7 +93,7 @@ export function MermaidFence({ code }: { code: string }) {
   );
 }
 
-/** `![alt](path)` in a message. A local file shows from its stored copy; anything else stays text. */
+/** A local image shows from its stored copy, so it outlives the file. */
 export function EmbeddedImage({ alt, path }: { alt: string; path: string }) {
   const d = pick(useContext(SessionContext), (x) => x.origin === path && x.kind !== "mermaid");
   if (!d) return <code title="This image is not stored as a diagram">{alt || path}</code>;

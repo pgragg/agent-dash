@@ -269,11 +269,7 @@ export interface Action {
 
 export type DiagramKind = "mermaid" | "svg" | "png" | "jpeg" | "gif" | "webp";
 
-/**
- * A diagram or chart that an agent made: a mermaid fence in a reply, a .mmd or .svg file it
- * wrote, or a local image it showed with `![title](path)`. The database keeps a copy, so the
- * diagram opens even when its conversation, its file, or its ticket is gone.
- */
+/** A stored copy, so a diagram opens after its conversation, file, or ticket is gone. */
 export interface Diagram {
   id: number;
   kind: DiagramKind;
@@ -282,7 +278,7 @@ export interface Diagram {
   sessionId: string;
   /** The conversation's main ticket. Null when the conversation has no ticket. */
   ticket: string | null;
-  /** "reply" for a fence in a reply, else the file path as the agent wrote it. */
+  /** "reply" for a fence in a reply, else the file path as written. */
   origin: string;
   /** SHA-1 of the source, so a fence on the page can find its diagram. */
   hash: string;

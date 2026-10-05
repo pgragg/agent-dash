@@ -4,11 +4,7 @@ import type { DiagramWithSource } from "../../shared/types.ts";
 import type { SessionIndex } from "../sources/sessions.ts";
 import * as db from "../summaries/db.ts";
 
-/**
- * `GET /api/diagram?id=N`: one diagram with its text (null for a raster image).
- * `GET /api/diagram/raw?id=N`: the diagram as a file. An agent wrote the SVG, so the browser
- * gets it with a policy that runs no script, even when it is opened on its own.
- */
+/** `GET /api/diagram?id=N` and `GET /api/diagram/raw?id=N`: one diagram, as JSON or as its file. */
 export async function handle(_req: IncomingMessage, res: ServerResponse, url: URL, sessions: SessionIndex): Promise<boolean> {
   if (url.pathname !== "/api/diagram" && url.pathname !== "/api/diagram/raw") return false;
   const d = db.getDiagram(Number(url.searchParams.get("id")));

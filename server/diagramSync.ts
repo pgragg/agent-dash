@@ -3,13 +3,10 @@ import { loadImage } from "./diagrams.ts";
 import type { ParsedSession } from "./sources/sessions.ts";
 import * as db from "./summaries/db.ts";
 
-/** The mtime of each embedded image when it was last read, by "<session> <path>", so a file is read once per change. */
+/** Last-read mtime per "<session> <path>", so each image file is read once per change. */
 const readAt = new Map<string, number>();
 
-/**
- * Stores each diagram that is new, and moves a conversation's diagrams to its ticket when it
- * gets one. Each write reloads the page, which calls this again, so it writes only on a change.
- */
+/** Writes only on a change: each write reloads the page, which calls this again. */
 export async function syncDiagrams(sessions: ParsedSession[], ticketOf: (s: ParsedSession) => string | null, now = new Date()): Promise<void> {
   const known = db.diagramKeys();
   const rows: db.NewDiagram[] = [];

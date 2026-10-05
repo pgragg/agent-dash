@@ -1351,7 +1351,7 @@ function NewConversationForm() {
 function ConversationView({ sessionId, data, now }: { sessionId: string; data: Dashboard; now: number }) {
   const run = useMemo(() => [...data.myTickets, ...data.otherTickets].flatMap((g) => g.runs).concat(data.unlinkedRuns).find((r) => r.sessionId === sessionId), [data, sessionId]);
   const [error, setError] = useState<string | null>(null);
-  // A conversation older than the board's window still has a log: a diagram links here from any age.
+  // A diagram can link to a conversation older than the board's window.
   const old = useLoad(() => (run ? Promise.resolve(null) : api.transcript(sessionId)), run ? "live" : `${sessionId} ${data.generatedAt}`);
   const diagrams = data.diagrams.filter((d) => d.sessionId === sessionId);
   const end = useRef<HTMLDivElement>(null);

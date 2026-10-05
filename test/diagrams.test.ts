@@ -32,7 +32,7 @@ test("a mermaid fence in a reply is a diagram, titled by itself, else by the lin
   );
   assert.equal(found[0].kind === "mermaid" && found[0].hash, sha1("flowchart LR\n  A --> B"));
   assert.equal(mermaidTitle("sequenceDiagram\n  A->>B: hi", ""), "Sequence diagram");
-  // A fence of another language, or an image line just above, is not a title or a diagram.
+  // Another language is no diagram, and an image line is no title.
   assert.deepEqual(findInReply("```ts\nconst a = 1\n```", "/repo", null), []);
   assert.equal(findInReply(`![x](a.png)\n${fence("graph TD\n A-->B")}`, "/repo", null).find((f) => f.kind === "mermaid")?.title, "Flowchart");
 });

@@ -4,7 +4,7 @@ import { age, api, dirLabel, plural, stamp } from "./lib.tsx";
 import { Mermaid } from "./mermaid.tsx";
 import { href, humanAge } from "./routes.ts";
 
-/** The diagram page (`#/d:ID`), the list of every diagram (`#/diagrams`), and the cards that the board shows. */
+/** The diagram page (`#/d:ID`), the list (`#/diagrams`), and the cards on the board. */
 
 const KIND_LABEL: Record<DiagramKind, string> = { mermaid: "mermaid", svg: "SVG", png: "PNG", jpeg: "JPEG", gif: "GIF", webp: "WebP" };
 
@@ -22,7 +22,7 @@ function sourceOf(id: number): Promise<string | null> {
   return p;
 }
 
-/** True once the element comes near the screen, so a long list renders only what you scroll to. */
+/** Turns true near the screen, so a long list renders only what you scroll to. */
 function useVisible<T extends Element>(): [React.RefObject<T | null>, boolean] {
   const ref = useRef<T>(null);
   const [visible, setVisible] = useState(false);
@@ -85,7 +85,7 @@ export function DiagramCards({ diagrams, now, showTicket = false, showConversati
   );
 }
 
-/** `#/d:ID`. It reads the diagram from the database, so it opens without its conversation or its ticket. */
+/** Reads only the stored row, so it opens without its conversation or ticket. */
 export function DiagramView({ id, data, now }: { id: number; data: Dashboard; now: number }) {
   const [d, setD] = useState<DiagramWithSource | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -95,7 +95,7 @@ export function DiagramView({ id, data, now }: { id: number; data: Dashboard; no
     setError(null);
     api.diagram(id).then(setD, (err: Error) => setError(err.message));
   }, [id]);
-  // The listing has the newest ticket; the page loaded once, so take a move from there.
+  // The page loads once; the live listing has the ticket if it moved since.
   const ticketKey = data.diagrams.find((x) => x.id === id)?.ticket ?? d?.ticket ?? null;
   const ticket = useMemo(() => [...data.myTickets, ...data.otherTickets].find((g) => g.ticket.key === ticketKey)?.ticket, [data, ticketKey]);
   const siblings = d ? data.diagrams.filter((x) => x.sessionId === d.sessionId && x.id !== d.id) : [];

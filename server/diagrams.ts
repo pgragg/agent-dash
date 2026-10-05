@@ -4,11 +4,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import type { DiagramKind } from "../shared/types.ts";
 
-/**
- * Diagrams that agents make. Three things count, because each one is the agent showing you a
- * picture on purpose: a mermaid fence in a reply, a .mmd/.mermaid/.svg file it writes, and a
- * local image it embeds with `![title](path)`. A file it only names (a screenshot) does not count.
- */
+/** Only pictures an agent shows on purpose count; a screenshot it merely names does not. */
 
 /** A diagram with its text, found in the log. */
 export interface FoundText {
@@ -26,7 +22,7 @@ export interface FoundFile {
   title: string;
   /** Absolute. */
   path: string;
-  /** The path as the agent wrote it, so the page can match the embed to its diagram. */
+  /** As written, so the page can match an embed in a message to its diagram. */
   origin: string;
   at: string | null;
 }
@@ -52,7 +48,7 @@ function typeName(code: string): string {
 
 /** The diagram's own title, else the line just before the fence, else its type. */
 export function mermaidTitle(code: string, before: string): string {
-  // Front matter "title: X", a "title X" line, or "pie title X" on the first line.
+  // Front matter "title: X", a "title X" line, or "pie title X".
   const own = code.match(/^\s*title:\s*(.+)$/m)?.[1] ?? code.match(/^\s*(?:\w+\s+)?title\s+(.+)$/m)?.[1];
   if (own) return clip(own.replace(/^["']|["']$/g, ""));
   const lead = before
@@ -90,7 +86,7 @@ export function findInReply(text: string, cwd: string, at: string | null): Found
   return out;
 }
 
-/** A `write` tool call that makes a mermaid or SVG file, or a markdown file with mermaid fences in it. */
+/** A written .mmd or .svg file, or the mermaid fences in a written markdown file. */
 export function findInWrite(args: unknown, at: string | null): Found[] {
   const { path, content } = (args ?? {}) as { path?: unknown; content?: unknown };
   if (typeof path !== "string" || typeof content !== "string" || !content.trim() || content.length > MAX_TEXT) return [];
@@ -123,7 +119,7 @@ export async function loadImage(path: string): Promise<{ kind: DiagramKind; sour
     const buf = await readFile(path);
     const kind = sniffImage(buf);
     if (!kind) return null;
-    // SVG stays text, so the page can show its source; a raster image is kept as base64.
+    // SVG stays text, so the page can show its source.
     return { kind, source: kind === "svg" ? buf.toString("utf8") : buf.toString("base64"), hash: sha1(buf) };
   } catch {
     return null;

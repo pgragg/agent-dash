@@ -310,7 +310,7 @@ export function diagramKeys(): Set<string> {
   return new Set((open().prepare("SELECT key FROM diagrams").all() as { key: string }[]).map((r) => r.key));
 }
 
-/** One transaction, so a first scan of every old log writes (and reloads the page) once. A known key is skipped. */
+/** One transaction, so the first scan of every old log reloads the page once. */
 export function addDiagrams(rows: NewDiagram[]): void {
   if (!rows.length) return;
   const d = open();
@@ -335,7 +335,7 @@ export function getDiagram(id: number): (Diagram & { source: string }) | null {
   return row ? { ...row } : null;
 }
 
-/** A conversation can get its ticket later, for example when it opens a PR that names one. */
+/** A conversation can get its ticket later, from a PR that names one. */
 export function setDiagramTicket(sessionId: string, ticket: string): number {
   return Number(open().prepare("UPDATE diagrams SET ticket = ? WHERE session_id = ? AND ticket IS NOT ?").run(ticket, sessionId, ticket).changes);
 }
