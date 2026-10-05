@@ -82,12 +82,18 @@ export function validateSdlcFinish(input: { finishedAt?: unknown; outcome?: unkn
 }
 
 /** "none" (any case) or an empty text: the test changes no Beta or Prod state. */
-export function validateSdlcPlan(input: { plan?: unknown; stateChanges?: unknown }, now = new Date()): SdlcPlan {
+export function validateSdlcPlan(input: { plan?: unknown; stateChanges?: unknown; summary?: unknown; writesSummary?: unknown }, now = new Date()): SdlcPlan {
   const plan = text(input.plan, "plan");
   if (!plan) throw new Error("the plan is empty");
   const changes = text(input.stateChanges, "stateChanges");
   if (changes === null && input.stateChanges === undefined) throw new Error("say which Beta or Prod state the test changes, or none");
-  return { plan, stateChanges: changes && changes.toLowerCase() !== "none" ? changes : null, plannedAt: now.toISOString() };
+  const stateChanges = changes && changes.toLowerCase() !== "none" ? changes : null;
+  // Piper reads these two first, and decides on Confirm from them.
+  const summary = text(input.summary, "summary");
+  if (!summary) throw new Error("add --summary: a very short summary of the plan, one or two sentences");
+  const writesSummary = stateChanges ? text(input.writesSummary, "writesSummary") : null;
+  if (stateChanges && !writesSummary) throw new Error('add --writes-summary: a short summary of the state changes, per environment, for example "Postman Beta: create one test project, then delete it"');
+  return { plan, stateChanges, plannedAt: now.toISOString(), summary, writesSummary };
 }
 
 /** Saves the running execution of an accepted plan, and returns it with the message that starts it. */

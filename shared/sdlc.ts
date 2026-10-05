@@ -296,8 +296,9 @@ Work out from the context what the change does, and plan a test that shows that 
 While you plan, change no state on ${SHARED_ENVS}: use read-only requests only. If the test must change state there (create or edit data, change a setting, deploy, sync), write each change in a state changes file: one line per change, with the system and the exact command or request. A change to local state only (a local database, local files) is not one of them.
 
 agent-dash shows this plan as in progress (SDLC event ${planId}) until you record it, with one of these:
-node ${script} plan --id ${planId} --plan-file <file> --state-changes none
-node ${script} plan --id ${planId} --plan-file <file> --state-changes-file <file>
+node ${script} plan --id ${planId} --summary "<plan summary>" --plan-file <file> --state-changes none
+node ${script} plan --id ${planId} --summary "<plan summary>" --writes-summary "<writes summary>" --plan-file <file> --state-changes-file <file>
+Piper reads the two summaries first, at the top of the plan. The plan summary is one or two short sentences: what the test does and what it shows. The writes summary says, per environment, what the test writes there, in a few words, for example "Postman Beta: create one test project, then delete it". The files hold the details.
 Use the first command only when the test changes no state on ${SHARED_ENVS}. agent-dash then accepts the plan at once, and the script tells you how to run it: run it in this turn. After the second command, Piper must confirm the plan in agent-dash first: reply with a short summary of the plan and its state changes, and stop. Piper can ask for changes in this conversation; record each new version with the same command. Piper's confirmation comes as a message, and it is the approval to make the state changes that the plan lists.`;
 }
 

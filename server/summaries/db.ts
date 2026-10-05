@@ -93,6 +93,9 @@ CREATE TABLE IF NOT EXISTS SDLC_Event (
   -- writes it needs (NULL: none). A confirmed plan is Piper's approval for those writes.
   planned_at    TEXT,
   state_changes TEXT,
+  -- A plan: one short line per environment on what it writes there, above the plan on the page.
+  -- The plan's own short summary goes in summary.
+  writes_summary TEXT,
   confirmed_at  TEXT,
   confirmed_by  TEXT CHECK (confirmed_by IN ('piper', 'auto')),
   -- An execution: the plan that it runs.
@@ -192,7 +195,7 @@ function toRecord(r: Row): SummaryRecord {
 
 let db: DatabaseSync | null = null;
 
-const SDLC_EVENT_COLUMNS = ["session_id", "skipped_at", "pr_url", "channel", "message", "message_url", "summary", "planned_at", "state_changes", "confirmed_at", "confirmed_by", "plan_id"];
+const SDLC_EVENT_COLUMNS = ["session_id", "skipped_at", "pr_url", "channel", "message", "message_url", "summary", "planned_at", "state_changes", "writes_summary", "confirmed_at", "confirmed_by", "plan_id"];
 
 /**
  * SQLite cannot change a CHECK, so an older SDLC_Event table is copied into a new one with the same ids.
@@ -599,6 +602,10 @@ export interface SdlcPlan {
   /** The Beta or Prod writes that the test needs. Null: none, so the plan is accepted at once. */
   stateChanges: string | null;
   plannedAt: string;
+  /** A very short summary of the plan, for the top of its row. */
+  summary?: string | null;
+  /** A short summary of the Beta or Prod writes and their environments. Null: none. */
+  writesSummary?: string | null;
 }
 
 /**
@@ -608,11 +615,11 @@ export interface SdlcPlan {
 export function recordPlan(id: number, p: SdlcPlan): SdlcEvent | null {
   const changed = open()
     .prepare(
-      `UPDATE SDLC_Event SET test_details = ?, state_changes = ?, planned_at = ?,
+      `UPDATE SDLC_Event SET test_details = ?, state_changes = ?, planned_at = ?, summary = ?, writes_summary = ?,
         confirmed_at = CASE WHEN ? IS NULL THEN ? END, confirmed_by = CASE WHEN ? IS NULL THEN 'auto' END
        WHERE id = ? AND event_type = 'smoketest_plan' AND confirmed_at IS NULL AND skipped_at IS NULL`,
     )
-    .run(p.plan, p.stateChanges, p.plannedAt, p.stateChanges, p.plannedAt, p.stateChanges, id).changes;
+    .run(p.plan, p.stateChanges, p.plannedAt, p.summary ?? null, p.writesSummary ?? null, p.stateChanges, p.plannedAt, p.stateChanges, id).changes;
   return changed ? getSdlcEvent(id) : null;
 }
 
@@ -658,7 +665,7 @@ function sdlcEvents(where = "", ...params: number[]): SdlcEvent[] {
   const rows = open()
     .prepare(
       `SELECT e.id, e.event_type AS eventType, e.started_at AS startedAt, e.finished_at AS finishedAt, e.outcome, e.test_details AS testDetails, e.test_results AS testResults, e.session_id AS sessionId, e.skipped_at AS skippedAt, e.created_at AS createdAt,
-        e.planned_at AS plannedAt, e.state_changes AS stateChanges, e.confirmed_at AS confirmedAt, e.confirmed_by AS confirmedBy, e.plan_id AS planId,
+        e.planned_at AS plannedAt, e.state_changes AS stateChanges, e.writes_summary AS writesSummary, e.confirmed_at AS confirmedAt, e.confirmed_by AS confirmedBy, e.plan_id AS planId,
         e.pr_url AS prUrl, e.channel, e.message, e.message_url AS messageUrl, e.summary,
         (SELECT group_concat(environment) FROM SDLC_Event_Environment WHERE sdlc_event_id = e.id) AS envs,
         (SELECT group_concat(ticket) FROM SDLC_Event_Ticket WHERE sdlc_event_id = e.id) AS keys

@@ -10,8 +10,9 @@
  * `smoketest` records a smoketest_execution. A smoketest that agent-dash started has a plan first;
  * the agent records the plan, then finishes the execution that the accepted plan starts:
  *
- *   node scripts/sdlc-event.ts plan --id 11 --plan-file plan.md --state-changes none
- *   node scripts/sdlc-event.ts plan --id 11 --plan-file plan.md --state-changes-file writes.md
+ *   node scripts/sdlc-event.ts plan --id 11 --summary "Publish a docs site locally and load it" --plan-file plan.md --state-changes none
+ *   node scripts/sdlc-event.ts plan --id 11 --summary "…" --writes-summary "Postman Beta: create one test project, then delete it" \
+ *     --plan-file plan.md --state-changes-file writes.md
  *   node scripts/sdlc-event.ts finish --id 12 --outcome passed --summary "Publish flow works end to end" --details-file details.md --results-file results.md
  *
  * A plan with `--state-changes none` changes no Beta or Prod state, so it is accepted at once, and
@@ -27,7 +28,7 @@ import { startExecution, validateSdlcEvent, validateSdlcFinish, validateSdlcPlan
 import * as db from "../server/summaries/db.ts";
 
 const USAGE = `usage: node scripts/sdlc-event.ts smoketest|deploy --ticket KEY [--ticket KEY] --env ENV [--env ENV] [--started ISO] [--finished ISO] [--outcome passed|failed|blocked] [--summary TEXT] [--details TEXT | --details-file F] [--results TEXT | --results-file F]
-       node scripts/sdlc-event.ts plan --id N (--plan TEXT | --plan-file F) (--state-changes none|TEXT | --state-changes-file F)
+       node scripts/sdlc-event.ts plan --id N --summary TEXT (--plan TEXT | --plan-file F) (--state-changes none | (--state-changes TEXT | --state-changes-file F) --writes-summary TEXT)
        node scripts/sdlc-event.ts finish --id N --outcome passed|failed|blocked [--finished ISO] [--summary TEXT] [--details TEXT | --details-file F] [--results TEXT | --results-file F]`;
 
 try {
@@ -49,12 +50,13 @@ try {
       "plan-file": { type: "string" },
       "state-changes": { type: "string" },
       "state-changes-file": { type: "string" },
+      "writes-summary": { type: "string" },
     },
   });
   const read = (f: string | undefined, v: string | undefined) => (f ? readFileSync(f, "utf8") : v);
   if (positionals[0] === "plan") {
     const id = Number(values.id);
-    const planned = db.recordPlan(id, validateSdlcPlan({ plan: read(values["plan-file"], values.plan), stateChanges: read(values["state-changes-file"], values["state-changes"]) }));
+    const planned = db.recordPlan(id, validateSdlcPlan({ plan: read(values["plan-file"], values.plan), stateChanges: read(values["state-changes-file"], values["state-changes"]), summary: values.summary, writesSummary: values["writes-summary"] }));
     if (!planned) throw new Error(`no plan with --id ${values.id ?? ""} that is still open: a confirmed plan cannot change. Ask Piper to start a new plan.`);
     if (!planned.confirmedAt) {
       console.log(`Recorded the plan (SDLC event ${id}). It changes Beta or Prod state, so it waits for Piper's confirmation in agent-dash. Reply with a short summary of the plan, and stop.`);
