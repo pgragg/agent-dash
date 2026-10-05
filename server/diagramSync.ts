@@ -17,6 +17,8 @@ export async function syncDiagrams(sessions: ParsedSession[], ticketOf: (s: Pars
     const found = s.diagrams ?? [];
     if (!found.length) continue;
     const ticket = ticketOf(s);
+    const written = new Set(found.flatMap((f) => (f.kind !== "file" && f.origin !== "reply" ? [`${s.sessionId} ${f.hash}`] : [])));
+    db.dropReplacedDiagrams(s.sessionId, written);
     for (const f of found) {
       const base = { sessionId: s.sessionId, ticket, title: f.title, origin: f.origin, createdAt: f.at ?? now.toISOString() };
       if (f.kind !== "file") {

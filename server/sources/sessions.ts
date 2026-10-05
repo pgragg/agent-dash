@@ -110,7 +110,7 @@ export function parseSession(raw: string, sessionFile: string, mtime: Date, tick
   const created = new Set<string>();
   const mentioned = new Set<string>();
   const prCreateCalls = new Set<string>();
-  const diagrams: Found[] = [];
+  let diagrams: Found[] = [];
 
   const added = new Map<string, number>();
   const score = (text: string, source: keyof typeof WEIGHT) => {
@@ -164,7 +164,12 @@ export function parseSession(raw: string, sessionFile: string, mtime: Date, tick
           score(args, "toolCall");
           mention(args);
           if (part.name === "bash" && args.includes("gh pr create") && part.id) prCreateCalls.add(part.id);
-          if (part.name === "write") diagrams.push(...findInWrite(part.arguments, entry.timestamp ?? null));
+          if (part.name === "write") {
+            // Only the newest write of a file is current; edits are not tracked, so an older write can be stale.
+            const path = (part.arguments as { path?: unknown } | undefined)?.path;
+            diagrams = diagrams.filter((d) => d.origin === "reply" || d.origin !== path);
+            diagrams.push(...findInWrite(part.arguments, entry.timestamp ?? null));
+          }
         }
         // An abort during a tool call is logged as an error; it is a stop, not an API failure.
         lastStopReason = msg.stopReason === "error" && msg.errorMessage === "This operation was aborted" ? "aborted" : (msg.stopReason ?? null);

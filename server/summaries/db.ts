@@ -390,6 +390,15 @@ export function getDiagram(id: number, raw = false): (Diagram & { source: string
 }
 
 /** A conversation can get its ticket later, from a PR that names one. */
+/** Drops a conversation's diagrams from file writes that a newer write of the same file replaced. */
+export function dropReplacedDiagrams(sessionId: string, keep: Set<string>): number {
+  const rows = open().prepare("SELECT key FROM diagrams WHERE session_id = ? AND origin != 'reply' AND kind IN ('mermaid', 'svg')").all(sessionId) as { key: string }[];
+  const del = open().prepare("DELETE FROM diagrams WHERE key = ?");
+  let n = 0;
+  for (const r of rows) if (!keep.has(r.key)) n += Number(del.run(r.key).changes);
+  return n;
+}
+
 export function setDiagramTicket(sessionId: string, ticket: string): number {
   return Number(open().prepare("UPDATE diagrams SET ticket = ? WHERE session_id = ? AND ticket IS NOT ?").run(ticket, sessionId, ticket).changes);
 }
