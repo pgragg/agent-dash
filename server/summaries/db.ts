@@ -93,6 +93,8 @@ CREATE TABLE IF NOT EXISTS SDLC_Event_Ticket (
   sdlc_event_id INTEGER NOT NULL REFERENCES SDLC_Event (id),
   ticket        TEXT NOT NULL,
   created_at    TEXT NOT NULL,
+  -- Set when the server started a next-steps draft for this link; empty means not yet.
+  summary_requested_at TEXT,
   UNIQUE (sdlc_event_id, ticket)
 );
 CREATE INDEX IF NOT EXISTS sdlc_event_ticket_by_ticket ON SDLC_Event_Ticket (ticket);
@@ -181,6 +183,10 @@ export function open(path = DB_PATH): DatabaseSync {
       INSERT INTO PiConversationStatusChange SELECT * FROM PiConversationStatusChange_old;
       DROP TABLE PiConversationStatusChange_old;
       COMMIT;`);
+  }
+  // Links that are already there count as drafted, so an upgrade does not start a paid run per ticket.
+  if (!(db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event_Ticket') WHERE name = 'summary_requested_at'").get())) {
+    db.exec("ALTER TABLE SDLC_Event_Ticket ADD COLUMN summary_requested_at TEXT; UPDATE SDLC_Event_Ticket SET summary_requested_at = created_at");
   }
   // Summaries saved before steps were stored get their rows once.
   for (const r of db.prepare("SELECT id, ticket, summary FROM summaries WHERE status = 'done' AND id NOT IN (SELECT summary_id FROM next_steps)").all() as unknown as Row[]) {
@@ -506,6 +512,26 @@ function sdlcEvents(where = "", ...params: number[]): SdlcEvent[] {
     )
     .all(...params) as unknown as (Omit<SdlcEvent, "environments" | "tickets"> & { envs: string | null; keys: string | null })[];
   return rows.map(({ envs, keys, ...r }) => ({ ...r, environments: (envs?.split(",") ?? []) as SdlcEnvironment[], tickets: keys?.split(",") ?? [] }));
+}
+
+/**
+ * Marks every event link that has no next-steps draft yet as drafted, and returns its tickets,
+ * with the newest link time of each. Read and mark are one step, so two callers never both draft.
+ */
+export function claimNewEventTickets(now = new Date()): Map<string, string> {
+  const rows = open()
+    .prepare("UPDATE SDLC_Event_Ticket SET summary_requested_at = ? WHERE summary_requested_at IS NULL RETURNING ticket, created_at AS createdAt")
+    .all(now.toISOString()) as { ticket: string; createdAt: string }[];
+  const out = new Map<string, string>();
+  for (const r of rows) {
+    const prev = out.get(r.ticket);
+    if (!prev || r.createdAt > prev) out.set(r.ticket, r.createdAt);
+  }
+  return out;
+}
+
+export function hasNewEventTickets(): boolean {
+  return !!open().prepare("SELECT 1 FROM SDLC_Event_Ticket WHERE summary_requested_at IS NULL LIMIT 1").get();
 }
 
 /** Every ticket's events, newest first. An event on two tickets shows under both. */

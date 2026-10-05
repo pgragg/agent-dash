@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { buildHandoff } from "../server/handoff.ts";
 import { validateSdlcEvent } from "../server/sdlc.ts";
 import * as db from "../server/summaries/db.ts";
-import { buildContext, buildPrompt } from "../server/summaries/runner.ts";
+import { buildContext, buildPrompt, redraftAfterNewEvents } from "../server/summaries/runner.ts";
 import { confirmDeployMessage, parseEnvironment, sdlcProgress, smoketestMessage } from "../shared/sdlc.ts";
 import type { SdlcEvent } from "../shared/types.ts";
 import { NOW, PATTERN, pr, ticket } from "./helpers.ts";
@@ -178,4 +178,30 @@ test("verb messages name the environment and the record command; the summary pro
   assert.match(ctx, /Next stage: Local smoketest\./);
   const handoff = buildHandoff({ group: { ticket: ticket(), runs: [], prs: [pr()], threads: {} }, notes: [], summary: undefined, events: [ev()], now: new Date(NOW) });
   assert.match(handoff, /\[x\] Local smoketest/);
+});
+
+test("a new event starts one next-steps draft per ticket on the board, and replaces a draft that started before it", () => {
+  db.claimNewEventTickets(); // the events of the tests above
+  db.createRequest("FSDK-40", new Date(Date.now() - 60_000));
+  db.addSdlcEvent({ eventType: "smoketest", startedAt: "2026-10-02T10:00:00.000Z", environments: ["localhost"], tickets: ["FSDK-40", "FSDK-41"] });
+  db.addSdlcEvent({ eventType: "deploy", startedAt: "2026-10-02T11:00:00.000Z", environments: ["postman_beta"], tickets: ["FSDK-40"] });
+  const calls: { key: string; force?: boolean }[] = [];
+  const start = async (g: { ticket: { key: string } }, opts?: { force?: boolean }) => (calls.push({ key: g.ticket.key, force: opts?.force }), {} as db.SummaryRecord);
+  const groups = [{ ticket: ticket({ key: "FSDK-40" }), runs: [], prs: [] }];
+  // FSDK-41 is not on the board, so it gets no draft, and does not stay pending.
+  assert.deepEqual(redraftAfterNewEvents(groups, undefined, start), ["FSDK-40"]);
+  assert.deepEqual(calls, [{ key: "FSDK-40", force: true }]);
+  assert.equal(db.hasNewEventTickets(), false);
+  assert.deepEqual(redraftAfterNewEvents(groups, undefined, start), []);
+});
+
+test("an upgrade counts the event links that are already there as drafted", () => {
+  const old = join(dir, "old-links.db");
+  const o = new DatabaseSync(old);
+  o.exec("CREATE TABLE SDLC_Event_Ticket (id INTEGER PRIMARY KEY AUTOINCREMENT, sdlc_event_id INTEGER NOT NULL, ticket TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE (sdlc_event_id, ticket))");
+  o.exec("INSERT INTO SDLC_Event_Ticket (sdlc_event_id, ticket, created_at) VALUES (99, 'FSDK-50', '2026-10-01T00:00:00.000Z')");
+  const script = new URL("../scripts/sdlc-event.ts", import.meta.url).pathname;
+  execFileSync("node", [script, "smoketest", "--ticket", "FSDK-51", "--env", "localhost"], { env: { ...process.env, AGENT_DASH_DB: old } });
+  const rows = o.prepare("SELECT ticket, summary_requested_at AS at FROM SDLC_Event_Ticket ORDER BY id").all() as { ticket: string; at: string | null }[];
+  assert.deepEqual(rows.map((r) => ({ ...r })), [{ ticket: "FSDK-50", at: "2026-10-01T00:00:00.000Z" }, { ticket: "FSDK-51", at: null }]);
 });
