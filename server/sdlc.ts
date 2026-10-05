@@ -12,6 +12,7 @@ export interface SdlcEventInput {
   outcome?: unknown;
   testDetails?: unknown;
   testResults?: unknown;
+  skippedAt?: unknown;
   environments?: unknown;
   tickets?: unknown;
 }
@@ -43,6 +44,8 @@ export function validateSdlcEvent(input: SdlcEventInput, ticketPattern: RegExp, 
   const startedAt = isoOrNull(input.startedAt, "startedAt") ?? now.toISOString();
   const finishedAt = isoOrNull(input.finishedAt, "finishedAt");
   if (finishedAt && finishedAt < startedAt) throw new Error("finishedAt is before startedAt");
+  const skippedAt = isoOrNull(input.skippedAt, "skippedAt");
+  if (skippedAt && (input.eventType !== "smoketest" || input.outcome)) throw new Error("only a smoketest with no outcome can be skipped");
   return {
     eventType: input.eventType,
     startedAt,
@@ -50,6 +53,7 @@ export function validateSdlcEvent(input: SdlcEventInput, ticketPattern: RegExp, 
     outcome: (input.outcome as NewSdlcEvent["outcome"]) ?? null,
     testDetails: text(input.testDetails, "testDetails"),
     testResults: text(input.testResults, "testResults"),
+    skippedAt,
     environments: [...new Set(envs as SdlcEnvironment[])],
     tickets,
   };
