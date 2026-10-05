@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { splitSummary } from "../../shared/nextSteps.ts";
-import type { Diagram, DiagramKind, NextStep, Note, SdlcEnvironment, SdlcEvent, SdlcEventType, SmoketestOutcome, ThreadStatus, ThreadStatusChange, TicketSummary } from "../../shared/types.ts";
+import type { Diagram, DiagramKind, NextStep, Note, ReviewDraft, SdlcEnvironment, SdlcEvent, SdlcEventType, SmoketestOutcome, ThreadStatus, ThreadStatusChange, TicketSummary } from "../../shared/types.ts";
 
 export const DB_PATH = process.env.AGENT_DASH_DB ?? join(homedir(), ".agent-dash/agent-dash.db");
 
@@ -66,11 +66,12 @@ CREATE TABLE IF NOT EXISTS actions (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS actions_open_by_key ON actions (key) WHERE cleared_at IS NULL;
 
--- One row per thing that happened to a change on its way to prod: a smoketest, or a deploy that
--- Argo or Piper confirmed. The other SDLC stages read GitHub and Jira, so they have no rows.
+-- One row per thing that happened to a change on its way to prod: a smoketest, a deploy that
+-- Argo or Piper confirmed, or a Slack message that asked for a PR review. The other SDLC stages
+-- read GitHub and Jira, so they have no rows.
 CREATE TABLE IF NOT EXISTS SDLC_Event (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  event_type   TEXT NOT NULL CHECK (event_type IN ('smoketest', 'deploy')),
+  event_type   TEXT NOT NULL CHECK (event_type IN ('smoketest', 'deploy', 'review_request')),
   started_at   TEXT NOT NULL,
   finished_at  TEXT,
   outcome      TEXT CHECK (outcome IN ('passed', 'failed', 'blocked')),
@@ -80,7 +81,12 @@ CREATE TABLE IF NOT EXISTS SDLC_Event (
   session_id   TEXT,
   -- Set when Piper chose not to run the smoketest: the stage then counts as passed by on purpose.
   skipped_at   TEXT,
-  created_at   TEXT NOT NULL
+  created_at   TEXT NOT NULL,
+  -- A review request: the PR, the Slack channel id, the text that was posted, and its permalink.
+  pr_url       TEXT,
+  channel      TEXT,
+  message      TEXT,
+  message_url  TEXT
 );
 
 -- The environments under test, usually one.
@@ -130,6 +136,15 @@ CREATE TABLE IF NOT EXISTS tickets (
   key           TEXT PRIMARY KEY,
   snoozed_until TEXT
 );
+
+-- One drafted Slack review request per PR, written by a cheap model. Piper can edit it before it is sent.
+CREATE TABLE IF NOT EXISTS review_drafts (
+  pr_url       TEXT PRIMARY KEY,
+  status       TEXT NOT NULL CHECK (status IN ('in_progress', 'done', 'failed')),
+  text         TEXT,
+  error        TEXT,
+  requested_at TEXT NOT NULL
+);
 `;
 
 interface Row {
@@ -166,12 +181,14 @@ function toRecord(r: Row): SummaryRecord {
 
 let db: DatabaseSync | null = null;
 
+const SDLC_EVENT_COLUMNS = ["session_id", "skipped_at", "pr_url", "channel", "message", "message_url"];
+
 /** SQLite cannot change a CHECK, so an older SDLC_Event table is copied into a new one with the same ids. */
-function allowBlockedOutcome(d: DatabaseSync): void {
+function upgradeSdlcEventChecks(d: DatabaseSync): void {
   const row = d.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'SDLC_Event'").get() as { sql: string } | undefined;
-  if (!row || row.sql.includes("'blocked'")) return;
+  if (!row || (row.sql.includes("'blocked'") && row.sql.includes("'review_request'"))) return;
   const create = SCHEMA.slice(SCHEMA.indexOf("CREATE TABLE IF NOT EXISTS SDLC_Event ("), SCHEMA.indexOf("-- The environments under test"));
-  const cols = "id, event_type, started_at, finished_at, outcome, test_details, test_results, session_id, skipped_at, created_at";
+  const cols = ["id, event_type, started_at, finished_at, outcome, test_details, test_results, created_at", ...SDLC_EVENT_COLUMNS].join(", ");
   // The other SDLC tables refer to SDLC_Event by name, so the checks must be off while it is gone.
   d.exec("PRAGMA foreign_keys = OFF");
   try {
@@ -200,10 +217,9 @@ export function open(path = DB_PATH): DatabaseSync {
   const diagramColumns = new Set((db.prepare("PRAGMA table_info(diagrams)").all() as { name: string }[]).map((c) => c.name));
   for (const c of ["edited_at", "deleted_at"]) if (!diagramColumns.has(c)) db.exec(`ALTER TABLE diagrams ADD COLUMN ${c} TEXT`);
   // CREATE TABLE IF NOT EXISTS does not add a column to a table that is already there.
-  if (!db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = 'session_id'").get()) db.exec("ALTER TABLE SDLC_Event ADD COLUMN session_id TEXT");
-  if (!(db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = 'skipped_at'").get())) db.exec("ALTER TABLE SDLC_Event ADD COLUMN skipped_at TEXT");
+  for (const c of SDLC_EVENT_COLUMNS) if (!db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = ?").get(c)) db.exec(`ALTER TABLE SDLC_Event ADD COLUMN ${c} TEXT`);
   // Before the trigger below: copying the table drops the triggers on it.
-  allowBlockedOutcome(db);
+  upgradeSdlcEventChecks(db);
   // SQLite cannot change a CHECK, so an older table is copied into one that allows 'unlinked'.
   const threadTable = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'PiConversationStatusChange'").get() as { sql: string };
   if (!threadTable.sql.includes("'unlinked'")) {
@@ -499,6 +515,10 @@ export interface NewSdlcEvent {
   testResults?: string | null;
   sessionId?: string | null;
   skippedAt?: string | null;
+  prUrl?: string | null;
+  channel?: string | null;
+  message?: string | null;
+  messageUrl?: string | null;
   environments: SdlcEnvironment[];
   tickets: string[];
 }
@@ -509,8 +529,8 @@ export function addSdlcEvent(e: NewSdlcEvent, now = new Date()): SdlcEvent {
   d.exec("BEGIN IMMEDIATE");
   try {
     const { id } = d
-      .prepare("INSERT INTO SDLC_Event (event_type, started_at, finished_at, outcome, test_details, test_results, session_id, skipped_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
-      .get(e.eventType, e.startedAt, e.finishedAt ?? null, e.outcome ?? null, e.testDetails ?? null, e.testResults ?? null, e.sessionId ?? null, e.skippedAt ?? null, created) as { id: number };
+      .prepare("INSERT INTO SDLC_Event (event_type, started_at, finished_at, outcome, test_details, test_results, session_id, skipped_at, created_at, pr_url, channel, message, message_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
+      .get(e.eventType, e.startedAt, e.finishedAt ?? null, e.outcome ?? null, e.testDetails ?? null, e.testResults ?? null, e.sessionId ?? null, e.skippedAt ?? null, created, e.prUrl ?? null, e.channel ?? null, e.message ?? null, e.messageUrl ?? null) as { id: number };
     const env = d.prepare("INSERT OR IGNORE INTO SDLC_Event_Environment (sdlc_event_id, environment) VALUES (?, ?)");
     for (const x of e.environments) env.run(id, x);
     // A smoketest that only started moves no stage yet, so it gets its draft when it finishes.
@@ -564,6 +584,7 @@ function sdlcEvents(where = "", ...params: number[]): SdlcEvent[] {
   const rows = open()
     .prepare(
       `SELECT e.id, e.event_type AS eventType, e.started_at AS startedAt, e.finished_at AS finishedAt, e.outcome, e.test_details AS testDetails, e.test_results AS testResults, e.session_id AS sessionId, e.skipped_at AS skippedAt, e.created_at AS createdAt,
+        e.pr_url AS prUrl, e.channel, e.message, e.message_url AS messageUrl,
         (SELECT group_concat(environment) FROM SDLC_Event_Environment WHERE sdlc_event_id = e.id) AS envs,
         (SELECT group_concat(ticket) FROM SDLC_Event_Ticket WHERE sdlc_event_id = e.id) AS keys
        FROM SDLC_Event e ${where} ORDER BY e.started_at DESC, e.id DESC`,
@@ -597,5 +618,48 @@ export function hasNewEventTickets(): boolean {
 export function sdlcEventsByTicket(): Record<string, SdlcEvent[]> {
   const out: Record<string, SdlcEvent[]> = {};
   for (const e of sdlcEvents()) for (const t of e.tickets) (out[t] ??= []).push(e);
+  return out;
+}
+
+/** Every PR's review requests, newest first, also for PRs with no ticket. */
+export function reviewRequestsByPr(): Record<string, SdlcEvent[]> {
+  const out: Record<string, SdlcEvent[]> = {};
+  for (const e of sdlcEvents("WHERE e.event_type = 'review_request'")) if (e.prUrl) (out[e.prUrl] ??= []).push(e);
+  return out;
+}
+
+// ---- review drafts: a cheap model's Slack review request per PR -----------------------
+
+const DRAFT_COLUMNS = "pr_url AS prUrl, status, text, error, requested_at AS requestedAt";
+
+/**
+ * Marks each PR that needs a draft as in progress, and returns those PRs. A PR needs one when it
+ * has none, or its draft failed or got stuck before `retryBefore`. Read and mark are one step, so
+ * two page loads never draft the same PR twice.
+ */
+export function claimReviewDrafts(prUrls: string[], retryBefore: string, now = new Date()): string[] {
+  const claim = open().prepare(
+    `INSERT INTO review_drafts (pr_url, status, requested_at) VALUES (?, 'in_progress', ?)
+     ON CONFLICT (pr_url) DO UPDATE SET status = 'in_progress', error = NULL, requested_at = excluded.requested_at
+     WHERE review_drafts.status != 'done' AND review_drafts.requested_at < ?
+     RETURNING pr_url`,
+  );
+  return prUrls.filter((u) => claim.get(u, now.toISOString(), retryBefore));
+}
+
+/** Only an in-progress draft changes, so a late answer cannot overwrite a newer one. */
+export function finishReviewDraft(prUrl: string, result: { text: string } | { error: string }): boolean {
+  const text = "text" in result ? result.text : null;
+  const error = "error" in result ? result.error : null;
+  return open().prepare("UPDATE review_drafts SET status = ?, text = ?, error = ? WHERE pr_url = ? AND status = 'in_progress'").run(text ? "done" : "failed", text, error, prUrl).changes > 0;
+}
+
+export function deleteReviewDraft(prUrl: string): boolean {
+  return open().prepare("DELETE FROM review_drafts WHERE pr_url = ?").run(prUrl).changes > 0;
+}
+
+export function reviewDrafts(): Record<string, ReviewDraft> {
+  const out: Record<string, ReviewDraft> = {};
+  for (const r of open().prepare(`SELECT ${DRAFT_COLUMNS} FROM review_drafts`).all() as unknown as ReviewDraft[]) out[r.prUrl] = { ...r };
   return out;
 }

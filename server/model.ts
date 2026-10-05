@@ -225,6 +225,8 @@ export function buildDashboard(input: ModelInput): Dashboard {
     actions: [],
     diagrams: [],
     sdlcEvents: {},
+    reviewDrafts: {},
+    reviewRequests: {},
     sources: input.sources,
     extensionInstalled: input.extensionInstalled,
   };

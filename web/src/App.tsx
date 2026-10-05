@@ -13,6 +13,7 @@ import { needStep } from "./needs.ts";
 import { href, humanAge, parseHash, resolveBoardRef, type Route } from "./routes.ts";
 import { FixLogin } from "./fixLogin.tsx";
 import { rowKey } from "./rowNav.ts";
+import { ReviewRequest, useReviewDrafts } from "./reviewRequest.tsx";
 import { SdlcBar, Smoketests } from "./sdlc.tsx";
 import { SlackQuotes } from "./slackQuotes.tsx";
 import { DueDateVerb, TicketPanel } from "./ticketPanel.tsx";
@@ -947,6 +948,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
 
 function PrsView({ data, now }: { data: Dashboard; now: number }) {
   const groups = useMemo(() => groupOpenPrs(data), [data]);
+  useReviewDrafts(data.prs, data.reviewDrafts);
   const total = countPrs(groups);
   const ticketCount = groups.filter((g) => g.ticket).length;
   return (
@@ -989,6 +991,7 @@ function PrsView({ data, now }: { data: Dashboard; now: number }) {
                 return (
                   <div key={pr.url} className="pr-entry" id={prRef(pr.url) ?? undefined}>
                     <PrRow pr={pr} now={now} />
+                    <ReviewRequest pr={pr} draft={data.reviewDrafts[pr.url]} sent={data.reviewRequests[pr.url]} now={now} />
                     {todo.length > 0 && (
                       <ul className="pr-why">
                         {todo.map((a) => (
