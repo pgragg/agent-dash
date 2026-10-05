@@ -7,8 +7,12 @@
  * Slack once and calls Slack's own search.messages endpoint from inside the page, with the
  * page's token and cookies. It only searches; it never posts, reacts, or marks anything read.
  * Login and safety notes: ~/pi/secrets/slack/README.md.
+ *
+ * With AGENT_DASH_SLACK_HITS set (a summary run sets it), each match is also appended to that
+ * file as a JSON line, so the dashboard can quote the messages a summary links to.
  */
 import { execFileSync } from "node:child_process";
+import { appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -55,6 +59,8 @@ try {
     process.exit(1);
   }
   console.log(`${res.total} messages match ${JSON.stringify(query)}; newest ${res.matches.length}:`);
+  const hits = process.env.AGENT_DASH_SLACK_HITS;
+  if (hits) appendFileSync(hits, res.matches.map((m: Record<string, unknown>) => `${JSON.stringify({ permalink: m.permalink, channel: m.channel, user: m.user, ts: m.ts, text: String(m.text).slice(0, 2000) })}\n`).join(""));
   for (const m of res.matches) {
     const when = new Date(Number(m.ts) * 1000).toISOString().slice(0, 16).replace("T", " ");
     console.log(`\n[${when}] #${m.channel} @${m.user}: ${String(m.text).replace(/\s+/g, " ").slice(0, 400)}\n  ${m.permalink}`);

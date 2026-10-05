@@ -7,7 +7,7 @@ It answers one question: **what do I look at next?**
 
 It reads your pi session logs, your Jira tickets, and your GitHub PRs. You can act on the answer without leaving the page.
 
-The dashboard never writes to Jira or GitHub. The only things it sends anywhere go to your own pi sessions: a reply that you type, a Stop, and the answer to an extension dialog. A [verb button](#pr-verbs) starts an agent on one small task, and that agent does the write: the click is your approval.
+The dashboard never writes to Jira or GitHub. The only things it sends anywhere go to your own pi sessions: a reply that you type, a Stop, and the answer to an extension dialog. A verb button (a [PR verb](#pr-verbs), or **Move to** on the [Ticket](#the-ticket-section) section) starts an agent on one small task, and that agent does the write: the click is your approval.
 
 ## Run it
 
@@ -26,7 +26,7 @@ The navbar at the top switches between the views: **Board** (`#/`, the queue and
 ### Board
 
 - **Left: the queue.** One entry per ticket (or per ticket-less run or PR), ranked by its most urgent signal (see [Queue ranking](#queue-ranking)). Under it: **Waiting on others** (only context left, such as a PR out for review), **Done in Jira** (closed tickets that still have agents open, tagged green **done**; never in the queue), **Agents at work**, **Done for now**, and **Quiet tickets** (your tickets with nothing going on). An entry with several signals shows the most urgent one, with the others as tags: for example "Agent is waiting on you" with **in review**.
-- **Right: a workspace for the selected entry.** In order: why the entry is in the queue (each PR signal with its [verb button](#pr-verbs)), the drafted [next steps](#next-steps-summaries), **Start a new agent**, your notes, each live agent's whole last message with a reply box (see [Live control](#live-control)), the PRs, and the run history. **Show the conversation** on an agent card shows the whole chat in the card (prompts and replies, no tool traffic), so you can read an agent on the board or on its page.
+- **Right: a workspace for the selected entry.** In order: why the entry is in the queue (each PR signal with its [verb button](#pr-verbs)), the [Ticket](#the-ticket-section) section, the drafted [next steps](#next-steps-summaries), **Start a new agent**, your notes, each live agent's whole last message with a reply box (see [Live control](#live-control)), the PRs, and the run history. **Show the conversation** on an agent card shows the whole chat in the card (prompts and replies, no tool traffic), so you can read an agent on the board or on its page.
 - **Done for now** (`E`) hides an entry until one of its signals changes, so the queue works like an inbox. It is saved in the browser's localStorage.
 - **Notes**: each ticket's workspace has a private, timestamped notes list (`N`). Notes are saved in SQLite (`notes` table: `ticket`, `created_at`, `body`) and never leave your machine, except that a next-steps draft reads them first and trusts them over older sources. A note newer than the draft marks it **out of date**.
 - **Resolve a thread**: **Resolve** on an agent card or a history row says "this pi thread no longer matters to this ticket", with an optional reason. A resolved thread moves to **Resolved** under the ticket's history, with its reason, and **Mark relevant** undoes it. A resolved thread no longer puts the ticket in the queue or shows as its agent, and next-steps drafts see only its name and reason. If it still waits for you and is resolved for all its tickets, it shows in the queue on its own.
@@ -34,7 +34,8 @@ The navbar at the top switches between the views: **Board** (`#/`, the queue and
 - **History** (`#/history`): every pi chat on this machine, newest first, grouped by day, with no time window. The search box matches every word against the name, first prompt, last reply, folder and tickets. Click a chat to read it: your prompts and the agent's replies, without tool traffic, the newest 40 first. A live chat reloads as it changes. `GET /api/history` gives the list (without each run's whole last message, to keep it small), and `GET /api/transcript?session=<id>` gives one chat. The server finds the log by session id from its own scan, and never takes a path from the page.
 - **Notifications**: **Turn on notifications** in the top bar asks Chrome for permission. After that, the page sends a notification when an agent that worked for 45 s or more starts to wait for you, unless you stopped it with Esc. A click opens that run's entry on the board. They need the page open in a tab (in the background is fine), and an exact status from the extension: a status guessed from the log never notifies. **Notifications on** mutes them (saved in localStorage). If Chrome shows nothing, allow notifications for Google Chrome in macOS System Settings → Notifications. They replace the old `notify-on-wait` pi extension, which asked macOS for a notification from the terminal.
 - **New conversation** (`C`), at the top of the queue, opens a new page (`#/c`). Type the first message and pick the folder (default `~`), and **Start** runs a plain pi with no ticket and no context file. That pi has no terminal: the page goes to `#/c:<sessionId>`, and you talk to the agent there (see [Conversations on the page](#conversations-on-the-page)).
-- **Keyboard**: `J`/`K` move, `E` done for now, `R` reply, `N` note, `A` new agent, `C` new conversation, `O` open the iTerm tab (or the page of a conversation), `S` draft next steps, `⌘↵` send, `?` help.
+- **Keyboard**: `J`/`K` move, `E` done for now, `R` reply, `N` note, `A` new agent, `C` new conversation, `O` open the iTerm tab (or the page of a conversation), `S` draft next steps, `T` show or hide the ticket section, `⌘↵` send, `?` help. On the PRs and History views, `J`/`K` select a row and `↵` opens it (the PR, or the chat).
+- **Fix login**: when Jira or GitHub is down, the top bar shows **Fix Jira login** or **Fix GitHub login**. It runs `~/pi/auth/pi-auth ensure <target>` on the server (`POST /api/login?source=jira|github`, with the `X-Agent-Dash` guard), then refreshes. The target comes from a fixed list, never from the request. pi-auth can open your Chrome; it changes nothing remote. If pi-auth has no target for the source, the button tells you how to log in by hand.
 - `#/t:FSDK-123` or `#/r:<sessionId>` in the URL selects an entry. See [Addresses](#addresses) for the other objects.
 
 ### Actions
@@ -50,7 +51,7 @@ Each action is a row in the SQLite `actions` table. The server syncs the table o
 
 ### PRs
 
-Your open PRs, grouped by ticket. A PR links to a ticket as on the board, so a PR with no key in its title or branch takes the ticket of the run that opened it. A PR that names two tickets shows under both. The groups with the most urgent PR come first, in the [queue ranking](#queue-ranking) order, and PRs with no ticket come last. Under each PR, the signals that need you (for example "CI is red: lint, test") show with the reason and a [verb button](#pr-verbs). The ticket title opens that ticket on the board. A click on a PR row, here or on the board, opens the [PR panel](#pr-panel); the small `↗` at the end of the row opens GitHub. The CI tag of a red PR names the failing checks. Only PRs updated in the last 14 days show, because the GitHub fetch uses that window. The keyboard shortcuts work only on the board.
+Your open PRs, grouped by ticket. A PR links to a ticket as on the board, so a PR with no key in its title or branch takes the ticket of the run that opened it. A PR that names two tickets shows under both. The groups with the most urgent PR come first, in the [queue ranking](#queue-ranking) order, and PRs with no ticket come last. Under each PR, the signals that need you (for example "CI is red: lint, test") show with the reason and a [verb button](#pr-verbs). The ticket title opens that ticket on the board. A click on a PR row, here or on the board, opens the [PR panel](#pr-panel); the small `↗` at the end of the row opens GitHub. The CI tag of a red PR names the failing checks. Only PRs updated in the last 14 days show, because the GitHub fetch uses that window. `J`/`K` select a PR, and `↵` opens it.
 
 ### PR panel
 
@@ -81,6 +82,17 @@ A PR with a ticket on the board starts a ticket agent (`POST /api/agents?ticket=
 ### Links in agent messages
 
 A GitHub PR link in a message opens the PR panel, and a Jira link to a ticket on the board opens the ticket (`#/t:KEY`). A small `↗` next to each of these links still opens GitHub or Jira. Other links open as before, in a new tab.
+
+### The ticket section
+
+The **Ticket** section under the workspace header is closed at first. A click or `T` opens it, and the page then reads the ticket from Jira: the description and the 10 newest comments. `GET /api/ticket?key=KEY` (with the `X-Agent-Dash` guard, because each call can reach Jira with your token) makes three read-only GETs (`/rest/api/3/issue/KEY`, its `/comment` list, and its `/transitions`), turns Jira's rich text (ADF) into markdown (`shared/adf.ts`), and caches the answer for 2 minutes. **Reload** reads it again. The `KEY ↗` link and the `↗` in the section still open the ticket in Jira.
+
+The section also has two **Jira verbs**. The page itself never writes to Jira: each verb starts a new agent (`POST /api/agents?ticket=KEY`, as **Start a new agent** does) with a first message from `shared/jiraVerbs.ts`. The message tells the agent to use the `jira-tickets` skill and to make that one change and nothing else. Your click is the approval.
+
+- **Move to**: the statuses that Jira's transitions list offers now. A status transition needs no further approval, so the agent applies it.
+- **Set due date**: the date picker starts two weeks out. On a ticket with no due date, the agent sets it. On a ticket that already has one, the agent shows you the change and asks you first.
+
+An **Overdue** or **Due soon** line in the "why" list has a **New due date…** button that does the same as **Set due date**.
 
 ## Addresses
 
@@ -147,7 +159,7 @@ The server listens on `127.0.0.1` only, because the page shows prompts and repli
 |---|---|---|
 | pi sessions | `~/.pi/agent/sessions/**/*.jsonl` | Re-parses only the files that changed. A cold scan of about 700 sessions takes about 1 s. |
 | Run status | `~/.agent-dash/status/<sessionId>.json`, written by `extension/agent-dash-status.ts` | Without it, status is a guess from the log, marked `?` |
-| Jira | `POST /rest/api/3/search/jql` with the token in `~/pi/secrets/jira/.env.personal` | Open tickets assigned to you, excluding the deprecated `FSM` project |
+| Jira | `POST /rest/api/3/search/jql` with the token in `~/pi/secrets/jira/.env.personal` | Open tickets assigned to you, excluding the deprecated `FSM` project. The [Ticket](#the-ticket-section) section reads one ticket's description, comments and transitions with GETs, only when it opens. |
 | GitHub | `gh api graphql` with your `gh` login | Your PRs updated in the last 14 days, with CI (and the names of the failing checks), review, and merge state. The [PR panel](#pr-panel) reads one PR in full on demand. |
 
 Jira and GitHub answers are cached for 2 minutes. After the first load, a stale answer is shown at once and refreshed in the background. **refresh** forces a new fetch.
@@ -259,13 +271,15 @@ When a summary is saved, the server splits its **Next steps** list into one `nex
 
 If a run exits without saving, the server takes its last reply (pi -p prints it) as the summary. If there is no reply, it marks the row failed. The server also stops a run after 30 minutes. Runs are detached and write to log files, so a server restart does not stop them. On the next page load, the server checks rows whose pid is gone.
 
+**Slack quotes.** When a summary links to a Slack message, the card shows a closed **Slack** list under the summary with the message text, its channel, its author and the time, so you can read it without going to Slack. The summary run sets `AGENT_DASH_SLACK_HITS`, so `slack-search.ts` also saves each match to `slack.jsonl` in the run's work folder. `GET /api/summaries/slack?id=<id>` returns the saved matches that the summary links to. It takes the folder from the database row, never from the request. A summary from before this change has no saved matches and shows no list.
+
 `scripts/slack-search.ts "<query>"` searches Slack read-only. It opens Slack once with the saved login in `~/pi/secrets/slack/` and calls Slack's `search.messages` from inside the page, because clicking through the search box from a headless browser is unreliable.
 
 Optional: `AGENT_DASH_SUMMARY_MODEL` and `AGENT_DASH_SUMMARY_THINKING` choose the model and thinking level of summary runs.
 
 ## Configuration
 
-Environment variables, all optional: `AGENT_DASH_PORT`, `AGENT_DASH_SESSIONS_DIR`, `AGENT_DASH_STATUS_DIR`, `AGENT_DASH_INBOX_DIR`, `AGENT_DASH_CONVERSATIONS_DIR`, `AGENT_DASH_PROJECTS` (default `FSDK|EFSUP`), `AGENT_DASH_EXCLUDE_PROJECTS` (default `FSM`), `AGENT_DASH_RECENT_DAYS` (default 14), `JIRA_SERVER`, `JIRA_LOGIN`, `JIRA_API_TOKEN`.
+Environment variables, all optional: `AGENT_DASH_PORT`, `AGENT_DASH_SESSIONS_DIR`, `AGENT_DASH_STATUS_DIR`, `AGENT_DASH_INBOX_DIR`, `AGENT_DASH_CONVERSATIONS_DIR`, `AGENT_DASH_PROJECTS` (default `FSDK|EFSUP`), `AGENT_DASH_EXCLUDE_PROJECTS` (default `FSM`), `AGENT_DASH_RECENT_DAYS` (default 14), `JIRA_SERVER`, `JIRA_LOGIN`, `JIRA_API_TOKEN`, `AGENT_DASH_PI_AUTH` (default `~/pi/auth/pi-auth`).
 
 ## Develop
 

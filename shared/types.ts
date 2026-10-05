@@ -303,3 +303,44 @@ export interface Dashboard {
   sources: { jira: SourceHealth; github: SourceHealth; sessions: SourceHealth };
   extensionInstalled: boolean;
 }
+
+/** One Jira comment, with its body as markdown. */
+export interface TicketComment {
+  author: string;
+  created: string;
+  body: string;
+}
+
+/** A status the ticket can move to now, from Jira's transitions list. */
+export interface TicketTransition {
+  id: string;
+  /** The transition's own name, such as "Ready for Review". */
+  name: string;
+  /** The status it leads to, such as "In Review". */
+  to: string;
+}
+
+/** `GET /api/ticket?key=KEY`: read lazily, so the dashboard payload stays small. */
+export interface TicketDetail {
+  key: string;
+  status: string;
+  dueDate: string | null;
+  /** Markdown, from Jira's ADF. */
+  description: string;
+  /** The newest comments, oldest first. */
+  comments: TicketComment[];
+  commentTotal: number;
+  transitions: TicketTransition[];
+  /** Set when the transitions could not be read; the rest is still good. */
+  transitionsError?: string;
+  fetchedAt: string;
+}
+
+/** A Slack message that a next-steps summary links to, as the summary run found it. */
+export interface SlackQuote {
+  permalink: string;
+  channel: string;
+  user: string;
+  ts: string;
+  text: string;
+}

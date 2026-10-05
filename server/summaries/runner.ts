@@ -17,6 +17,8 @@ const WORK_ROOT = join(ROOT, "summaries");
 const SESSION_DIR = join(ROOT, "summary-sessions");
 const SAVE_SCRIPT = new URL("../../scripts/save-summary.ts", import.meta.url).pathname;
 const SLACK_SCRIPT = new URL("../../scripts/slack-search.ts", import.meta.url).pathname;
+/** In a run's work folder: one JSON line per Slack match that the run found. */
+export const SLACK_HITS = "slack.jsonl";
 const CONTEXT_BUDGET = 60_000;
 const PER_SESSION_MAX = 12_000;
 
@@ -112,6 +114,7 @@ STEPS
 4. Slack, read-only. Search with this script only; do not drive the Slack UI:
    node ${SLACK_SCRIPT} "${key}"
    It prints the newest matches with permalinks. If it says the login expired, skip Slack.
+   When a step rests on a Slack message, put the message's full permalink in the step: the dashboard quotes the message next to the summary.
 
 OUTPUT (at most 120 words, markdown):
 **State:** one sentence.
@@ -201,7 +204,8 @@ export async function requestSummary(input: SummaryInput, opts: { force?: boolea
     detached: true,
     stdio: ["ignore", out, err],
     // The `pi` shell alias sets this; a spawned pi does not get the alias.
-    env: { ...process.env, SSL_CERT_FILE: process.env.SSL_CERT_FILE ?? "/etc/ssl/cert.pem" },
+    // AGENT_DASH_SLACK_HITS: slack-search.ts saves its matches there, for the page's quotes.
+    env: { ...process.env, SSL_CERT_FILE: process.env.SSL_CERT_FILE ?? "/etc/ssl/cert.pem", AGENT_DASH_SLACK_HITS: join(workDir, SLACK_HITS) },
   });
   closeSync(out);
   closeSync(err);
