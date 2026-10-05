@@ -83,6 +83,22 @@ function SmoketestVerb({ ticket, env, cwd, onError }: { ticket: string; env: Sdl
   );
 }
 
+/** Records a smoketest that Piper chose not to run, so its stage counts as passed. */
+function SkipSmoketest({ ticket, env, onError }: { ticket: string; env: SdlcEnvironment; onError: (m: string | null) => void }) {
+  return (
+    <button
+      className="btn ghost small"
+      title={`Record that you skip the ${ENV_LABEL[env]} smoketest of ${ticket}. Delete it on the Smoketests card to undo.`}
+      onClick={async () => {
+        const now = new Date().toISOString();
+        onError(await post("/api/sdlc-events", { eventType: "smoketest", tickets: [ticket], environments: [env], startedAt: now, skippedAt: now }));
+      }}
+    >
+      Skip smoketest
+    </button>
+  );
+}
+
 const STATE_TEXT: Record<StageState, string> = { done: "done", failed: "failed", waiting: "waiting", skipped: "skipped", todo: "to do" };
 
 function StageActions({ stage, group, cwd, onError }: { stage: Stage; group: TicketGroup; cwd: string; onError: (m: string | null) => void }) {
@@ -92,6 +108,7 @@ function StageActions({ stage, group, cwd, onError }: { stage: Stage; group: Tic
     return (
       <>
         <SmoketestVerb ticket={key} env={env} cwd={cwd} onError={onError} />
+        {stage.state !== "done" && stage.state !== "skipped" && <SkipSmoketest ticket={key} env={env} onError={onError} />}
         {stage.events.length > 0 && (
           <a className="btn ghost small" href="#smoketests" onClick={(e) => (e.preventDefault(), document.getElementById("smoketests")?.scrollIntoView({ behavior: "smooth" }))}>
             See smoketests
@@ -279,6 +296,7 @@ function SmoketestRow({ e, now, onError }: { e: SdlcEvent; now: number; onError:
             {ENV_LABEL[x]}
           </span>
         ))}
+        {e.skippedAt && <span className="tag">skipped</span>}
         {e.outcome && <span className={`tag ${e.outcome === "passed" ? "tone-good" : "tone-bad"}`}>{e.outcome}</span>}
         {e.tickets.length > 1 && <span>· also on {e.tickets.slice(1).join(", ")}</span>}
         <button
@@ -319,6 +337,7 @@ export function Smoketests({ ticket, events, now, cwd, onError }: { ticket: stri
           ))}
         </select>
         <SmoketestVerb key={env} ticket={ticket} env={env} cwd={cwd} onError={onError} />
+        <SkipSmoketest ticket={ticket} env={env} onError={onError} />
         {!recording && (
           <button className="btn ghost small" onClick={() => setRecording(true)} title="Record a smoketest you ran yourself">
             Record by hand

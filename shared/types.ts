@@ -318,6 +318,8 @@ export interface SdlcEvent {
   outcome: "passed" | "failed" | null;
   testDetails: string | null;
   testResults: string | null;
+  /** Set on a smoketest that Piper chose to skip. It has no outcome. */
+  skippedAt: string | null;
   environments: SdlcEnvironment[];
   tickets: string[];
   createdAt: string;

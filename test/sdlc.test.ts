@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { buildHandoff } from "../server/handoff.ts";
 import { validateSdlcEvent } from "../server/sdlc.ts";
@@ -26,6 +27,7 @@ function ev(over: Partial<SdlcEvent> = {}): SdlcEvent {
     outcome: "passed",
     testDetails: null,
     testResults: null,
+    skippedAt: null,
     environments: ["localhost"],
     tickets: ["FSDK-1"],
     createdAt: "2026-10-02T10:00:00.000Z",
@@ -81,6 +83,16 @@ test("a merged deploy PR with no confirmed deploy waits for Argo; Fern Dev count
   assert.equal(states(smoked).in_beta, "skipped");
 });
 
+test("a skipped smoketest passes its stage on purpose, and a later run decides again", () => {
+  const skip = ev({ outcome: null, skippedAt: "2026-10-02T10:00:00.000Z" });
+  const p = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [skip] });
+  assert.equal(states(p).local_smoketest, "skipped");
+  assert.match(p.stages[p.current].detail, /skipped 2026-10-02/);
+  assert.equal(p.next?.id, "in_beta");
+  const ran = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [skip, ev({ outcome: "failed", startedAt: "2026-10-02T11:00:00.000Z" })] });
+  assert.equal(states(ran).local_smoketest, "failed");
+});
+
 test("Done comes from Jira, and then there is no next stage", () => {
   const p = sdlcProgress({ ticket: ticket({ status: "Done", statusCategory: "done" }), prs: [pr({ state: "merged" })], events: [] });
   assert.equal(p.stages[p.current].id, "done");
@@ -107,6 +119,20 @@ test("an event links to each ticket and environment, newest first, and a delete 
   assert.equal(db.deleteSdlcEvent(newer.id), true);
   assert.equal(db.sdlcEventsByTicket()["FSDK-21"], undefined);
   assert.equal(db.deleteSdlcEvent(newer.id), false);
+  const skip = db.addSdlcEvent({ eventType: "smoketest", startedAt: "2026-10-02T12:00:00.000Z", skippedAt: "2026-10-02T12:00:00.000Z", environments: ["postman_beta"], tickets: ["FSDK-22"] });
+  assert.equal(db.sdlcEventsByTicket()["FSDK-22"][0].skippedAt, skip.skippedAt);
+  assert.equal(skip.skippedAt, "2026-10-02T12:00:00.000Z");
+  assert.equal(older.skippedAt, null);
+});
+
+test("a database from before skips gets the skipped_at column", () => {
+  const old = join(dir, "old.db");
+  new DatabaseSync(old).exec(
+    "CREATE TABLE SDLC_Event (id INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, outcome TEXT, test_details TEXT, test_results TEXT, created_at TEXT NOT NULL)",
+  );
+  const script = new URL("../scripts/sdlc-event.ts", import.meta.url).pathname;
+  const out = JSON.parse(execFileSync("node", [script, "smoketest", "--ticket", "FSDK-31", "--env", "localhost"], { env: { ...process.env, AGENT_DASH_DB: old } }).toString());
+  assert.equal(out.skippedAt, null);
 });
 
 test("a new event is checked: a known type, real keys, known environments, and times in order", () => {
@@ -118,6 +144,10 @@ test("a new event is checked: a known type, real keys, known environments, and t
   assert.throws(() => validateSdlcEvent({ eventType: "smoketest", tickets: ["FSDK-1 OR 1=1"], environments: ["localhost"] }, PATTERN), /not a ticket key/);
   assert.throws(() => validateSdlcEvent({ eventType: "smoketest", tickets: ["FSDK-1"], environments: ["staging"] }, PATTERN), /unknown environment/);
   assert.throws(() => validateSdlcEvent({ eventType: "smoketest", tickets: ["FSDK-1"], environments: [] }, PATTERN), /at least one environment/);
+  const skipped = validateSdlcEvent({ eventType: "smoketest", tickets: ["FSDK-1"], environments: ["localhost"], skippedAt: new Date(NOW).toISOString() }, PATTERN, now);
+  assert.equal(skipped.skippedAt, now.toISOString());
+  assert.throws(() => validateSdlcEvent({ eventType: "deploy", tickets: ["FSDK-1"], environments: ["localhost"], skippedAt: new Date(NOW).toISOString() }, PATTERN), /only a smoketest/);
+  assert.throws(() => validateSdlcEvent({ eventType: "smoketest", tickets: ["FSDK-1"], environments: ["localhost"], skippedAt: new Date(NOW).toISOString(), outcome: "passed" }, PATTERN), /no outcome/);
   assert.throws(() => validateSdlcEvent({ eventType: "smoketest", tickets: ["FSDK-1"], environments: ["localhost"], startedAt: "2026-10-02T12:00:00Z", finishedAt: "2026-10-02T11:00:00Z" }, PATTERN), /before startedAt/);
 });
 
