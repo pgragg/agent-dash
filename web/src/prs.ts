@@ -1,4 +1,5 @@
 import type { AttentionItem, Dashboard, PullRequest, Ticket } from "../../shared/types.ts";
+import { starredFirst } from "./star.ts";
 
 /** Open PRs grouped by ticket, for the PRs view. Kept free of React so the tests can import it. */
 
@@ -21,8 +22,9 @@ const newest = (g: PrGroup) => g.prs.map((e) => e.pr.updatedAt).sort().at(-1) ??
 /**
  * A PR that names two tickets shows under both, as on the board. Groups with the most urgent
  * PR come first, so the page reads in the same order as the queue; PRs with no ticket come last.
+ * Starred tickets come before all of them.
  */
-export function groupOpenPrs(d: Pick<Dashboard, "prs" | "attention" | "myTickets" | "otherTickets">): PrGroup[] {
+export function groupOpenPrs(d: Pick<Dashboard, "prs" | "attention" | "myTickets" | "otherTickets"> & Partial<Pick<Dashboard, "starred">>): PrGroup[] {
   const tickets = new Map([...d.myTickets, ...d.otherTickets].map((g) => [g.ticket.key, g.ticket]));
   const groups = new Map<string, PrGroup>();
   const none: PrGroup = { ticket: null, prs: [] };
@@ -39,7 +41,9 @@ export function groupOpenPrs(d: Pick<Dashboard, "prs" | "attention" | "myTickets
   }
   const all = [...groups.values(), none].filter((g) => g.prs.length);
   for (const g of all) g.prs.sort((a, b) => topScore(b) - topScore(a) || b.pr.updatedAt.localeCompare(a.pr.updatedAt));
-  return all.sort((a, b) => Number(!a.ticket) - Number(!b.ticket) || groupScore(b) - groupScore(a) || newest(b).localeCompare(newest(a)));
+  const starred = new Set(d.starred ?? []);
+  all.sort((a, b) => Number(!a.ticket) - Number(!b.ticket) || groupScore(b) - groupScore(a) || newest(b).localeCompare(newest(a)));
+  return starredFirst(all, (g) => !!g.ticket && starred.has(g.ticket.key));
 }
 
 /** How many distinct open PRs, when a PR can show under more than one ticket. */

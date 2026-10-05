@@ -342,6 +342,8 @@ export interface SdlcEvent {
   confirmedBy: "piper" | "auto" | null;
   /** On an execution: the plan that it runs. */
   planId: number | null;
+  /** One short line from the agent that ran the smoketest: what it showed. The collapsed row shows it. */
+  summary: string | null;
   /** A review request's PR, Slack channel id, message text and message permalink. Null on other events. */
   prUrl: string | null;
   channel: string | null;
@@ -388,6 +390,8 @@ export interface Dashboard {
   notes: Record<string, Note[]>;
   /** When each snoozed ticket comes back to the board, by ticket key. It can be in the past. */
   snoozedUntil: Record<string, string>;
+  /** Starred ticket keys, first starred first. They go to the top of the board and the PRs view. */
+  starred: string[];
   /** Open actions, first to do first. */
   actions: Action[];
   /** Every diagram an agent made, newest first, without its source. */

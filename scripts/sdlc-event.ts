@@ -12,7 +12,7 @@
  *
  *   node scripts/sdlc-event.ts plan --id 11 --plan-file plan.md --state-changes none
  *   node scripts/sdlc-event.ts plan --id 11 --plan-file plan.md --state-changes-file writes.md
- *   node scripts/sdlc-event.ts finish --id 12 --outcome passed --details-file details.md --results-file results.md
+ *   node scripts/sdlc-event.ts finish --id 12 --outcome passed --summary "Publish flow works end to end" --details-file details.md --results-file results.md
  *
  * A plan with `--state-changes none` changes no Beta or Prod state, so it is accepted at once, and
  * the script prints how to run it. Any other plan waits for Piper's Confirm in agent-dash.
@@ -26,9 +26,9 @@ import { config } from "../server/config.ts";
 import { startExecution, validateSdlcEvent, validateSdlcFinish, validateSdlcPlan } from "../server/sdlc.ts";
 import * as db from "../server/summaries/db.ts";
 
-const USAGE = `usage: node scripts/sdlc-event.ts smoketest|deploy --ticket KEY [--ticket KEY] --env ENV [--env ENV] [--started ISO] [--finished ISO] [--outcome passed|failed|blocked] [--details TEXT | --details-file F] [--results TEXT | --results-file F]
+const USAGE = `usage: node scripts/sdlc-event.ts smoketest|deploy --ticket KEY [--ticket KEY] --env ENV [--env ENV] [--started ISO] [--finished ISO] [--outcome passed|failed|blocked] [--summary TEXT] [--details TEXT | --details-file F] [--results TEXT | --results-file F]
        node scripts/sdlc-event.ts plan --id N (--plan TEXT | --plan-file F) (--state-changes none|TEXT | --state-changes-file F)
-       node scripts/sdlc-event.ts finish --id N --outcome passed|failed|blocked [--finished ISO] [--details TEXT | --details-file F] [--results TEXT | --results-file F]`;
+       node scripts/sdlc-event.ts finish --id N --outcome passed|failed|blocked [--finished ISO] [--summary TEXT] [--details TEXT | --details-file F] [--results TEXT | --results-file F]`;
 
 try {
   const { values, positionals } = parseArgs({
@@ -40,6 +40,7 @@ try {
       started: { type: "string" },
       finished: { type: "string" },
       outcome: { type: "string" },
+      summary: { type: "string" },
       details: { type: "string" },
       "details-file": { type: "string" },
       results: { type: "string" },
@@ -67,7 +68,7 @@ try {
     const id = Number(values.id);
     const running = Number.isInteger(id) ? db.getSdlcEvent(id) : null;
     if (running?.eventType !== "smoketest_execution") throw new Error(`no smoketest execution with --id ${values.id ?? ""}`);
-    const done = db.finishSdlcEvent(id, validateSdlcFinish({ finishedAt: values.finished, outcome: values.outcome, testDetails: read(values["details-file"], values.details), testResults: read(values["results-file"], values.results) }, running.startedAt));
+    const done = db.finishSdlcEvent(id, validateSdlcFinish({ finishedAt: values.finished, outcome: values.outcome, summary: values.summary, testDetails: read(values["details-file"], values.details), testResults: read(values["results-file"], values.results) }, running.startedAt));
     if (!done) throw new Error(`SDLC event ${id} already has a result`);
     console.log(JSON.stringify(done, null, 2));
     process.exit(0);
@@ -80,6 +81,7 @@ try {
       startedAt: values.started,
       finishedAt: values.finished,
       outcome: values.outcome,
+      summary: values.summary,
       testDetails: read(values["details-file"], values.details),
       testResults: read(values["results-file"], values.results),
     },

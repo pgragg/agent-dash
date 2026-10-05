@@ -21,6 +21,7 @@ import { DueDateVerb, TicketPanel } from "./ticketPanel.tsx";
 import { DiagramCards, DiagramsView, DiagramView } from "./diagrams.tsx";
 import { SessionScope } from "./mermaid.tsx";
 import { type BoardMode, kanbanColumns, stageOf, useBoardMode } from "./kanban.ts";
+import { starredFirst } from "./star.ts";
 import { DEFAULT_SNOOZE, isSnoozed, SNOOZE_OPTIONS, type SnoozeOption, snoozeUntil, untilLabel } from "./snooze.ts";
 
 /**
@@ -220,7 +221,7 @@ function runTone(run: HistoryRun): string {
 
 // ---- queue (left rail) --------------------------------------------------------------
 
-function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snoozedUntil, card = false, dim = false }: { s: Subject; selected: boolean; onSelect: () => void; now: number; summary?: TicketSummaryState; rank?: number; notes?: number; snoozedUntil?: string; card?: boolean; dim?: boolean }) {
+function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snoozedUntil, card = false, dim = false, starred = false }: { s: Subject; selected: boolean; onSelect: () => void; now: number; summary?: TicketSummaryState; rank?: number; notes?: number; snoozedUntil?: string; card?: boolean; dim?: boolean; starred?: boolean }) {
   const top = lead(s);
   const run = primaryRun(s);
   const ref = useRef<HTMLButtonElement>(null);
@@ -234,7 +235,12 @@ function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snooz
   const when = top?.kind === "awaiting_input" && run ? age(run.statusSince, now) : age(top?.updatedAt ?? run?.lastActivityAt ?? s.ticket?.ticket.updatedAt, now);
   const extra = otherKinds(s);
   return (
-    <button ref={ref} className={`q-item ${card ? "k-card" : ""} ${dim ? "dim" : ""} ${selected ? "selected" : ""}`} onClick={onSelect} aria-current={selected}>
+    <button ref={ref} className={`q-item ${card ? "k-card" : ""} ${dim ? "dim" : ""} ${starred ? "starred" : ""} ${selected ? "selected" : ""}`} onClick={onSelect} aria-current={selected}>
+      {starred && (
+        <span className="q-star" title="Starred" aria-label="Starred">
+          ★
+        </span>
+      )}
       <span className="q-rank">{rank ?? ""}</span>
       <span className="q-body">
         <span className="q-head">
@@ -290,7 +296,7 @@ function BoardModeToggle({ mode, setMode }: { mode: BoardMode; setMode: (m: Boar
 }
 
 /** The board's entries as cards, in the column of the SDLC stage that each ticket reached. */
-function KanbanBoard({ order, dim, ranks, selected, onSelect, data, now, until }: { order: Subject[]; dim: Set<Subject>; ranks: Map<Subject, number>; selected: Subject | null; onSelect: (s: Subject) => void; data: Dashboard; now: number; until: (s: Subject) => string | undefined }) {
+function KanbanBoard({ order, dim, ranks, selected, onSelect, data, now, until, isStarred }: { order: Subject[]; dim: Set<Subject>; ranks: Map<Subject, number>; selected: Subject | null; onSelect: (s: Subject) => void; data: Dashboard; now: number; until: (s: Subject) => string | undefined; isStarred: (s: Subject) => boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   // The selected card scrolls into view at load, which would hide the first stages. This runs after the cards' effects.
   useEffect(() => {
@@ -319,6 +325,7 @@ function KanbanBoard({ order, dim, ranks, selected, onSelect, data, now, until }
                 summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined}
                 notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0}
                 snoozedUntil={isSnoozed(until(s), now) ? until(s) : undefined}
+                starred={isStarred(s)}
               />
             ))}
           </div>
@@ -776,6 +783,21 @@ function History({ runs: allRuns, now, onError, ticket, threads = {}, focus = nu
   );
 }
 
+/** Pins the ticket to the top of the board and the PRs view. */
+function StarButton({ ticket, starred, onError }: { ticket: string; starred: boolean; onError: (m: string | null) => void }) {
+  const [busy, setBusy] = useState(false);
+  const toggle = async () => {
+    setBusy(true);
+    onError(await api.star(ticket, !starred));
+    setBusy(false);
+  };
+  return (
+    <button className={`btn ghost star-btn ${starred ? "on" : ""}`} onClick={toggle} disabled={busy} aria-pressed={starred} title={starred ? "Unstar: back to its normal place" : "Star: pin it to the top of the board and the PRs view"}>
+      {starred ? "★ Starred" : "☆ Star"}
+    </button>
+  );
+}
+
 /** Hides the ticket from the board until a time. `Z` snoozes with the picked option. */
 function SnoozeControl({ ticket, until, now, signal, onSnoozed, onError }: { ticket: string; until: string | undefined; now: number; signal: number; onSnoozed: () => void; onError: (m: string | null) => void }) {
   const [option, setOption] = useState<SnoozeOption>(DEFAULT_SNOOZE);
@@ -909,6 +931,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
             </>
           )}
           <span className="grow" />
+          {t && <StarButton key={`star-${t.key}`} ticket={t.key} starred={data.starred.includes(t.key)} onError={setError} />}
           {t && <SnoozeControl key={t.key} ticket={t.key} until={data.snoozedUntil[t.key]} now={now} signal={snoozeSignal} onSnoozed={onSnoozed} onError={setError} />}
           {actionable(s) &&
             (doneForNow ? (
@@ -1028,6 +1051,11 @@ function PrsView({ data, now }: { data: Dashboard; now: number }) {
                   <a className="key-link" href={t.url} target="_blank" rel="noreferrer" title="Open in Jira">
                     {t.key} ↗
                   </a>
+                  {data.starred.includes(t.key) && (
+                    <span className="star-mark" title="Starred" aria-label="Starred">
+                      ★
+                    </span>
+                  )}
                   <a className="pr-group-title" href={href(`t:${t.key}`)} title="Open on the board">
                     {t.summary}
                   </a>
@@ -1517,8 +1545,11 @@ export function App() {
   // A snoozed ticket leaves every other section until its time comes, whatever its signals say.
   const snoozedList = [...subjects.values()].filter(ticketSnoozed).sort((a, b) => until(a)!.localeCompare(until(b)!));
   const all = [...subjects.values()].filter((s) => !ticketSnoozed(s));
+  const starredKeys = useMemo(() => new Set(data?.starred ?? []), [data]);
+  const isStarred = (s: Subject) => !!s.ticket && starredKeys.has(s.ticket.ticket.key);
   const ranked = all.filter(actionable).sort((a, b) => lead(b)!.score - lead(a)!.score);
-  const queue = ranked.filter((s) => !doneForNow.isDone(s));
+  // Starred entries lead the queue, so their ranks are the first ones.
+  const queue = starredFirst(ranked.filter((s) => !doneForNow.isDone(s)), isStarred);
   const done = ranked.filter((s) => doneForNow.isDone(s));
   // Only context left, such as a PR out for review: the ball is with someone else.
   const othersTurn = all.filter((s) => s.items.length && !actionable(s) && !isDone(s)).sort((a, b) => lead(b)!.score - lead(a)!.score);
@@ -1526,7 +1557,11 @@ export function App() {
   // Closed in Jira, but agents still open on it: worth a glance to close the tabs, never a task.
   const doneInJira = all.filter((s) => isDone(s) && (s.items.length || liveRuns(s).length));
   const quiet = data ? data.myTickets.map((g) => subjects.get(`t:${g.ticket.key}`)!).filter((s) => !ticketSnoozed(s) && !s.items.length && !liveRuns(s).length) : [];
-  const order = [...queue, ...othersTurn, ...working, ...done, ...doneInJira, ...quiet, ...snoozedList];
+  // A starred ticket shows once, in the Starred section at the top of the rail; a snooze still hides it.
+  const unsnoozed = [...queue, ...othersTurn, ...working, ...done, ...doneInJira, ...quiet];
+  const starredList = unsnoozed.filter(isStarred);
+  const unstarred = (list: Subject[]) => list.filter((s) => !isStarred(s));
+  const order = [...starredList, ...unstarred(unsnoozed), ...snoozedList];
 
   const target = data && boardRef ? resolveBoardRef(boardRef, data, new Set(subjects.keys())) : null;
   const selected = (target && subjects.get(target.subjectId)) || queue[0] || order[0] || null;
@@ -1768,6 +1803,7 @@ export function App() {
             data={data}
             now={now}
             until={until}
+            isStarred={isStarred}
           />
           {drawer && selected && (
             <aside className="kanban-drawer" aria-label="Workspace">
@@ -1785,9 +1821,14 @@ export function App() {
               {newConversation}
               <BoardModeToggle mode={boardMode} setMode={setBoardMode} />
             </div>
-            <RailSection title="Up next" count={queue.length}>
-              {queue.map((s, i) => (
-                <QueueItem key={s.id} s={s} rank={i + 1} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
+            <RailSection title="Starred" count={starredList.length} hint="Tickets you starred, pinned to the top">
+              {starredList.map((s) => (
+                <QueueItem key={s.id} s={s} starred rank={queue.includes(s) ? queue.indexOf(s) + 1 : undefined} dim={done.includes(s) || quiet.includes(s)} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
+              ))}
+            </RailSection>
+            <RailSection title="Up next" count={unstarred(queue).length}>
+              {unstarred(queue).map((s) => (
+                <QueueItem key={s.id} s={s} rank={queue.indexOf(s) + 1} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
               ))}
             </RailSection>
             {queue.length === 0 && (
@@ -1800,18 +1841,18 @@ export function App() {
                 </p>
               </div>
             )}
-            <RailSection title="Waiting on others" count={othersTurn.length} hint="Someone else has the next move, such as a reviewer">
-              {othersTurn.map((s) => (
+            <RailSection title="Waiting on others" count={unstarred(othersTurn).length} hint="Someone else has the next move, such as a reviewer">
+              {unstarred(othersTurn).map((s) => (
                 <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
               ))}
             </RailSection>
-            <RailSection title="Agents at work" count={working.length} hint="Live runs that need nothing from you yet">
-              {working.map((s) => (
+            <RailSection title="Agents at work" count={unstarred(working).length} hint="Live runs that need nothing from you yet">
+              {unstarred(working).map((s) => (
                 <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
               ))}
             </RailSection>
-            <RailSection title="Done for now" count={done.length} defaultOpen={false} hint="Back in the queue when something changes">
-              {done.map((s) => (
+            <RailSection title="Done for now" count={unstarred(done).length} defaultOpen={false} hint="Back in the queue when something changes">
+              {unstarred(done).map((s) => (
                 <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
               ))}
             </RailSection>
@@ -1820,13 +1861,13 @@ export function App() {
                 <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} snoozedUntil={until(s)} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
               ))}
             </RailSection>
-            <RailSection title="Done in Jira" count={doneInJira.length} defaultOpen={false} hint="Closed tickets that still have agents open">
-              {doneInJira.map((s) => (
+            <RailSection title="Done in Jira" count={unstarred(doneInJira).length} defaultOpen={false} hint="Closed tickets that still have agents open">
+              {unstarred(doneInJira).map((s) => (
                 <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} />
               ))}
             </RailSection>
-            <RailSection title="Quiet tickets" count={quiet.length} defaultOpen={false} hint="Your tickets with nothing going on">
-              {quiet.map((s) => (
+            <RailSection title="Quiet tickets" count={unstarred(quiet).length} defaultOpen={false} hint="Your tickets with nothing going on">
+              {unstarred(quiet).map((s) => (
                 <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
               ))}
             </RailSection>

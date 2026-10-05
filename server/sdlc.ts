@@ -7,6 +7,8 @@ const OUTCOMES: SmoketestOutcome[] = ["passed", "failed", "blocked"];
 
 /** The text fields hold a test's notes and evidence, not its whole log. */
 const TEXT_MAX = 20_000;
+/** The summary is one line on the collapsed row; the details and results hold the rest. */
+const SUMMARY_MAX = 200;
 
 export interface SdlcEventInput {
   eventType?: unknown;
@@ -16,6 +18,7 @@ export interface SdlcEventInput {
   testDetails?: unknown;
   testResults?: unknown;
   skippedAt?: unknown;
+  summary?: unknown;
   environments?: unknown;
   tickets?: unknown;
 }
@@ -31,6 +34,12 @@ function text(v: unknown, field: string): string | null {
   if (typeof v !== "string") throw new Error(`${field} must be text`);
   if (v.length > TEXT_MAX) throw new Error(`${field} is longer than ${TEXT_MAX} characters`);
   return v.trim() || null;
+}
+
+function summaryText(v: unknown): string | null {
+  const s = text(v, "summary")?.replace(/\s+/g, " ") ?? null;
+  if (s && s.length > SUMMARY_MAX) throw new Error(`summary is longer than ${SUMMARY_MAX} characters`);
+  return s;
 }
 
 /** Checks a new event from the page or the script. Throws the first problem it finds. */
@@ -58,17 +67,18 @@ export function validateSdlcEvent(input: SdlcEventInput, ticketPattern: RegExp, 
     testDetails: text(input.testDetails, "testDetails"),
     testResults: text(input.testResults, "testResults"),
     skippedAt,
+    summary: summaryText(input.summary),
     environments: [...new Set(envs as SdlcEnvironment[])],
     tickets,
   };
 }
 
 /** An agent result must not end a smoketest before it started. */
-export function validateSdlcFinish(input: { finishedAt?: unknown; outcome?: unknown; testDetails?: unknown; testResults?: unknown }, startedAt: string, now = new Date()): SdlcFinish {
+export function validateSdlcFinish(input: { finishedAt?: unknown; outcome?: unknown; testDetails?: unknown; testResults?: unknown; summary?: unknown }, startedAt: string, now = new Date()): SdlcFinish {
   if (!OUTCOMES.includes(input.outcome as SmoketestOutcome)) throw new Error("outcome must be passed, failed or blocked");
   const finishedAt = isoOrNull(input.finishedAt, "finishedAt") ?? now.toISOString();
   if (finishedAt < startedAt) throw new Error("finishedAt is before startedAt");
-  return { finishedAt, outcome: input.outcome as SmoketestOutcome, testDetails: text(input.testDetails, "testDetails"), testResults: text(input.testResults, "testResults") };
+  return { finishedAt, outcome: input.outcome as SmoketestOutcome, testDetails: text(input.testDetails, "testDetails"), testResults: text(input.testResults, "testResults"), summary: summaryText(input.summary) };
 }
 
 /** "none" (any case) or an empty text: the test changes no Beta or Prod state. */

@@ -29,6 +29,7 @@ function ev(over: Partial<SdlcEvent> = {}): SdlcEvent {
     testResults: null,
     sessionId: null,
     skippedAt: null,
+    summary: null,
     prUrl: null,
     channel: null,
     message: null,
@@ -272,6 +273,7 @@ test("a new event is checked: a known type, real keys, known environments, and t
   assert.throws(() => validateSdlcEvent({ eventType: "deploy", tickets: ["FSDK-1"], environments: ["localhost"], skippedAt: new Date(NOW).toISOString() }, PATTERN), /only a smoketest/);
   assert.throws(() => validateSdlcEvent({ eventType: "smoketest_execution", tickets: ["FSDK-1"], environments: ["localhost"], skippedAt: new Date(NOW).toISOString(), outcome: "passed" }, PATTERN), /no outcome/);
   assert.throws(() => validateSdlcEvent({ eventType: "smoketest_execution", tickets: ["FSDK-1"], environments: ["localhost"], startedAt: "2026-10-02T12:00:00Z", finishedAt: "2026-10-02T11:00:00Z" }, PATTERN), /before startedAt/);
+  assert.throws(() => validateSdlcEvent({ eventType: "smoketest_execution", tickets: ["FSDK-1"], environments: ["localhost"], summary: "x".repeat(201) }, PATTERN), /summary is longer/);
   assert.equal(validateSdlcEvent({ eventType: "smoketest_execution", tickets: ["FSDK-1"], environments: ["localhost"], outcome: "blocked" }, PATTERN, now).outcome, "blocked");
   assert.throws(() => validateSdlcEvent({ eventType: "smoketest_execution", tickets: ["FSDK-1"], environments: ["localhost"], outcome: "inconclusive" }, PATTERN), /passed, failed or blocked/);
 });
@@ -293,8 +295,10 @@ test("the agent finishes its running event once, with the script", () => {
   const running = db.addSdlcEvent({ eventType: "smoketest_execution", startedAt: "2026-10-02T10:00:00.000Z", environments: ["localhost"], tickets: ["FSDK-31"], sessionId: "abc-123" });
   assert.equal(running.sessionId, "abc-123");
   assert.equal(running.finishedAt, null);
-  const out = JSON.parse(execFileSync("node", [script, "finish", "--id", String(running.id), "--outcome", "failed", "--results", "500 on /publish"], { env }).toString());
+  const out = JSON.parse(execFileSync("node", [script, "finish", "--id", String(running.id), "--outcome", "failed", "--summary", "Publish\n500s: no token", "--results", "500 on /publish"], { env }).toString());
   assert.equal(out.outcome, "failed");
+  // The summary is one line on the collapsed row.
+  assert.equal(out.summary, "Publish 500s: no token");
   assert.ok(out.finishedAt);
   const saved = db.sdlcEventsByTicket()["FSDK-31"][0];
   assert.equal(saved.testResults, "500 on /publish");
@@ -326,6 +330,7 @@ test("verb messages name the environment and the record command; the summary pro
   const auto = executeMessage("FSDK-1", "localhost", "/s", 42, plan({ id: 39 }));
   assert.match(auto, /accepted the smoketest plan of FSDK-1 on localhost \(SDLC event 39\), because it changes no state/);
   assert.doesNotMatch(auto, /<plan>/);
+  assert.match(run, /--summary "<one line>"/);
   const c = confirmDeployMessage("FSDK-1", "beta", ["https://github.com/postman-eng/cloud9-parcels-deployments/pull/7"], "/s");
   assert.match(c, /Do not sync, roll back, or change anything/);
   assert.match(c, /deploy --ticket FSDK-1 --env postman_beta/);

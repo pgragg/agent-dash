@@ -82,6 +82,8 @@ CREATE TABLE IF NOT EXISTS SDLC_Event (
   -- Set when Piper chose not to run the smoketest: the stage then counts as passed by on purpose.
   skipped_at   TEXT,
   created_at   TEXT NOT NULL,
+  -- One line that the agent writes when the smoketest is done, for the collapsed row on the page.
+  summary      TEXT,
   -- A review request: the PR, the Slack channel id, the text that was posted, and its permalink.
   pr_url       TEXT,
   channel      TEXT,
@@ -139,10 +141,11 @@ CREATE INDEX IF NOT EXISTS diagrams_by_ticket ON diagrams (ticket, id);
 CREATE INDEX IF NOT EXISTS diagrams_by_session ON diagrams (session_id, id);
 
 -- Local state per ticket. Jira stays the source of truth for everything else about it.
--- snoozed_until hides the ticket from the board until that time.
+-- snoozed_until hides the ticket from the board until that time. starred_at pins it to the top.
 CREATE TABLE IF NOT EXISTS tickets (
   key           TEXT PRIMARY KEY,
-  snoozed_until TEXT
+  snoozed_until TEXT,
+  starred_at    TEXT
 );
 
 -- One drafted Slack review request per PR, written by a cheap model. Piper can edit it before it is sent.
@@ -189,7 +192,7 @@ function toRecord(r: Row): SummaryRecord {
 
 let db: DatabaseSync | null = null;
 
-const SDLC_EVENT_COLUMNS = ["session_id", "skipped_at", "pr_url", "channel", "message", "message_url", "planned_at", "state_changes", "confirmed_at", "confirmed_by", "plan_id"];
+const SDLC_EVENT_COLUMNS = ["session_id", "skipped_at", "pr_url", "channel", "message", "message_url", "summary", "planned_at", "state_changes", "confirmed_at", "confirmed_by", "plan_id"];
 
 /**
  * SQLite cannot change a CHECK, so an older SDLC_Event table is copied into a new one with the same ids.
@@ -231,6 +234,7 @@ export function open(path = DB_PATH): DatabaseSync {
   // CREATE TABLE IF NOT EXISTS does not add a column to a table that is already there.
   // The copy below adds the CHECK on confirmed_by and the reference of plan_id.
   for (const c of SDLC_EVENT_COLUMNS) if (!db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = ?").get(c)) db.exec(`ALTER TABLE SDLC_Event ADD COLUMN ${c} ${c === "plan_id" ? "INTEGER" : "TEXT"}`);
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('tickets') WHERE name = 'starred_at'").get()) db.exec("ALTER TABLE tickets ADD COLUMN starred_at TEXT");
   // Before the trigger below: copying the table drops the triggers on it.
   upgradeSdlcEventChecks(db);
   // SQLite cannot change a CHECK, so an older table is copied into one that allows 'unlinked'.
@@ -367,6 +371,19 @@ export function snoozedUntilByTicket(): Record<string, string> {
   const out: Record<string, string> = {};
   for (const r of open().prepare("SELECT key, snoozed_until AS until FROM tickets WHERE snoozed_until IS NOT NULL").all() as { key: string; until: string }[]) out[r.key] = r.until;
   return out;
+}
+
+// ---- star: pin a ticket to the top of the board and the PRs view ----------------------
+
+export function setStarred(ticket: string, starred: boolean): void {
+  open()
+    .prepare("INSERT INTO tickets (key, starred_at) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET starred_at = excluded.starred_at")
+    .run(ticket, starred ? new Date().toISOString() : null);
+}
+
+/** Starred ticket keys, first starred first. */
+export function starredTickets(): string[] {
+  return (open().prepare("SELECT key FROM tickets WHERE starred_at IS NOT NULL ORDER BY starred_at").all() as { key: string }[]).map((r) => r.key);
 }
 
 // ---- thread status: is a pi thread still relevant to a ticket? -----------------------
@@ -530,6 +547,7 @@ export interface NewSdlcEvent {
   sessionId?: string | null;
   skippedAt?: string | null;
   planId?: number | null;
+  summary?: string | null;
   prUrl?: string | null;
   channel?: string | null;
   message?: string | null;
@@ -544,8 +562,8 @@ export function addSdlcEvent(e: NewSdlcEvent, now = new Date()): SdlcEvent {
   d.exec("BEGIN IMMEDIATE");
   try {
     const { id } = d
-      .prepare("INSERT INTO SDLC_Event (event_type, started_at, finished_at, outcome, test_details, test_results, session_id, skipped_at, plan_id, created_at, pr_url, channel, message, message_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
-      .get(e.eventType, e.startedAt, e.finishedAt ?? null, e.outcome ?? null, e.testDetails ?? null, e.testResults ?? null, e.sessionId ?? null, e.skippedAt ?? null, e.planId ?? null, created, e.prUrl ?? null, e.channel ?? null, e.message ?? null, e.messageUrl ?? null) as { id: number };
+      .prepare("INSERT INTO SDLC_Event (event_type, started_at, finished_at, outcome, test_details, test_results, session_id, skipped_at, plan_id, created_at, pr_url, channel, message, message_url, summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
+      .get(e.eventType, e.startedAt, e.finishedAt ?? null, e.outcome ?? null, e.testDetails ?? null, e.testResults ?? null, e.sessionId ?? null, e.skippedAt ?? null, e.planId ?? null, created, e.prUrl ?? null, e.channel ?? null, e.message ?? null, e.messageUrl ?? null, e.summary ?? null) as { id: number };
     const env = d.prepare("INSERT OR IGNORE INTO SDLC_Event_Environment (sdlc_event_id, environment) VALUES (?, ?)");
     for (const x of e.environments) env.run(id, x);
     // A smoketest that only started moves no stage yet, so it gets its draft when it finishes. A plan never gets one.
@@ -565,13 +583,14 @@ export interface SdlcFinish {
   outcome: SmoketestOutcome;
   testDetails: string | null;
   testResults: string | null;
+  summary?: string | null;
 }
 
 /** Ends a running smoketest. Null when there is no such smoketest, or it already ended. */
 export function finishSdlcEvent(id: number, f: SdlcFinish): SdlcEvent | null {
   const changed = open()
-    .prepare("UPDATE SDLC_Event SET finished_at = ?, outcome = ?, test_details = coalesce(?, test_details), test_results = coalesce(?, test_results) WHERE id = ? AND event_type = 'smoketest_execution' AND finished_at IS NULL AND outcome IS NULL AND skipped_at IS NULL")
-    .run(f.finishedAt, f.outcome, f.testDetails, f.testResults, id).changes;
+    .prepare("UPDATE SDLC_Event SET finished_at = ?, outcome = ?, test_details = coalesce(?, test_details), test_results = coalesce(?, test_results), summary = coalesce(?, summary) WHERE id = ? AND event_type = 'smoketest_execution' AND finished_at IS NULL AND outcome IS NULL AND skipped_at IS NULL")
+    .run(f.finishedAt, f.outcome, f.testDetails, f.testResults, f.summary ?? null, id).changes;
   return changed ? getSdlcEvent(id) : null;
 }
 
@@ -640,7 +659,7 @@ function sdlcEvents(where = "", ...params: number[]): SdlcEvent[] {
     .prepare(
       `SELECT e.id, e.event_type AS eventType, e.started_at AS startedAt, e.finished_at AS finishedAt, e.outcome, e.test_details AS testDetails, e.test_results AS testResults, e.session_id AS sessionId, e.skipped_at AS skippedAt, e.created_at AS createdAt,
         e.planned_at AS plannedAt, e.state_changes AS stateChanges, e.confirmed_at AS confirmedAt, e.confirmed_by AS confirmedBy, e.plan_id AS planId,
-        e.pr_url AS prUrl, e.channel, e.message, e.message_url AS messageUrl,
+        e.pr_url AS prUrl, e.channel, e.message, e.message_url AS messageUrl, e.summary,
         (SELECT group_concat(environment) FROM SDLC_Event_Environment WHERE sdlc_event_id = e.id) AS envs,
         (SELECT group_concat(ticket) FROM SDLC_Event_Ticket WHERE sdlc_event_id = e.id) AS keys
        FROM SDLC_Event e ${where} ORDER BY e.started_at DESC, e.id DESC`,
