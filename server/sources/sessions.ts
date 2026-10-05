@@ -40,6 +40,14 @@ const WEIGHT = { name: 5, user: 3, toolCall: 1, assistant: 1 } as const;
  */
 const CAP: Partial<Record<keyof typeof WEIGHT, number>> = { assistant: 1 };
 const MAX_TICKETS = 3;
+/**
+ * Skills that report across all recent work. They name every ticket in sight, so nothing after
+ * one starts links the session: otherwise it shows up on every ticket it listed.
+ */
+const REPORT_SKILLS = ["daily-progress-report", "standup-daily-summary", "itemize-invoice", "pi-usage-report", "pi-usage-invoice"];
+// `/skill:x` puts `<skill name="x"` in the user message; an agent that picks the skill reads its SKILL.md.
+const REPORT_SKILL_INVOKED = new RegExp(`<skill name="(?:${REPORT_SKILLS.join("|")})"`);
+const REPORT_SKILL_READ = new RegExp(`/skills/(?:${REPORT_SKILLS.join("|")})/SKILL\\.md`);
 const LAST_MESSAGE_MAX = 6_000;
 
 interface ContentPart {
@@ -94,6 +102,7 @@ export function parseSession(raw: string, sessionFile: string, mtime: Date, tick
   let lastStopReason: string | null = null;
   let midRun = false;
   let userMessageCount = 0;
+  let usedReportSkill = false;
   const scores = new Map<string, number>();
   const created = new Set<string>();
   const mentioned = new Set<string>();
@@ -101,6 +110,8 @@ export function parseSession(raw: string, sessionFile: string, mtime: Date, tick
 
   const added = new Map<string, number>();
   const score = (text: string, source: keyof typeof WEIGHT) => {
+    // Work before the report still counts, and so does a session name, which is set on purpose.
+    if (usedReportSkill && source !== "name") return;
     for (const key of extractTickets(text, ticketPattern)) {
       const sofar = added.get(`${source}:${key}`) ?? 0;
       const add = Math.min(WEIGHT[source], (CAP[source] ?? Infinity) - sofar);
@@ -129,6 +140,7 @@ export function parseSession(raw: string, sessionFile: string, mtime: Date, tick
       if (msg.role === "user") {
         // A dash handoff lists other tickets and PRs as background; count only the ticket it is for.
         const text = stripHandoff(textOf(msg.content));
+        if (REPORT_SKILL_INVOKED.test(text)) usedReportSkill = true;
         userMessageCount += 1;
         if (!firstPrompt) firstPrompt = oneLine(text, 400);
         score(text, "user");
@@ -143,6 +155,7 @@ export function parseSession(raw: string, sessionFile: string, mtime: Date, tick
         for (const part of (msg.content ?? []) as ContentPart[]) {
           if (part?.type !== "toolCall") continue;
           const args = JSON.stringify(part.arguments ?? {});
+          if (part.name === "read" && REPORT_SKILL_READ.test(args)) usedReportSkill = true;
           score(args, "toolCall");
           mention(args);
           if (part.name === "bash" && args.includes("gh pr create") && part.id) prCreateCalls.add(part.id);
