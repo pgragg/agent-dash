@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { splitSummary } from "../../shared/nextSteps.ts";
-import type { Diagram, DiagramKind, NextStep, Note, ReviewDraft, SdlcEnvironment, SdlcEvent, SdlcEventType, SmoketestOutcome, ThreadStatus, ThreadStatusChange, TicketSummary } from "../../shared/types.ts";
+import type { ConversationSummary, Diagram, DiagramKind, NextStep, Note, ReviewDraft, SdlcEnvironment, SdlcEvent, SdlcEventType, SmoketestOutcome, ThreadStatus, ThreadStatusChange, TicketSummary } from "../../shared/types.ts";
 
 export const DB_PATH = process.env.AGENT_DASH_DB ?? join(homedir(), ".agent-dash/agent-dash.db");
 
@@ -155,6 +155,21 @@ CREATE TABLE IF NOT EXISTS review_drafts (
   text         TEXT,
   error        TEXT,
   requested_at TEXT NOT NULL
+);
+
+-- One short summary per pi conversation, written by a cheap model. basis is the state of the run
+-- that it was drafted from, so a newer message makes a new draft. A new draft keeps the old texts
+-- until it is done, so the page always has something to show.
+CREATE TABLE IF NOT EXISTS conversation_summaries (
+  session_id   TEXT PRIMARY KEY,
+  status       TEXT NOT NULL CHECK (status IN ('in_progress', 'done', 'failed')),
+  basis        TEXT NOT NULL,
+  about        TEXT,
+  latest       TEXT,
+  needs        TEXT,
+  error        TEXT,
+  requested_at TEXT NOT NULL,
+  generated_at TEXT
 );
 `;
 
@@ -737,4 +752,51 @@ export function reviewDrafts(): Record<string, ReviewDraft> {
   const out: Record<string, ReviewDraft> = {};
   for (const r of open().prepare(`SELECT ${DRAFT_COLUMNS} FROM review_drafts`).all() as unknown as ReviewDraft[]) out[r.prUrl] = { ...r };
   return out;
+}
+
+export interface ConversationSummaryRow {
+  sessionId: string;
+  status: ConversationSummary["status"];
+  basis: string;
+  about: string | null;
+  latest: string | null;
+  needs: string | null;
+  error: string | null;
+  requestedAt: string;
+  generatedAt: string | null;
+}
+
+export function conversationSummaries(): Map<string, ConversationSummaryRow> {
+  const rows = open()
+    .prepare("SELECT session_id AS sessionId, status, basis, about, latest, needs, error, requested_at AS requestedAt, generated_at AS generatedAt FROM conversation_summaries")
+    .all() as unknown as ConversationSummaryRow[];
+  return new Map(rows.map((r) => [r.sessionId, { ...r }]));
+}
+
+/**
+ * Marks a new draft in progress for the run's current basis, and returns true when it took it.
+ * It takes a run whose basis changed, unless a draft runs; and a draft that failed or stuck before
+ * `retryBefore`. The old texts stay until the new draft is done.
+ */
+export function claimConversationSummary(sessionId: string, basis: string, retryBefore: string, now = new Date()): boolean {
+  return !!open()
+    .prepare(
+      `INSERT INTO conversation_summaries (session_id, status, basis, requested_at) VALUES (?, 'in_progress', ?, ?)
+       ON CONFLICT (session_id) DO UPDATE SET status = 'in_progress', basis = excluded.basis, error = NULL, requested_at = excluded.requested_at
+       WHERE (conversation_summaries.basis != excluded.basis AND conversation_summaries.status != 'in_progress')
+          OR (conversation_summaries.status != 'done' AND conversation_summaries.requested_at < ?)
+       RETURNING session_id`,
+    )
+    .get(sessionId, basis, now.toISOString(), retryBefore);
+}
+
+/** Saves a finished draft. A failed one keeps the old texts. False when another draft took the row since. */
+export function finishConversationSummary(sessionId: string, basis: string, result: { about: string; latest: string; needs: string } | { error: string }, now = new Date()): boolean {
+  const d = open();
+  if ("error" in result) return d.prepare("UPDATE conversation_summaries SET status = 'failed', error = ? WHERE session_id = ? AND basis = ? AND status = 'in_progress'").run(result.error, sessionId, basis).changes > 0;
+  return (
+    d
+      .prepare("UPDATE conversation_summaries SET status = 'done', about = ?, latest = ?, needs = ?, error = NULL, generated_at = ? WHERE session_id = ? AND basis = ? AND status = 'in_progress'")
+      .run(result.about, result.latest, result.needs, now.toISOString(), sessionId, basis).changes > 0
+  );
 }

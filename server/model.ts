@@ -228,6 +228,7 @@ export function buildDashboard(input: ModelInput): Dashboard {
     diagrams: [],
     sdlcEvents: {},
     reviewDrafts: {},
+    conversationSummaries: {},
     reviewRequests: {},
     sources: input.sources,
     extensionInstalled: input.extensionInstalled,

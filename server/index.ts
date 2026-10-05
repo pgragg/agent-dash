@@ -24,6 +24,7 @@ import * as sdlcRoute from "./routes/sdlc.ts";
 import * as smoketestPlanRoute from "./routes/smoketestPlan.ts";
 import * as reviewRoute from "./routes/reviewRequests.ts";
 import { confirmDeployMessage, deployStageOf, parseEnvironment, planMessage } from "../shared/sdlc.ts";
+import { requestConversationSummaries, summariesFor } from "./conversationSummaries.ts";
 import { syncDiagrams } from "./diagramSync.ts";
 import { fetchMyPrs } from "./sources/github.ts";
 import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
@@ -144,6 +145,10 @@ async function dashboard(force: boolean) {
   d.reviewDrafts = summaryDb.reviewDrafts();
   d.reviewRequests = summaryDb.reviewRequestsByPr();
   redraftAfterNewEvents([...d.myTickets, ...d.otherTickets], broadcast);
+  // Each live agent card opens on its summary, so draft it before Piper looks.
+  const boardRuns = [...d.myTickets, ...d.otherTickets].flatMap((g) => g.runs).concat(d.unlinkedRuns);
+  requestConversationSummaries(boardRuns.filter((r) => r.status !== "finished"), (id) => sessions.fileFor(id), broadcast);
+  d.conversationSummaries = summariesFor(boardRuns);
   return d;
 }
 
@@ -237,6 +242,15 @@ const server = createServer(async (req, res) => {
     if (url.pathname === "/api/dashboard") {
       const body = JSON.stringify(await dashboard(url.searchParams.has("refresh")));
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(body);
+    } else if (url.pathname === "/api/conversation-summaries" && req.method === "POST") {
+      // A finished run's summary, drafted when its page opens. It starts a paid model run, so the guard.
+      if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
+      const id = url.searchParams.get("session") ?? "";
+      const d = await dashboard(false);
+      const r = [...d.myTickets, ...d.otherTickets].flatMap((g) => g.runs).concat(d.unlinkedRuns).find((x) => x.sessionId === id);
+      if (!r) return void res.writeHead(404, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "no such run on the board" }));
+      const started = requestConversationSummaries([r], (s) => sessions.fileFor(s), broadcast);
+      res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ started }));
     } else if (url.pathname === "/api/summaries" && req.method === "POST") {
       // Same CSRF guard as /api/focus: this endpoint starts a paid model run.
       if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();

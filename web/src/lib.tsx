@@ -208,6 +208,8 @@ const FOCUS_ERRORS: Record<string, string> = {
 
 export const api = {
   focusTab: (sessionId: string) => post(`/api/focus?session=${encodeURIComponent(sessionId)}`),
+  /** Drafts a finished run's short summary, if it has none or an old one. */
+  summarizeConversation: (sessionId: string) => post(`/api/conversation-summaries?session=${encodeURIComponent(sessionId)}`),
   summarize: (ticket: string, force: boolean) => post(`/api/summaries?ticket=${encodeURIComponent(ticket)}${force ? "&force" : ""}`),
   /** A steer goes in after the current tool calls; a plain reply waits until the agent finishes. */
   reply: (sessionId: string, text: string, steer = false) => post(`/api/reply?session=${encodeURIComponent(sessionId)}`, { text, steer }),

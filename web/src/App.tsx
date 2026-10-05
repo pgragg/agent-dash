@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { splitSummary } from "../../shared/nextSteps.ts";
 import { prRef } from "../../shared/refs.ts";
-import type { Action, ActionKind, AttentionItem, AttentionKind, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState } from "../../shared/types.ts";
+import type { Action, ActionKind, AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState } from "../../shared/types.ts";
 import { conversationHash, launchAgent, ResumeHere, resuming } from "./agents.tsx";
 import { filterHistory, groupByDay } from "./history.ts";
 import { PrPanel, PrVerbButton } from "./prPanel.tsx";
@@ -16,6 +16,7 @@ import { rowKey } from "./rowNav.ts";
 import { ReviewRequest, useReviewDrafts } from "./reviewRequest.tsx";
 import { SdlcBar, Smoketests } from "./sdlc.tsx";
 import { Chat, useLoad } from "./chat.tsx";
+import { ConversationGist } from "./gist.tsx";
 import { SlackQuotes } from "./slackQuotes.tsx";
 import { DueDateVerb, TicketPanel } from "./ticketPanel.tsx";
 import { DiagramCards, DiagramsView, DiagramView } from "./diagrams.tsx";
@@ -637,9 +638,12 @@ function ThreadButtons({ ticket, run, onError, className = "btn ghost" }: { tick
   );
 }
 
-function AgentCard({ run, now, onError, focusSignal, primary, ticket }: { run: Run; now: number; onError: (m: string | null) => void; focusSignal: number; primary: boolean; ticket?: string }) {
+function AgentCard({ run, now, onError, focusSignal, primary, ticket, summary }: { run: Run; now: number; onError: (m: string | null) => void; focusSignal: number; primary: boolean; ticket?: string; summary?: ConversationSummary }) {
   const [expanded, setExpanded] = useState(false);
   const [chat, setChat] = useState(false);
+  // The card opens on its summary; a click shows the last message and the chat under it.
+  const [detailsChoice, setDetails] = useState<boolean | null>(null);
+  const details = detailsChoice ?? !summary?.about;
   const long = run.lastMessage.length > 900;
   return (
     <section className={`card agent tone-border-${runTone(run)}`} id={`r:${run.sessionId}`}>
@@ -655,11 +659,12 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket }: { run: R
         {ticket && <ThreadButtons ticket={ticket} run={run} onError={onError} />}
         <OpenTab run={run} onError={onError} hotkey={primary} />
       </header>
+      <ConversationGist run={run} summary={summary} now={now} open={details} onToggle={() => setDetails(!details)} />
       <LivePanel run={run} now={now} onError={onError} />
       {/* The whole chat ends with the last message, so it replaces it. */}
       {/* A working agent writes its log on every tool call; reload on a new prompt or when it stops, not on each write. */}
-      {chat && <Chat sessionId={run.sessionId} refreshKey={run.status === "working" ? run.userMessageCount : run.lastActivityAt + run.status} />}
-      {!chat && run.lastMessage && (
+      {details && chat && <Chat sessionId={run.sessionId} refreshKey={run.status === "working" ? run.userMessageCount : run.lastActivityAt + run.status} />}
+      {details && !chat && run.lastMessage && (
         <div className={`agent-message ${long && !expanded ? "clamped" : ""}`}>
           <SessionScope sessionId={run.sessionId}>
             <Markdown text={run.lastMessage} />
@@ -671,7 +676,11 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket }: { run: R
           )}
         </div>
       )}
-      <button className="btn ghost small chat-toggle" aria-expanded={chat} onClick={() => setChat(!chat)}>{chat ? "Show only the last message" : "Show the conversation"}</button>
+      {details && (
+        <button className="btn ghost small chat-toggle" aria-expanded={chat} onClick={() => setChat(!chat)}>
+          {chat ? "Show only the last message" : "Show the conversation"}
+        </button>
+      )}
       {run.status !== "finished" && <Composer run={run} onError={onError} focusSignal={primary ? focusSignal : 0} />}
     </section>
   );
@@ -983,7 +992,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
         <div className="stack">
           <h2 className="section-title">{live.length ? (live.length === 1 ? "Agent" : `Agents · ${live.length}`) : "Last run"}</h2>
           {featured.map((r) => (
-            <AgentCard key={r.sessionId} run={r} now={now} onError={setError} focusSignal={focusSignal} primary={r.sessionId === primary?.sessionId} ticket={s.ticket?.ticket.key} />
+            <AgentCard key={r.sessionId} run={r} now={now} onError={setError} focusSignal={focusSignal} primary={r.sessionId === primary?.sessionId} ticket={s.ticket?.ticket.key} summary={data.conversationSummaries[r.sessionId]} />
           ))}
         </div>
       )}
@@ -1467,6 +1476,7 @@ function ConversationView({ sessionId, data, now }: { sessionId: string; data: D
           <DiagramCards diagrams={diagrams} now={now} showTicket />
         </div>
       )}
+      {run && <ConversationGist run={run} summary={data.conversationSummaries[sessionId]} now={now} />}
       {run && <Chat sessionId={sessionId} refreshKey={run.lastActivityAt + run.status} />}
       {!run && old.value && <Chat sessionId={sessionId} refreshKey="old" />}
       {run && <LivePanel run={run} now={now} onError={setError} working="The agent is working…" />}
