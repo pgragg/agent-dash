@@ -9,6 +9,7 @@ import { ciTag } from "./prView.ts";
 import { countPrs, groupOpenPrs } from "./prs.ts";
 import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, resumeCommand, runTitle, shortDate, stamp, useDashboard, useFlash, useNow, useWaitNotifications } from "./lib.tsx";
 import { Composer, LivePanel } from "./liveControl.tsx";
+import { needStep } from "./needs.ts";
 import { href, humanAge, parseHash, resolveBoardRef, type Route } from "./routes.ts";
 import { FixLogin } from "./fixLogin.tsx";
 import { rowKey } from "./rowNav.ts";
@@ -1044,6 +1045,86 @@ function ActionsView({ data, now, focus }: { data: Dashboard; now: number; focus
   );
 }
 
+// ---- Needs you view ---------------------------------------------------------------
+
+/** The first step of the ticket's newest finished next-steps draft. */
+function firstStep(data: Dashboard, s: Subject): NextStep | null {
+  const state = s.ticket ? data.summaries[s.ticket.ticket.key] : undefined;
+  const shown = state?.latest.status === "done" ? state.latest : state?.lastDone;
+  return shown?.steps[0] ?? null;
+}
+
+/** The entries behind "N things need you", in queue order: what each is, its ticket, and where to act in agent-dash. */
+function NeedsView({ queue, hidden, data, now }: { queue: Subject[]; hidden: number; data: Dashboard; now: number }) {
+  return (
+    <article className="workspace">
+      <header className="ws-head">
+        <h1>{queue.length ? `${plural(queue.length, "thing")} need you` : "Nothing needs you"}</h1>
+        <div className="ws-meta">
+          <span className="meta">
+            Most urgent first, as in the queue{hidden > 0 && ` · ${hidden} done for now, not shown`}
+          </span>
+        </div>
+      </header>
+      {queue.length === 0 ? (
+        <div className="zero big">Nothing needs you. The agents at work and the PRs out for review are on the board.</div>
+      ) : (
+        <div className="card flush">
+          <ol className="actions">
+            {queue.map((s, i) => {
+              const item = lead(s)!;
+              const step = firstStep(data, s);
+              const next = needStep(item, step, s.id);
+              const tone = KIND[item.kind].tone;
+              return (
+                <li key={s.id} className="action need" id={`need:${s.id}`}>
+                  <span className="q-rank">{i + 1}</span>
+                  <Dot tone={tone} />
+                  <div className="action-body">
+                    <div className="action-summary">
+                      <b className={`tone-text-${tone}`}>{KIND[item.kind].title}</b> · {inline(item.reason)}
+                    </div>
+                    <div className="action-meta">
+                      {s.ticket ? (
+                        <a className="key-link" href={href(`t:${s.ticket.ticket.key}`)} title="Open the ticket on the board">
+                          {s.ticket.ticket.key}
+                        </a>
+                      ) : (
+                        <span className="meta">no ticket</span>
+                      )}
+                      <span className="meta action-ticket">{subjectTitle(s)}</span>
+                      {otherKinds(s).map((k) => (
+                        <span key={k} className={`tag tone-${KIND[k].tone}`}>
+                          {SHORT[k]}
+                        </span>
+                      ))}
+                    </div>
+                    {step && next.ref !== `step:${step.id}` && (
+                      <div className="action-meta need-step">
+                        <span className="meta">Drafted next step:</span>
+                        <a href={href(`step:${step.id}`)} className="need-step-body">
+                          {inline(step.body)}
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                  <span className="meta action-age" title={stamp(item.updatedAt)}>
+                    {age(item.updatedAt, now)} ago
+                  </span>
+                  <PrVerbButton item={item} data={data} />
+                  <a className="btn small primary" href={href(next.ref)}>
+                    {next.label} →
+                  </a>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      )}
+    </article>
+  );
+}
+
 // ---- History view -------------------------------------------------------------------
 
 /** Rows rendered at first. A year of chats is about a thousand rows, which is slow to render at once. */
@@ -1493,13 +1574,15 @@ export function App() {
           </nav>
         </div>
         <div className="headline">
-          {queue.length ? (
-            <>
-              <b>{plural(queue.length, "thing")}</b> need you
-            </>
-          ) : (
-            <b>Nothing needs you</b>
-          )}
+          <a href="#/needs" className={`needs-link ${view === "needs" ? "active" : ""}`} title="See what needs you, and where to act on each">
+            {queue.length ? (
+              <>
+                <b>{plural(queue.length, "thing")}</b> need you
+              </>
+            ) : (
+              <b>Nothing needs you</b>
+            )}
+          </a>
           <span className="sep">·</span>
           <span>
             <Dot tone="waiting" /> {waitingRuns} waiting
@@ -1524,7 +1607,11 @@ export function App() {
         </button>
       </header>
 
-      {route.view === "actions" ? (
+      {route.view === "needs" ? (
+        <main className="main">
+          <NeedsView queue={queue} hidden={done.length} data={data} now={now} />
+        </main>
+      ) : route.view === "actions" ? (
         <main className="main">
           <ActionsView data={data} now={now} focus={route.action} />
         </main>
