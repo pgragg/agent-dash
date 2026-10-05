@@ -247,8 +247,8 @@ export async function requestSummary(input: SummaryInput, opts: { force?: boolea
 }
 
 /**
- * Starts a new draft for each ticket that got a smoketest or deploy since the last call, because
- * the event moves the ticket along the SDLC and the old next steps no longer fit. A ticket that is
+ * Starts a new draft for each ticket that got a new or changed smoketest or deploy since the last
+ * call, because the event moves the ticket along the SDLC and the old next steps no longer fit. A ticket that is
  * not in `groups` gets no draft: there is nothing to draft from, and keeping it pending would
  * start a dashboard load on each database write.
  */
@@ -259,7 +259,7 @@ export function redraftAfterNewEvents(groups: SummaryInput[], onChange?: () => v
     const newest = claimed.get(g.ticket.key);
     if (!newest) continue;
     const current = db.latestForTicket(g.ticket.key);
-    // A run that started before the event cannot see it.
+    // A run that started before the event was made or changed cannot see it.
     const force = current?.status === "in_progress" && current.requestedAt < newest;
     start(g, { force, onChange }).catch((err: Error) => console.error(`agent-dash: redraft of ${g.ticket.key} failed: ${err.message}`));
     started.push(g.ticket.key);
