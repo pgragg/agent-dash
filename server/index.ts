@@ -27,6 +27,7 @@ import { confirmDeployMessage, deployStageOf, parseEnvironment, planMessage } fr
 import { syncDiagrams } from "./diagramSync.ts";
 import { fetchMyPrs } from "./sources/github.ts";
 import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
+import { isLocalKey, readLocalTickets } from "./sources/localTickets.ts";
 import { SessionIndex, transcriptTurns } from "./sources/sessions.ts";
 import { isAlive, readReportedStatuses } from "./sources/status.ts";
 import * as summaryDb from "./summaries/db.ts";
@@ -85,7 +86,7 @@ let othersHealth: SourceHealth = { ok: true };
 async function dashboard(force: boolean) {
   const now = Date.now();
   let sessionsHealth: SourceHealth = { ok: true, fetchedAt: new Date(now).toISOString() };
-  const [parsed, reported, mine, pulls] = await Promise.all([
+  const [scanned, reported, jiraMine, rawPulls] = await Promise.all([
     sessions.scan().catch((err: Error) => {
       sessionsHealth = { ok: false, error: err.message };
       return [];
@@ -95,8 +96,17 @@ async function dashboard(force: boolean) {
     prs.get(force),
   ]);
 
+  // agent-dash's own tickets are local files, so they are read again on each build and never asked of Jira.
+  const local = new Map(readLocalTickets(config.localTicketsDir, config.port).map((t) => [t.key, t]));
+  // Keys match in any case, so a name such as /tmp/ad-7791.log reads as a key. With no file, it is not a ticket.
+  const real = (k: string) => !isLocalKey(k) || local.has(k);
+  const parsed = scanned.map((s) => (s.tickets.every(real) ? s : { ...s, tickets: s.tickets.filter(real) }));
+  const pulls = rawPulls.map((p) => (p.tickets.every(real) ? p : { ...p, tickets: p.tickets.filter(real) }));
+  const mine = [...jiraMine, ...[...local.values()].filter((t) => t.statusCategory !== "done")];
+  const otherKeys = otherTicketKeys(parsed, pulls, new Set(mine.map((t) => t.key)), now, config.recentDays);
+  const otherLocal = otherKeys.flatMap((k) => local.get(k) ?? []);
   // Tickets outside my open list are looked up once and kept; their summaries rarely change.
-  const missing = otherTicketKeys(parsed, pulls, new Set(mine.map((t) => t.key)), now, config.recentDays).filter((k) => force || !others.has(k));
+  const missing = otherKeys.filter((k) => !isLocalKey(k) && (force || !others.has(k)));
   if (missing.length) {
     try {
       for (const t of await fetchTickets(missing)) others.set(t.key, t);
@@ -119,7 +129,7 @@ async function dashboard(force: boolean) {
     sessions: parsed,
     reported,
     myTickets: mine,
-    otherTickets: [...others.values()],
+    otherTickets: [...others.values(), ...otherLocal],
     prs: pulls,
     now,
     recentDays: config.recentDays,

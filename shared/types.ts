@@ -168,6 +168,8 @@ export interface Ticket {
   dueDate: string | null;
   updatedAt: string;
   assignedToMe: boolean;
+  /** Set on a local agent-dash ticket (`AD-<n>`): the markdown file that is the ticket. */
+  file?: string;
 }
 
 export type AttentionKind =

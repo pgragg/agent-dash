@@ -160,7 +160,7 @@ export function TicketPanel({ ticket, cwd, onError }: { ticket: Ticket; cwd: str
             Reload
           </button>
         )}
-        <a className="btn ghost small" href={ticket.url} target="_blank" rel="noreferrer" title="Open in Jira">
+        <a className="btn ghost small" href={ticket.url} target="_blank" rel="noreferrer" title={ticket.file ? "Open the ticket file" : "Open in Jira"}>
           ↗
         </a>
       </header>
@@ -196,11 +196,17 @@ export function TicketPanel({ ticket, cwd, onError }: { ticket: Ticket; cwd: str
               ))}
             </ol>
           )}
-          <div className="verbs">
-            <MoveVerb ticket={ticket} detail={detail} cwd={cwd} onError={onError} />
-            <DueDateVerb ticket={{ ...ticket, dueDate: detail.dueDate }} onError={onError} onSet={reload} />
-          </div>
-          <p className="meta">Move to starts an agent in {cwd} that makes that one change with the jira-tickets skill. Set due date changes Jira at once.</p>
+          {ticket.file ? (
+            <p className="meta">A local ticket: {ticket.file}. Move the file to another status folder to change its status.</p>
+          ) : (
+            <>
+              <div className="verbs">
+                <MoveVerb ticket={ticket} detail={detail} cwd={cwd} onError={onError} />
+                <DueDateVerb ticket={{ ...ticket, dueDate: detail.dueDate }} onError={onError} onSet={reload} />
+              </div>
+              <p className="meta">Move to starts an agent in {cwd} that makes that one change with the jira-tickets skill. Set due date changes Jira at once.</p>
+            </>
+          )}
         </>
       )}
     </section>

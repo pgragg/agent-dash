@@ -913,7 +913,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
         <h1>{subjectTitle(s)}</h1>
         <div className="ws-meta">
           {t && (
-            <a className="key-link" href={t.url} target="_blank" rel="noreferrer" title="Open in Jira">
+            <a className="key-link" href={t.url} target="_blank" rel="noreferrer" title={t.file ? "Open the ticket file" : "Open in Jira"}>
               {t.key} ↗
             </a>
           )}
@@ -1048,7 +1048,7 @@ function PrsView({ data, now }: { data: Dashboard; now: number }) {
             <header className="pr-group-head">
               {t ? (
                 <>
-                  <a className="key-link" href={t.url} target="_blank" rel="noreferrer" title="Open in Jira">
+                  <a className="key-link" href={t.url} target="_blank" rel="noreferrer" title={t.file ? "Open the ticket file" : "Open in Jira"}>
                     {t.key} ↗
                   </a>
                   {data.starred.includes(t.key) && (

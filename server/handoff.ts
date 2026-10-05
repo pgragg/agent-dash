@@ -70,7 +70,7 @@ export function buildHandoff({ group, notes, summary, events = [], now }: Handof
     "Treat it as background: Piper's message after this context says what to do. Notes are Piper's own and the most trusted source.",
     "",
     `# ${t.key}: ${t.summary}`,
-    `- Jira: ${t.url}`,
+    t.file ? `- Ticket file: ${t.file}` : `- Jira: ${t.url}`,
     `- Status: ${t.status} · Priority: ${t.priority ?? "-"} · Due: ${t.dueDate ?? "-"}`,
     "",
     "## Piper's notes (oldest first)",
