@@ -93,6 +93,19 @@ test("sync stores each diagram once with its conversation and ticket, reads embe
   assert.deepEqual([...new Set(db.listDiagrams().filter((d) => d.sessionId === "sync-1").map((d) => d.ticket))], ["FSDK-10"]);
 });
 
+test("a newer write of a file replaces the diagrams of its older writes", async () => {
+  const write = (id: string, content: string) => ({ type: "message", message: { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id, name: "write", arguments: { path: "/r/notes.md", content } }] } });
+  const lines = [header("rewrite-1", "/repo"), user("FSDK-11 draw it"), write("w1", fence("graph LR\n A -- --bad --> B")), reply(`Also:\n${fence("graph TD\n R-->S")}`)];
+  await syncDiagrams([parseSession(jsonl(...lines), "/f", new Date(), PATTERN)!], () => "FSDK-11");
+  lines.push(write("w2", fence("graph LR\n A --> B")));
+  await syncDiagrams([parseSession(jsonl(...lines), "/f", new Date(), PATTERN)!], () => "FSDK-11");
+  const rows = db.listDiagrams().filter((d) => d.sessionId === "rewrite-1");
+  assert.deepEqual(rows.map((d) => [d.origin, d.hash]).sort(), [
+    ["/r/notes.md", sha1("graph LR\n A --> B")],
+    ["reply", sha1("graph TD\n R-->S")],
+  ]);
+});
+
 test("the routes serve a diagram on its own, and its file with a policy that runs no script", async () => {
   mkdirSync(join(tmp, "sessions", "p"), { recursive: true });
   writeFileSync(join(tmp, "sessions", "p", "s.jsonl"), jsonl(header("live-session", "/repo"), name("Draw the flow"), user("draw"), reply("ok")));
