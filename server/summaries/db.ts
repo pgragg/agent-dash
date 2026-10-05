@@ -330,7 +330,7 @@ export function listDiagrams(): Diagram[] {
   return (open().prepare(`SELECT ${DIAGRAM_COLUMNS} FROM diagrams ORDER BY created_at DESC, id DESC`).all() as unknown as Diagram[]).map((r) => ({ ...r }));
 }
 
-/** Without `raw`, a raster image's base64 stays in the database: the page loads it as a file. */
+/** Without `raw`, raster base64 stays put: the page loads the image as a file. */
 export function getDiagram(id: number, raw = false): (Diagram & { source: string | null }) | null {
   const source = raw ? "source" : "CASE WHEN kind IN ('mermaid', 'svg') THEN source END AS source";
   const row = open().prepare(`SELECT ${DIAGRAM_COLUMNS}, ${source} FROM diagrams WHERE id = ?`).get(id) as unknown as (Diagram & { source: string | null }) | undefined;

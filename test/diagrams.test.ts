@@ -118,7 +118,7 @@ test("the routes serve a diagram on its own, and its file with a policy that run
   assert.match(raw.headers.get("content-security-policy") ?? "", /default-src 'none'.*sandbox/);
   assert.equal((await fetch(`${base}/api/diagram?id=99999`)).status, 404);
 
-  // A conversation from the last scan is named; a raster file comes back as its bytes.
+  // The last scan names the conversation; a raster comes back as bytes.
   const pngId = db.listDiagrams().find((d) => d.sessionId === "live-session")!.id;
   assert.equal((await (await fetch(`${base}/api/diagram?id=${pngId}`)).json()).conversation.title, "Draw the flow");
   const png = await fetch(`${base}/api/diagram/raw?id=${pngId}`);
