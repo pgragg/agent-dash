@@ -395,10 +395,14 @@ function RecordForm({ ticket, onError, onDone }: { ticket: string; onError: (m: 
   );
 }
 
-/** The first prose line of a markdown text: no heading, no list or quote marker, no emphasis. */
+/**
+ * The first prose line of a markdown text: no heading, no list or quote marker, no emphasis. Only
+ * rows from before summaries use it, and their first line can be a whole paragraph, so it is cut.
+ */
 function firstLine(md: string | null): string | null {
   const line = md?.split("\n").find((l) => l.trim() && !/^\s*(#|```|---|\|)/.test(l));
-  return line?.replace(/^[>*\-\s\d.]+/, "").replace(/[*_`]/g, "") || null;
+  const text = line?.replace(/^[>*\-\s\d.]+/, "").replace(/[*_`]/g, "") ?? "";
+  return text.length > 300 ? `${text.slice(0, 300)}…` : text || null;
 }
 
 /** The one line on a finished smoketest's collapsed row. Rows from before summaries show the first line of their results. */
