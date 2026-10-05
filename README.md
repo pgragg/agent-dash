@@ -153,7 +153,7 @@ node scripts/sdlc-event.ts smoketest --ticket ABC-123 --env localhost \
 node scripts/sdlc-event.ts deploy --ticket ABC-123 --env postman_beta --details "<Argo app>: Synced, Healthy, 1.2.3"
 # A smoketest that agent-dash started: record the plan on its plan event. "none" accepts it at
 # once and prints how to run it; a state changes file makes it wait for Piper's Confirm.
-# --summary is required; --writes-summary is required with state changes.
+# --summary is required; --writes-summary is required with state changes, and refused with none. Each is at most 500 characters.
 node scripts/sdlc-event.ts plan --id 11 --summary "Publish a docs site locally and load it" --plan-file plan.md --state-changes none
 node scripts/sdlc-event.ts plan --id 11 --summary "Publish a docs site on Beta and load it" \
   --writes-summary "Postman Beta: create one test project, then delete it" --plan-file plan.md --state-changes-file writes.md

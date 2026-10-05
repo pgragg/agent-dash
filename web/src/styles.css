@@ -590,7 +590,7 @@ a.btn.verb { text-decoration: none; }
 /* A plan that waits for Piper: its approval is the point, so the row stands out. */
 .plan-row.open { padding: 10px 12px; border-radius: 12px; border-left: 3px solid var(--warn); background: var(--hover); }
 .plan-summary { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; }
-.plan-section { padding: 8px 10px; border-radius: 8px; background: var(--bg); font-size: 13px; }
+.plan-section { padding: 8px 10px; border-radius: 8px; background: var(--surface); font-size: 13px; }
 .plan-section > b { display: block; margin-bottom: 2px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 .plan-section > p { margin: 0; }
 .plan-changes { background: var(--warn-bg); }

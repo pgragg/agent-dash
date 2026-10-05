@@ -9,6 +9,8 @@ const OUTCOMES: SmoketestOutcome[] = ["passed", "failed", "blocked"];
 const TEXT_MAX = 20_000;
 /** The summary is one line on the collapsed row; the details and results hold the rest. */
 const SUMMARY_MAX = 200;
+/** A plan's two summaries sit above the plan; the files hold the rest. */
+const PLAN_SUMMARY_MAX = 500;
 
 export interface SdlcEventInput {
   eventType?: unknown;
@@ -88,11 +90,15 @@ export function validateSdlcPlan(input: { plan?: unknown; stateChanges?: unknown
   const changes = text(input.stateChanges, "stateChanges");
   if (changes === null && input.stateChanges === undefined) throw new Error("say which Beta or Prod state the test changes, or none");
   const stateChanges = changes && changes.toLowerCase() !== "none" ? changes : null;
-  // Piper reads these two first, and decides on Confirm from them.
+  // Piper reads these two first, and decides on Confirm from them, so they must stay short.
   const summary = text(input.summary, "summary");
   if (!summary) throw new Error("add --summary: a very short summary of the plan, one or two sentences");
-  const writesSummary = stateChanges ? text(input.writesSummary, "writesSummary") : null;
+  if (summary.length > PLAN_SUMMARY_MAX) throw new Error(`--summary is longer than ${PLAN_SUMMARY_MAX} characters: the plan file holds the details`);
+  const writesSummary = text(input.writesSummary, "writesSummary");
+  // Writes named with "none" would skip Piper's Confirm.
+  if (!stateChanges && writesSummary) throw new Error("--writes-summary names writes, but --state-changes is none: list the state changes in --state-changes-file, or drop --writes-summary");
   if (stateChanges && !writesSummary) throw new Error('add --writes-summary: a short summary of the state changes, per environment, for example "Postman Beta: create one test project, then delete it"');
+  if (writesSummary && writesSummary.length > PLAN_SUMMARY_MAX) throw new Error(`--writes-summary is longer than ${PLAN_SUMMARY_MAX} characters: the state changes file holds the details`);
   return { plan, stateChanges, plannedAt: now.toISOString(), summary, writesSummary };
 }
 

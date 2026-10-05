@@ -463,8 +463,9 @@ test("the plan text and the state changes are checked; none means no state chang
   // Piper reads the summaries first, so a plan without them is refused.
   assert.throws(() => validateSdlcPlan({ plan: "x", stateChanges: "none" }), /--summary/);
   assert.throws(() => validateSdlcPlan({ plan: "x", stateChanges: "POST /a on Beta", ...s }), /--writes-summary/);
-  // With no state changes there is nothing to summarise.
-  assert.equal(validateSdlcPlan({ plan: "x", stateChanges: "none", writesSummary: "y", ...s }).writesSummary, null);
+  // Writes named with "none" would skip the Confirm.
+  assert.throws(() => validateSdlcPlan({ plan: "x", stateChanges: "none", writesSummary: "Postman Beta: one project", ...s }), /--state-changes is none/);
+  assert.throws(() => validateSdlcPlan({ plan: "x", stateChanges: "none", summary: "y".repeat(501) }), /longer than 500/);
 });
 
 test("the agent records its plan with the script: no state changes runs at once, with the plan's session; others wait", () => {
@@ -488,7 +489,7 @@ test("the agent records its plan with the script: no state changes runs at once,
   assert.equal(db.sdlcEventsByTicket()["FSDK-73"].filter((e) => e.eventType === "smoketest_execution").length, 0);
   // No state changes named at all is refused, and so is a plan that is already accepted.
   assert.throws(() => execFileSync("node", [script, "plan", "--id", String(beta.id), "--plan-file", planFile], { env, stdio: "pipe" }));
-  assert.throws(() => execFileSync("node", [script, "plan", "--id", String(local.id), "--plan-file", planFile, "--state-changes", "none"], { env, stdio: "pipe" }));
+  assert.throws(() => execFileSync("node", [script, "plan", "--id", String(local.id), "--summary", "x", "--plan-file", planFile, "--state-changes", "none"], { env, stdio: "pipe" }), /a confirmed plan cannot change/);
 });
 
 test("a deleted plan leaves its run, without the link", () => {
