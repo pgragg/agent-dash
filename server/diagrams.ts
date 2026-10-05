@@ -30,7 +30,7 @@ export interface FoundFile {
 export type Found = FoundText | FoundFile;
 
 /** A diagram or image bigger than this is more likely a mistake than a chart. */
-const MAX_TEXT = 200_000;
+export const MAX_TEXT = 200_000;
 const MAX_IMAGE = 5_000_000;
 
 export const sha1 = (data: string | Buffer) => createHash("sha1").update(data).digest("hex");

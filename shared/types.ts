@@ -284,11 +284,15 @@ export interface Diagram {
   hash: string;
   /** When the agent wrote it. */
   createdAt: string;
+  /** When you last changed its title or source. */
+  editedAt: string | null;
 }
 
 /** A diagram with its text. Null for a raster image, which `/api/diagram/raw` serves. */
 export interface DiagramWithSource extends Diagram {
   source: string | null;
+  /** Set when you deleted it: it is off the board and the list, and its page can restore it. */
+  deletedAt: string | null;
   /** The conversation, from the log. Null when its log is gone. */
   conversation: { title: string; cwd: string; startedAt: string; lastActivityAt: string } | null;
 }

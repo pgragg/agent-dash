@@ -197,7 +197,7 @@ const server = createServer(async (req, res) => {
     if (await liveControl.handle(req, res, url)) return;
     if (await prRoute.handle(req, res, url)) return;
     if (await ticketRoute.handle(req, res, url)) return;
-    if (await diagramRoute.handle(req, res, url, sessions)) return;
+    if (await diagramRoute.handle(req, res, url, sessions, broadcast)) return;
     if (await loginRoute.handle(req, res, url)) return;
     if (await slackRoute.handle(req, res, url)) return;
     if (url.pathname === "/api/dashboard") {

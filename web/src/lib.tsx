@@ -246,6 +246,13 @@ export const api = {
     if (!res.ok) throw new Error(json.error ?? `could not load the diagram (${res.status})`);
     return json;
   },
+  /** Fixes an agent's mistake: a new title or source, or `deleted` to take it off the board (false restores it). */
+  editDiagram: async (id: number, change: { title?: string; source?: string; deleted?: boolean }): Promise<DiagramWithSource> => {
+    const res = await fetch(`/api/diagram?id=${id}`, { method: "POST", headers: { "X-Agent-Dash": "1", "Content-Type": "application/json" }, body: JSON.stringify(change) });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error ?? `could not save the diagram (${res.status})`);
+    return json;
+  },
   transcript: async (sessionId: string): Promise<Transcript> => {
     const res = await fetch(`/api/transcript?session=${encodeURIComponent(sessionId)}`);
     if (!res.ok) throw new Error(`could not load the chat (${res.status})`);
