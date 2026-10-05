@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { RunStatus } from "../../shared/types.ts";
+import type { RunActivity, RunDialog, RunStatus } from "../../shared/types.ts";
 
 export interface ReportedStatus {
   sessionId: string;
@@ -13,6 +13,15 @@ export interface ReportedStatus {
   mode?: string;
   state: "working" | "awaiting_input" | "closed";
   since: string;
+  /** 2 and later: the extension reads *.steer and *.abort files, and reports activity and dialogs. */
+  version?: number;
+  activity?: RunActivity | null;
+  dialog?: RunDialog | null;
+}
+
+/** The extension of this session acts on Stop and Steer files. An older one reads only *.txt. */
+export function takesControls(s: ReportedStatus | undefined): boolean {
+  return Boolean(s?.inbox) && (s?.version ?? 1) >= 2;
 }
 
 export async function readReportedStatuses(dir: string): Promise<Map<string, ReportedStatus>> {
@@ -43,5 +52,7 @@ export function isAlive(pid: number): boolean {
 /** A killed pi process never writes "closed", so a dead pid also means finished. */
 export function resolveReported(s: ReportedStatus, alive: (pid: number) => boolean = isAlive): { status: RunStatus; since: string } {
   if (s.state === "closed" || !alive(s.pid)) return { status: "finished", since: s.since };
+  // An open dialog blocks the run until you answer it, so it waits for you.
+  if (s.dialog) return { status: "awaiting_input", since: s.dialog.since };
   return { status: s.state, since: s.since };
 }

@@ -192,7 +192,7 @@ export function useWaitNotifications(data: Dashboard | null) {
 }
 
 /** The custom header makes the browser send a CORS preflight, which the server never answers. */
-async function post(path: string, body?: unknown, method = "POST"): Promise<string | null> {
+export async function post(path: string, body?: unknown, method = "POST"): Promise<string | null> {
   const res = await fetch(path, { method, headers: { "X-Agent-Dash": "1", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
   if (res.ok) return null;
   const json = await res.json().catch(() => ({}));
@@ -207,7 +207,8 @@ const FOCUS_ERRORS: Record<string, string> = {
 export const api = {
   focusTab: (sessionId: string) => post(`/api/focus?session=${encodeURIComponent(sessionId)}`),
   summarize: (ticket: string, force: boolean) => post(`/api/summaries?ticket=${encodeURIComponent(ticket)}${force ? "&force" : ""}`),
-  reply: (sessionId: string, text: string) => post(`/api/reply?session=${encodeURIComponent(sessionId)}`, { text }),
+  /** A steer goes in after the current tool calls; a plain reply waits until the agent finishes. */
+  reply: (sessionId: string, text: string, steer = false) => post(`/api/reply?session=${encodeURIComponent(sessionId)}`, { text, steer }),
   addNote: (ticket: string, body: string) => post(`/api/notes?ticket=${encodeURIComponent(ticket)}`, { body }),
   deleteNote: (id: number) => post(`/api/notes?id=${id}`, undefined, "DELETE"),
   /** Starts a headless pi with the first message; resolves to its session id, or throws the reason. */

@@ -13,6 +13,7 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "test": "node --test 'test/**/*.test.ts'",
+    "exits": "node scripts/exits.ts",
     "install-extension": "node scripts/install-extension.ts"
   },
   "dependencies": {

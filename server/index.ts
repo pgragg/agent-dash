@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, renameSync, statSync, watch, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, statSync, watch, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
@@ -7,9 +7,13 @@ import type { Dashboard, PullRequest, SourceHealth, Ticket } from "../shared/typ
 import { actionCandidates, keepWhenDown, toActions } from "./actions.ts";
 import { config } from "./config.ts";
 import { startConversation } from "./conversations.ts";
-import { buildHandoff, stepMessage } from "./handoff.ts";
+import { recordExit, wroteRecently } from "./exits.ts";
 import { focusItermSession, piCommand, runInNewItermTab } from "./iterm.ts";
 import { buildDashboard, buildHistory, otherTicketKeys } from "./model.ts";
+import * as exitRoutes from "./routes/exits.ts";
+import { agentMessage, agentName, buildHandoff, stepMessage } from "./handoff.ts";
+import * as resumeRoute from "./routes/resume.ts";
+import * as liveControl from "./routes/liveControl.ts";
 import * as prRoute from "./routes/pr.ts";
 import { fetchMyPrs } from "./sources/github.ts";
 import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
@@ -138,7 +142,7 @@ watch(config.sessionsDir, { recursive: true }, broadcast);
 watch(config.statusDir, broadcast);
 // A summary run saves into SQLite from its own process; WAL writes touch agent-dash.db-wal.
 watch(dirname(summaryDb.DB_PATH), (_e, file) => {
-  if (file?.startsWith(basename(summaryDb.DB_PATH))) broadcast();
+  if (file?.startsWith(basename(summaryDb.DB_PATH)) && !wroteRecently()) broadcast();
 });
 // Time alone changes a status: a pid dies, or a wait crosses a threshold.
 setInterval(broadcast, 30_000).unref();
@@ -150,7 +154,10 @@ function readBody(req: IncomingMessage, max: number): Promise<string> {
     let body = "";
     req.on("data", (chunk) => {
       body += chunk;
-      if (body.length > max) reject(new Error("request body too large"));
+      if (body.length > max) {
+        reject(new Error("request body too large"));
+        req.destroy();
+      }
     });
     req.on("end", () => resolve(body));
     req.on("error", reject);
@@ -174,6 +181,9 @@ async function serveStatic(path: string, res: ServerResponse): Promise<void> {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   try {
+    if (await exitRoutes.handle(req, res, url)) return;
+    if (await resumeRoute.handle(req, res, url, sessions)) return;
+    if (await liveControl.handle(req, res, url)) return;
     if (await prRoute.handle(req, res, url)) return;
     if (url.pathname === "/api/dashboard") {
       const body = JSON.stringify(await dashboard(url.searchParams.has("refresh")));
@@ -215,7 +225,7 @@ const server = createServer(async (req, res) => {
       const context = buildHandoff({ group, notes: d.notes[key] ?? [], summary: d.summaries[key], now: new Date() });
       if (url.pathname === "/api/agents/context") return void res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8" }).end(context);
 
-      const body = JSON.parse((await readBody(req, 64_000)) || "{}") as { message?: string; step?: number; cwd?: string };
+      const body = JSON.parse((await readBody(req, 64_000)) || "{}") as { message?: string; step?: number; cwd?: string; terminal?: boolean };
       const cwd = body.cwd ?? homedir();
       // A step is read from the database, so the button starts the step that the page shows.
       const step = body.step === undefined ? null : summaryDb.getStep(Number(body.step));
@@ -229,10 +239,11 @@ const server = createServer(async (req, res) => {
       const base = join(config.handoffDir, `${key}-${stamp}`);
       mkdirSync(config.handoffDir, { recursive: true });
       writeFileSync(`${base}.md`, context);
+      const name = agentName(key, step?.body ?? message);
+      // Headless by default, so the page is where you talk to the agent.
+      if (!body.terminal) return json(201, { ok: true, contextFile: `${base}.md`, sessionId: startConversation({ cwd: dir, message: agentMessage(context, message), name }) });
       // A leading "-" would read as a pi option; the space keeps it a message.
       writeFileSync(`${base}.txt`, message.trim().startsWith("-") ? ` ${message.trim()}` : message.trim());
-      // The name carries the key, so the new run links to the ticket at once.
-      const name = `${key}: ${(step?.body.replace(/[*`]/g, "") ?? message).trim().split("\n")[0].slice(0, 60)}`;
       const command = piCommand(dir, name, `${base}.md`, `${base}.txt`);
       const out = await runInNewItermTab(command);
       if (out.result !== "ok") return json(500, { error: out.result === "not_authorized" ? "Allow it in System Settings → Privacy & Security → Automation → iTerm2." : (out.detail ?? "could not open iTerm") });
@@ -245,7 +256,7 @@ const server = createServer(async (req, res) => {
       if (!body.message?.trim()) return json(400, { error: "write the first message" });
       const dir = (body.cwd?.trim() || "~").replace(/^~(?=\/|$)/, homedir());
       if (!dir.startsWith("/") || !existsSync(dir) || !statSync(dir).isDirectory()) return json(400, { error: `not a folder: ${body.cwd}` });
-      json(201, { sessionId: startConversation(dir, body.message.trim()) });
+      json(201, { sessionId: startConversation({ cwd: dir, message: body.message.trim() }) });
     } else if (url.pathname === "/api/conversations/end" && req.method === "POST") {
       if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
       const status = (await readReportedStatuses(config.statusDir)).get(url.searchParams.get("session") ?? "");
@@ -265,23 +276,6 @@ const server = createServer(async (req, res) => {
       const change = summaryDb.setThreadStatus(ticket, session, status, reason?.trim() || null);
       broadcast();
       json(201, change);
-    } else if (url.pathname === "/api/reply" && req.method === "POST") {
-      if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
-      const sessionId = url.searchParams.get("session") ?? "";
-      const status = (await readReportedStatuses(config.statusDir)).get(sessionId);
-      // Deliver only to a live session whose extension watches the inbox; otherwise the text would sit unread.
-      if (!status?.inbox || status.state === "closed" || !isAlive(status.pid)) {
-        return void res.writeHead(409, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "this session cannot take replies; open its tab" }));
-      }
-      const { text } = JSON.parse((await readBody(req, 64_000)) || "{}") as { text?: string };
-      if (!text?.trim()) return void res.writeHead(400, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "empty reply" }));
-      const dir = join(config.inboxDir, sessionId);
-      mkdirSync(dir, { recursive: true });
-      const file = join(dir, `${Date.now()}-${process.pid}.txt`);
-      // The extension reads *.txt only, so the rename makes the reply appear whole.
-      writeFileSync(`${file}.tmp`, text.trim());
-      renameSync(`${file}.tmp`, file);
-      res.writeHead(202, { "Content-Type": "application/json" }).end(JSON.stringify({ ok: true }));
     } else if (url.pathname === "/api/focus" && req.method === "POST") {
       // A custom header forces a CORS preflight, which this server never answers,
       // so another web page cannot make the browser call this endpoint.
@@ -291,6 +285,7 @@ const server = createServer(async (req, res) => {
       const tab = (await readReportedStatuses(config.statusDir)).get(sessionId)?.itermSessionId;
       if (!tab) return void res.writeHead(404, { "Content-Type": "application/json" }).end(JSON.stringify({ result: "missing" }));
       const out = await focusItermSession(tab);
+      if (out.result === "ok") recordExit({ kind: "iterm_focus", host: "iterm", view: null, section: null, ticket: null });
       const code = out.result === "ok" ? 200 : out.result === "missing" ? 404 : 500;
       res.writeHead(code, { "Content-Type": "application/json" }).end(JSON.stringify(out));
     } else if (url.pathname === "/api/history") {
