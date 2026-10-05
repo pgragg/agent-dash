@@ -83,6 +83,22 @@ function SmoketestVerb({ ticket, env, cwd, onError }: { ticket: string; env: Sdl
   );
 }
 
+/** Records a smoketest that Piper chose not to run, so its stage counts as passed. */
+function SkipSmoketest({ ticket, env, onError }: { ticket: string; env: SdlcEnvironment; onError: (m: string | null) => void }) {
+  return (
+    <button
+      className="btn ghost small"
+      title={`Record that you skip the ${ENV_LABEL[env]} smoketest of ${ticket}. Delete it on the Smoketests card to undo.`}
+      onClick={async () => {
+        const now = new Date().toISOString();
+        onError(await post("/api/sdlc-events", { eventType: "smoketest", tickets: [ticket], environments: [env], startedAt: now, skippedAt: now }));
+      }}
+    >
+      Skip smoketest
+    </button>
+  );
+}
+
 const STATE_TEXT: Record<StageState, string> = { done: "done", failed: "failed", running: "running", waiting: "waiting", skipped: "skipped", todo: "to do" };
 
 /** Its card in the ticket view; its page until pi writes the log. */
@@ -110,6 +126,7 @@ function StageActions({ stage, group, cwd, onError }: { stage: Stage; group: Tic
         ) : (
           <SmoketestVerb ticket={key} env={env} cwd={cwd} onError={onError} />
         )}
+        {stage.state !== "done" && stage.state !== "skipped" && !agent && <SkipSmoketest ticket={key} env={env} onError={onError} />}
         {stage.events.length > 0 && (
           <a className="btn ghost small" href="#smoketests" onClick={(e) => (e.preventDefault(), document.getElementById("smoketests")?.scrollIntoView({ behavior: "smooth" }))}>
             See smoketests
@@ -137,15 +154,14 @@ function StageActions({ stage, group, cwd, onError }: { stage: Stage; group: Tic
     }
     return (
       <>
-        {stage.state === "waiting" && (
-          <AgentVerb
-            ticket={key}
-            body={{ cwd, sdlc: { kind: "confirm_deploy", stage: where } }}
-            label="Confirm in Argo"
-            title={`Start an agent that checks the ${ENV_LABEL[envId]} deploy in Argo, read-only, and records it here.`}
-            onError={onError}
-          />
-        )}
+        {/* Always offered: the deploy can be live before the board sees its PR or earlier stages. */}
+        <AgentVerb
+          ticket={key}
+          body={{ cwd, sdlc: { kind: "confirm_deploy", stage: where } }}
+          label="Confirm in Argo"
+          title={`Start an agent that checks the ${ENV_LABEL[envId]} deploy in Argo, read-only, and records it here.`}
+          onError={onError}
+        />
         <button
           className="btn ghost small"
           title="For a change with no Argo deploy, or one you checked yourself"
@@ -315,6 +331,7 @@ function SmoketestRow({ e, now, runs, onError }: { e: SdlcEvent; now: number; ru
         ))}
         {running && <span className="tag tone-running">running</span>}
         {running && e.sessionId && <a href={agentHref(e.sessionId, runs)}>Open the agent</a>}
+        {e.skippedAt && <span className="tag">skipped</span>}
         {e.outcome && <span className={`tag ${e.outcome === "passed" ? "tone-good" : "tone-bad"}`}>{e.outcome}</span>}
         {e.tickets.length > 1 && <span>· also on {e.tickets.slice(1).join(", ")}</span>}
         <button
@@ -355,6 +372,7 @@ export function Smoketests({ ticket, events, runs, now, cwd, onError }: { ticket
           ))}
         </select>
         <SmoketestVerb key={env} ticket={ticket} env={env} cwd={cwd} onError={onError} />
+        <SkipSmoketest ticket={ticket} env={env} onError={onError} />
         {!recording && (
           <button className="btn ghost small" onClick={() => setRecording(true)} title="Record a smoketest you ran yourself">
             Record by hand

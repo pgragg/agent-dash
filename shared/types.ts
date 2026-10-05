@@ -236,7 +236,8 @@ export interface Note {
   body: string;
 }
 
-export type ThreadStatus = "relevant" | "resolved";
+/** "unlinked" takes the thread off the ticket, as if it never named it. */
+export type ThreadStatus = "relevant" | "resolved" | "unlinked";
 
 /** One change to whether a pi thread still matters to a ticket. The newest change is the current state. */
 export interface ThreadStatusChange {
@@ -284,11 +285,15 @@ export interface Diagram {
   hash: string;
   /** When the agent wrote it. */
   createdAt: string;
+  /** When you last changed its title or source. */
+  editedAt: string | null;
 }
 
 /** A diagram with its text. Null for a raster image, which `/api/diagram/raw` serves. */
 export interface DiagramWithSource extends Diagram {
   source: string | null;
+  /** Set when you deleted it: it is off the board and the list, and its page can restore it. */
+  deletedAt: string | null;
   /** The conversation, from the log. Null when its log is gone. */
   conversation: { title: string; cwd: string; startedAt: string; lastActivityAt: string } | null;
 }
@@ -320,6 +325,8 @@ export interface SdlcEvent {
   testResults: string | null;
   /** The pi session that runs it, when agent-dash started that session. */
   sessionId: string | null;
+  /** Set on a smoketest that Piper chose to skip. It has no outcome. */
+  skippedAt: string | null;
   environments: SdlcEnvironment[];
   tickets: string[];
   createdAt: string;

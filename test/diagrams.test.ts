@@ -106,6 +106,18 @@ test("a newer write of a file replaces the diagrams of its older writes", async 
   ]);
 });
 
+test("a newer write of a file keeps the diagram you edited, and a deleted diagram still follows its conversation's ticket", async () => {
+  const write = (id: string, content: string) => ({ type: "message", message: { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id, name: "write", arguments: { path: "/r/plan.md", content } }] } });
+  const lines = [header("rewrite-2", "/repo"), user("FSDK-12 draw it"), write("w1", fence("graph LR\n P-->Q"))];
+  await syncDiagrams([parseSession(jsonl(...lines), "/f", new Date(), PATTERN)!], () => "FSDK-12");
+  const mine = db.listDiagrams().find((d) => d.sessionId === "rewrite-2")!;
+  db.updateDiagram(mine.id, { title: "My fix", deleted: true });
+  lines.push(write("w2", fence("graph LR\n P-->R")));
+  await syncDiagrams([parseSession(jsonl(...lines), "/f", new Date(), PATTERN)!], () => "FSDK-13");
+  const kept = db.getDiagram(mine.id)!;
+  assert.deepEqual([kept.title, kept.ticket], ["My fix", "FSDK-13"]);
+});
+
 test("the routes serve a diagram on its own, and its file with a policy that runs no script", async () => {
   mkdirSync(join(tmp, "sessions", "p"), { recursive: true });
   writeFileSync(join(tmp, "sessions", "p", "s.jsonl"), jsonl(header("live-session", "/repo"), name("Draw the flow"), user("draw"), reply("ok")));
@@ -114,8 +126,9 @@ test("the routes serve a diagram on its own, and its file with a policy that run
   db.addDiagrams([{ key: "live-session png", sessionId: "live-session", ticket: null, kind: "png", title: "p", origin: "p.png", hash: "png", source: PNG.toString("base64"), createdAt: "2026-01-01T00:00:00Z" }]);
   db.addDiagrams([{ key: "gone-session abc", sessionId: "gone-session", ticket: "FSDK-1", kind: "svg", title: "a", origin: "/r/a.svg", hash: "abc", source: "<svg><script>alert(1)</script></svg>", createdAt: "2026-01-01T00:00:00Z" }]);
   const id = db.listDiagrams().find((d) => d.sessionId === "gone-session")!.id;
+  let changes = 0;
   const server = createServer(async (req, res) => {
-    if (!(await handle(req, res, new URL(req.url ?? "/", "http://localhost"), sessions))) res.writeHead(404).end();
+    if (!(await handle(req, res, new URL(req.url ?? "/", "http://localhost"), sessions, () => changes++))) res.writeHead(404).end();
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   after(() => server.close());
@@ -137,7 +150,64 @@ test("the routes serve a diagram on its own, and its file with a policy that run
   const png = await fetch(`${base}/api/diagram/raw?id=${pngId}`);
   assert.equal(png.headers.get("content-type"), "image/png");
   assert.equal(Buffer.from(await png.arrayBuffer()).equals(PNG), true);
-  assert.equal((await fetch(`${base}/api/diagram?id=${pngId}`, { method: "POST" })).status, 404);
+  assert.equal((await fetch(`${base}/api/diagram?id=${pngId}`, { method: "PUT" })).status, 404);
+});
+
+test("you can fix a diagram's title and source, and delete or restore it; the next scan does not bring it back", async () => {
+  const sessions = new SessionIndex(join(tmp, "no-sessions"), PATTERN);
+  const s = parseSession(jsonl(header("edit-1", "/repo"), user("FSDK-11 draw"), reply(`Flow:\n${fence("graph LR\n A-->B")}`)), "/f", new Date(), PATTERN)!;
+  await syncDiagrams([s], () => "FSDK-11");
+  const d = db.listDiagrams().find((x) => x.sessionId === "edit-1")!;
+  db.addDiagrams([{ key: "edit-1 png", sessionId: "edit-1", ticket: "FSDK-11", kind: "png", title: "p", origin: "p.png", hash: "png", source: PNG.toString("base64"), createdAt: "2026-01-01T00:00:00Z" }]);
+  const pngId = db.listDiagrams().find((x) => x.sessionId === "edit-1" && x.kind === "png")!.id;
+  let changes = 0;
+  const server = createServer(async (req, res) => {
+    if (!(await handle(req, res, new URL(req.url ?? "/", "http://localhost"), sessions, () => changes++))) res.writeHead(404).end();
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  after(() => server.close());
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const post = (id: number, body: unknown, headers: Record<string, string> = { "X-Agent-Dash": "1" }) => fetch(`${base}/api/diagram?id=${id}`, { method: "POST", headers, body: JSON.stringify(body) });
+
+  // Only the page may write: another site cannot set the header.
+  assert.equal((await post(d.id, { title: "x" }, {})).status, 403);
+  assert.equal((await post(d.id, { title: "  " })).status, 400);
+  assert.equal((await post(pngId, { source: "graph TD" })).status, 400);
+  assert.equal((await post(99999, { title: "x" })).status, 404);
+  assert.equal((await fetch(`${base}/api/diagram?id=${d.id}`, { method: "POST", headers: { "X-Agent-Dash": "1" }, body: "{not json" })).status, 400);
+  assert.equal((await post(d.id, { title: 123 })).status, 400);
+  assert.equal(changes, 0);
+
+  const edited = await (await post(d.id, { title: " The real flow ", source: "graph LR\n A-->C" })).json();
+  assert.deepEqual([edited.title, edited.source, edited.hash], ["The real flow", "graph LR\n A-->C", d.hash]);
+  assert.ok(edited.editedAt);
+  assert.equal(changes, 1);
+
+  const deleted = await (await post(d.id, { deleted: true })).json();
+  assert.ok(deleted.deletedAt);
+  assert.equal(db.listDiagrams().some((x) => x.id === d.id), false);
+  // The agent's log still has the fence; the deleted row keeps its key, so the scan skips it.
+  await syncDiagrams([s], () => "FSDK-11");
+  assert.equal(db.listDiagrams().some((x) => x.sessionId === "edit-1" && x.kind === "mermaid"), false);
+  // Its page still opens, to restore it, with your edits.
+  const restored = await (await post(d.id, { deleted: false })).json();
+  assert.deepEqual([restored.deletedAt, restored.title], [null, "The real flow"]);
+  assert.equal(db.listDiagrams().find((x) => x.id === d.id)?.title, "The real flow");
+});
+
+test("an edited SVG must stay an SVG", async () => {
+  db.addDiagrams([{ key: "svg-1 a", sessionId: "svg-1", ticket: null, kind: "svg", title: "a", origin: "/r/a.svg", hash: "a", source: "<svg></svg>", createdAt: "2026-01-01T00:00:00Z" }]);
+  const id = db.listDiagrams().find((x) => x.sessionId === "svg-1")!.id;
+  const sessions = new SessionIndex(join(tmp, "no-sessions"), PATTERN);
+  const server = createServer(async (req, res) => {
+    if (!(await handle(req, res, new URL(req.url ?? "/", "http://localhost"), sessions, () => {}))) res.writeHead(404).end();
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  after(() => server.close());
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/diagram?id=${id}`;
+  const post = (source: string) => fetch(url, { method: "POST", headers: { "X-Agent-Dash": "1" }, body: JSON.stringify({ source }) });
+  assert.equal((await post("<html><script>alert(1)</script></html>")).status, 400);
+  assert.equal((await post('<svg viewBox="0 0 1 1"></svg>')).status, 200);
 });
 
 test("diagram hashes open the diagram views", () => {

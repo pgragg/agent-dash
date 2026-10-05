@@ -7,6 +7,18 @@ import type { Diagram, DiagramKind, NextStep, Note, SdlcEnvironment, SdlcEvent, 
 
 export const DB_PATH = process.env.AGENT_DASH_DB ?? join(homedir(), ".agent-dash/agent-dash.db");
 
+const THREAD_TABLE = `
+CREATE TABLE IF NOT EXISTS PiConversationStatusChange (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket     TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  status     TEXT NOT NULL CHECK (status IN ('relevant', 'resolved', 'unlinked')),
+  reason     TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS pi_conversation_status_by_thread ON PiConversationStatusChange (ticket, session_id, id);
+`;
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS summaries (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,15 +52,7 @@ CREATE TABLE IF NOT EXISTS notes (
 CREATE INDEX IF NOT EXISTS notes_by_ticket ON notes (ticket, id);
 
 -- Append-only: each row is one change; the newest row per (ticket, session_id) is the current state.
-CREATE TABLE IF NOT EXISTS PiConversationStatusChange (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  ticket     TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  status     TEXT NOT NULL CHECK (status IN ('relevant', 'resolved')),
-  reason     TEXT,
-  created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS pi_conversation_status_by_thread ON PiConversationStatusChange (ticket, session_id, id);
+${THREAD_TABLE}
 
 -- One row per action on the Actions view, from it first showing to it going away.
 -- key names what the action is about ("ci_failing pr:<url>"), so the same action keeps its row and age.
@@ -74,6 +78,8 @@ CREATE TABLE IF NOT EXISTS SDLC_Event (
   test_results TEXT,
   -- The pi session that runs the smoketest, when agent-dash started it, so the page can link to it.
   session_id   TEXT,
+  -- Set when Piper chose not to run the smoketest: the stage then counts as passed by on purpose.
+  skipped_at   TEXT,
   created_at   TEXT NOT NULL
 );
 
@@ -89,12 +95,16 @@ CREATE TABLE IF NOT EXISTS SDLC_Event_Ticket (
   sdlc_event_id INTEGER NOT NULL REFERENCES SDLC_Event (id),
   ticket        TEXT NOT NULL,
   created_at    TEXT NOT NULL,
+  -- Set when the server started a next-steps draft for this link; empty means not yet.
+  summary_requested_at TEXT,
   UNIQUE (sdlc_event_id, ticket)
 );
 CREATE INDEX IF NOT EXISTS sdlc_event_ticket_by_ticket ON SDLC_Event_Ticket (ticket);
 
 -- One row per diagram an agent made. It keeps the source, so the diagram outlives its log and its file.
 -- key is "<session_id> <hash>": the same diagram twice in one conversation is one row.
+-- hash stays the agent's own, so its fence in a message still finds an edited row.
+-- A deleted row stays, with deleted_at, so the next scan of its log does not add it again.
 CREATE TABLE IF NOT EXISTS diagrams (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   key        TEXT NOT NULL UNIQUE,
@@ -105,7 +115,9 @@ CREATE TABLE IF NOT EXISTS diagrams (
   origin     TEXT NOT NULL,
   hash       TEXT NOT NULL,
   source     TEXT NOT NULL, -- mermaid or SVG text, or base64 for a raster image
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  edited_at  TEXT,
+  deleted_at TEXT
 );
 CREATE INDEX IF NOT EXISTS diagrams_by_ticket ON diagrams (ticket, id);
 CREATE INDEX IF NOT EXISTS diagrams_by_session ON diagrams (session_id, id);
@@ -159,8 +171,26 @@ export function open(path = DB_PATH): DatabaseSync {
   // WAL lets the server read while a summary run writes from its own process.
   db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
   db.exec(SCHEMA);
-  // IF NOT EXISTS keeps an old table as it is, without this column.
+  const diagramColumns = new Set((db.prepare("PRAGMA table_info(diagrams)").all() as { name: string }[]).map((c) => c.name));
+  for (const c of ["edited_at", "deleted_at"]) if (!diagramColumns.has(c)) db.exec(`ALTER TABLE diagrams ADD COLUMN ${c} TEXT`);
+  // CREATE TABLE IF NOT EXISTS does not add a column to a table that is already there.
   if (!db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = 'session_id'").get()) db.exec("ALTER TABLE SDLC_Event ADD COLUMN session_id TEXT");
+  if (!(db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = 'skipped_at'").get())) db.exec("ALTER TABLE SDLC_Event ADD COLUMN skipped_at TEXT");
+  // SQLite cannot change a CHECK, so an older table is copied into one that allows 'unlinked'.
+  const threadTable = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'PiConversationStatusChange'").get() as { sql: string };
+  if (!threadTable.sql.includes("'unlinked'")) {
+    db.exec(`BEGIN IMMEDIATE;
+      ALTER TABLE PiConversationStatusChange RENAME TO PiConversationStatusChange_old;
+      DROP INDEX pi_conversation_status_by_thread;
+      ${THREAD_TABLE}
+      INSERT INTO PiConversationStatusChange SELECT * FROM PiConversationStatusChange_old;
+      DROP TABLE PiConversationStatusChange_old;
+      COMMIT;`);
+  }
+  // Links that are already there count as drafted, so an upgrade does not start a paid run per ticket.
+  if (!(db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event_Ticket') WHERE name = 'summary_requested_at'").get())) {
+    db.exec("ALTER TABLE SDLC_Event_Ticket ADD COLUMN summary_requested_at TEXT; UPDATE SDLC_Event_Ticket SET summary_requested_at = created_at");
+  }
   // Summaries saved before steps were stored get their rows once.
   for (const r of db.prepare("SELECT id, ticket, summary FROM summaries WHERE status = 'done' AND id NOT IN (SELECT summary_id FROM next_steps)").all() as unknown as Row[]) {
     insertSteps(r.id, r.ticket, r.summary ?? "");
@@ -348,7 +378,7 @@ export function syncActions(current: ActionKey[], keepMissing: (key: string) => 
 
 // ---- diagrams: the diagrams and charts that agents made ------------------------------
 
-const DIAGRAM_COLUMNS = "id, kind, title, session_id AS sessionId, ticket, origin, hash, created_at AS createdAt";
+const DIAGRAM_COLUMNS = "id, kind, title, session_id AS sessionId, ticket, origin, hash, created_at AS createdAt, edited_at AS editedAt";
 
 export interface NewDiagram {
   key: string;
@@ -381,28 +411,42 @@ export function addDiagrams(rows: NewDiagram[]): void {
   }
 }
 
-/** Newest first, without the source. */
-export function listDiagrams(): Diagram[] {
-  return (open().prepare(`SELECT ${DIAGRAM_COLUMNS} FROM diagrams ORDER BY created_at DESC, id DESC`).all() as unknown as Diagram[]).map((r) => ({ ...r }));
+/** Newest first, without the source. Without `withDeleted`, without the ones you deleted. */
+export function listDiagrams({ withDeleted = false } = {}): Diagram[] {
+  return (open().prepare(`SELECT ${DIAGRAM_COLUMNS} FROM diagrams ${withDeleted ? "" : "WHERE deleted_at IS NULL"} ORDER BY created_at DESC, id DESC`).all() as unknown as Diagram[]).map((r) => ({ ...r }));
 }
 
-/** Without `raw`, raster base64 stays put: the page loads the image as a file. */
-export function getDiagram(id: number, raw = false): (Diagram & { source: string | null }) | null {
+export type StoredDiagram = Diagram & { source: string | null; deletedAt: string | null };
+
+/** A deleted one too, so its page can restore it. Without `raw`, raster base64 stays put: the page loads the image as a file. */
+export function getDiagram(id: number, raw = false): StoredDiagram | null {
   const source = raw ? "source" : "CASE WHEN kind IN ('mermaid', 'svg') THEN source END AS source";
-  const row = open().prepare(`SELECT ${DIAGRAM_COLUMNS}, ${source} FROM diagrams WHERE id = ?`).get(id) as unknown as (Diagram & { source: string | null }) | undefined;
+  const row = open().prepare(`SELECT ${DIAGRAM_COLUMNS}, deleted_at AS deletedAt, ${source} FROM diagrams WHERE id = ?`).get(id) as unknown as StoredDiagram | undefined;
   return row ? { ...row } : null;
 }
 
-/** A conversation can get its ticket later, from a PR that names one. */
-/** Drops a conversation's diagrams from file writes that a newer write of the same file replaced. */
+/** Your fix for an agent's mistake. The caller checks that the source fits the kind. */
+export function updateDiagram(id: number, change: { title?: string; source?: string; deleted?: boolean }, now = new Date()): boolean {
+  const at = now.toISOString();
+  const sets: [string, string | null][] = [];
+  if (change.title !== undefined) sets.push(["title", change.title]);
+  if (change.source !== undefined) sets.push(["source", change.source]);
+  if (sets.length) sets.push(["edited_at", at]);
+  if (change.deleted !== undefined) sets.push(["deleted_at", change.deleted ? at : null]);
+  if (!sets.length) return false;
+  return Number(open().prepare(`UPDATE diagrams SET ${sets.map(([c]) => `${c} = ?`).join(", ")} WHERE id = ?`).run(...sets.map(([, v]) => v), id).changes) > 0;
+}
+
+/** Drops a conversation's diagrams from file writes that a newer write of the same file replaced. Your edit is yours, so it stays. */
 export function dropReplacedDiagrams(sessionId: string, keep: Set<string>): number {
-  const rows = open().prepare("SELECT key FROM diagrams WHERE session_id = ? AND origin != 'reply' AND kind IN ('mermaid', 'svg')").all(sessionId) as { key: string }[];
+  const rows = open().prepare("SELECT key FROM diagrams WHERE session_id = ? AND origin != 'reply' AND kind IN ('mermaid', 'svg') AND edited_at IS NULL").all(sessionId) as { key: string }[];
   const del = open().prepare("DELETE FROM diagrams WHERE key = ?");
   let n = 0;
   for (const r of rows) if (!keep.has(r.key)) n += Number(del.run(r.key).changes);
   return n;
 }
 
+/** A conversation can get its ticket later, from a PR that names one. */
 export function setDiagramTicket(sessionId: string, ticket: string): number {
   return Number(open().prepare("UPDATE diagrams SET ticket = ? WHERE session_id = ? AND ticket IS NOT ?").run(ticket, sessionId, ticket).changes);
 }
@@ -421,6 +465,7 @@ export interface NewSdlcEvent {
   testDetails?: string | null;
   testResults?: string | null;
   sessionId?: string | null;
+  skippedAt?: string | null;
   environments: SdlcEnvironment[];
   tickets: string[];
 }
@@ -431,12 +476,14 @@ export function addSdlcEvent(e: NewSdlcEvent, now = new Date()): SdlcEvent {
   d.exec("BEGIN IMMEDIATE");
   try {
     const { id } = d
-      .prepare("INSERT INTO SDLC_Event (event_type, started_at, finished_at, outcome, test_details, test_results, session_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
-      .get(e.eventType, e.startedAt, e.finishedAt ?? null, e.outcome ?? null, e.testDetails ?? null, e.testResults ?? null, e.sessionId ?? null, created) as { id: number };
+      .prepare("INSERT INTO SDLC_Event (event_type, started_at, finished_at, outcome, test_details, test_results, session_id, skipped_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
+      .get(e.eventType, e.startedAt, e.finishedAt ?? null, e.outcome ?? null, e.testDetails ?? null, e.testResults ?? null, e.sessionId ?? null, e.skippedAt ?? null, created) as { id: number };
     const env = d.prepare("INSERT OR IGNORE INTO SDLC_Event_Environment (sdlc_event_id, environment) VALUES (?, ?)");
     for (const x of e.environments) env.run(id, x);
-    const link = d.prepare("INSERT OR IGNORE INTO SDLC_Event_Ticket (sdlc_event_id, ticket, created_at) VALUES (?, ?, ?)");
-    for (const t of e.tickets) link.run(id, t, created);
+    // A smoketest that only started moves no stage yet, so it gets its draft when it finishes.
+    const drafted = e.sessionId && !e.finishedAt && !e.outcome && !e.skippedAt ? created : null;
+    const link = d.prepare("INSERT OR IGNORE INTO SDLC_Event_Ticket (sdlc_event_id, ticket, created_at, summary_requested_at) VALUES (?, ?, ?, ?)");
+    for (const t of e.tickets) link.run(id, t, created, drafted);
     d.exec("COMMIT");
     return sdlcEvents("WHERE e.id = ?", id)[0];
   } catch (err) {
@@ -454,10 +501,20 @@ export interface SdlcFinish {
 
 /** Ends a running smoketest. Null when there is no such smoketest, or it already ended. */
 export function finishSdlcEvent(id: number, f: SdlcFinish): SdlcEvent | null {
-  const changed = open()
-    .prepare("UPDATE SDLC_Event SET finished_at = ?, outcome = ?, test_details = coalesce(?, test_details), test_results = coalesce(?, test_results) WHERE id = ? AND event_type = 'smoketest' AND finished_at IS NULL AND outcome IS NULL")
-    .run(f.finishedAt, f.outcome, f.testDetails, f.testResults, id).changes;
-  return changed ? getSdlcEvent(id) : null;
+  const d = open();
+  d.exec("BEGIN IMMEDIATE");
+  try {
+    const changed = d
+      .prepare("UPDATE SDLC_Event SET finished_at = ?, outcome = ?, test_details = coalesce(?, test_details), test_results = coalesce(?, test_results) WHERE id = ? AND event_type = 'smoketest' AND finished_at IS NULL AND outcome IS NULL AND skipped_at IS NULL")
+      .run(f.finishedAt, f.outcome, f.testDetails, f.testResults, id).changes;
+    // The result moves the stage, so the next steps get a new draft now.
+    if (changed) d.prepare("UPDATE SDLC_Event_Ticket SET summary_requested_at = NULL, created_at = ? WHERE sdlc_event_id = ?").run(new Date().toISOString(), id);
+    d.exec("COMMIT");
+    return changed ? getSdlcEvent(id) : null;
+  } catch (err) {
+    d.exec("ROLLBACK");
+    throw err;
+  }
 }
 
 export function getSdlcEvent(id: number): SdlcEvent | null {
@@ -483,13 +540,33 @@ export function deleteSdlcEvent(id: number): boolean {
 function sdlcEvents(where = "", ...params: number[]): SdlcEvent[] {
   const rows = open()
     .prepare(
-      `SELECT e.id, e.event_type AS eventType, e.started_at AS startedAt, e.finished_at AS finishedAt, e.outcome, e.test_details AS testDetails, e.test_results AS testResults, e.session_id AS sessionId, e.created_at AS createdAt,
+      `SELECT e.id, e.event_type AS eventType, e.started_at AS startedAt, e.finished_at AS finishedAt, e.outcome, e.test_details AS testDetails, e.test_results AS testResults, e.session_id AS sessionId, e.skipped_at AS skippedAt, e.created_at AS createdAt,
         (SELECT group_concat(environment) FROM SDLC_Event_Environment WHERE sdlc_event_id = e.id) AS envs,
         (SELECT group_concat(ticket) FROM SDLC_Event_Ticket WHERE sdlc_event_id = e.id) AS keys
        FROM SDLC_Event e ${where} ORDER BY e.started_at DESC, e.id DESC`,
     )
     .all(...params) as unknown as (Omit<SdlcEvent, "environments" | "tickets"> & { envs: string | null; keys: string | null })[];
   return rows.map(({ envs, keys, ...r }) => ({ ...r, environments: (envs?.split(",") ?? []) as SdlcEnvironment[], tickets: keys?.split(",") ?? [] }));
+}
+
+/**
+ * Marks every event link that has no next-steps draft yet as drafted, and returns its tickets,
+ * with the newest link time of each. Read and mark are one step, so two callers never both draft.
+ */
+export function claimNewEventTickets(now = new Date()): Map<string, string> {
+  const rows = open()
+    .prepare("UPDATE SDLC_Event_Ticket SET summary_requested_at = ? WHERE summary_requested_at IS NULL RETURNING ticket, created_at AS createdAt")
+    .all(now.toISOString()) as { ticket: string; createdAt: string }[];
+  const out = new Map<string, string>();
+  for (const r of rows) {
+    const prev = out.get(r.ticket);
+    if (!prev || r.createdAt > prev) out.set(r.ticket, r.createdAt);
+  }
+  return out;
+}
+
+export function hasNewEventTickets(): boolean {
+  return !!open().prepare("SELECT 1 FROM SDLC_Event_Ticket WHERE summary_requested_at IS NULL LIMIT 1").get();
 }
 
 /** Every ticket's events, newest first. An event on two tickets shows under both. */

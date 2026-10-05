@@ -329,11 +329,8 @@ a.pr-group-title:hover { text-decoration: underline; text-underline-offset: 3px;
 
 /* resolved threads */
 /* The reason box takes its own line, so it does not squeeze the row it sits in. */
-.resolve-form { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-basis: 100%; order: 10; padding: 0 0 10px; }
 .h-row, .agent .card-head { flex-wrap: wrap; }
 .h-row .meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.resolve-form input { height: 26px; flex: 1; max-width: 420px; padding: 0 9px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--bg); font: 13px var(--sans); color: var(--ink); outline: 0; }
-.resolve-form input:focus { border-color: var(--ink-2); background: var(--surface); }
 .history > li.resolved-group { padding: 4px 12px; }
 .history > li.resolved { background: var(--hover); }
 .history > li.resolved .h-title { cursor: default; color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line-2); }
@@ -510,6 +507,17 @@ a.btn.verb { text-decoration: none; }
 .diagram-full { padding: 24px; overflow: auto; }
 .diagram-full img { display: block; max-width: 100%; margin: 0 auto; background: #fff; border-radius: 8px; }
 .diagram-source { max-height: 420px; overflow: auto; }
+.diagram-deleted { display: flex; align-items: center; gap: 12px; padding: 12px 16px; color: var(--ink-2); }
+.diagram-deleted > span { flex: 1; }
+.diagram-editor { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.diagram-editor label, .diagram-editor-preview { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.diagram-editor input, .diagram-editor textarea { font: 14px/1.5 var(--sans); padding: 6px 8px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); color: var(--ink); }
+.diagram-editor textarea { font-family: var(--mono); font-size: 13px; min-height: 280px; resize: vertical; }
+.diagram-editor-panes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.diagram-editor-preview { overflow: auto; max-height: 420px; }
+.diagram-editor-preview img { max-width: 100%; background: #fff; border-radius: 8px; }
+.diagram-editor-actions { display: flex; align-items: center; gap: 8px; }
+.diagram-editor-actions .error { padding: 0; }
 
 /* Five views: the top bar keeps one line, and drops the least useful text first. */
 .headline, .headline span, .sources { white-space: nowrap; }

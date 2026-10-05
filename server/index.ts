@@ -28,7 +28,7 @@ import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
 import { SessionIndex, transcriptTurns } from "./sources/sessions.ts";
 import { isAlive, readReportedStatuses } from "./sources/status.ts";
 import * as summaryDb from "./summaries/db.ts";
-import { reconcile, requestSummary } from "./summaries/runner.ts";
+import { reconcile, redraftAfterNewEvents, requestSummary } from "./summaries/runner.ts";
 
 const WEB_DIST = new URL("../web/dist/", import.meta.url).pathname;
 /** Agents record smoketests and deploys with this script, into this dash's database. */
@@ -138,7 +138,14 @@ async function dashboard(force: boolean) {
   await syncDiagrams(parsed, (s) => runTicket.get(s.sessionId) ?? s.tickets[0] ?? null, new Date(now));
   d.diagrams = summaryDb.listDiagrams();
   d.sdlcEvents = summaryDb.sdlcEventsByTicket();
+  redraftAfterNewEvents([...d.myTickets, ...d.otherTickets], broadcast);
   return d;
+}
+
+/** Show a due date the dash just set at once, without a new Jira search. */
+function onDueDate(key: string, date: string): void {
+  for (const t of [...myTickets.value, ...others.values()]) if (t.key === key) t.dueDate = date;
+  broadcast();
 }
 
 // ---- live updates -------------------------------------------------------------------
@@ -158,9 +165,13 @@ function broadcast(): void {
 mkdirSync(config.statusDir, { recursive: true });
 watch(config.sessionsDir, { recursive: true }, broadcast);
 watch(config.statusDir, broadcast);
+let redraftLoad: Promise<unknown> | null = null;
 // A summary run saves into SQLite from its own process; WAL writes touch agent-dash.db-wal.
 watch(dirname(summaryDb.DB_PATH), (_e, file) => {
-  if (file?.startsWith(basename(summaryDb.DB_PATH)) && !wroteRecently()) broadcast();
+  if (!file?.startsWith(basename(summaryDb.DB_PATH))) return;
+  if (!wroteRecently()) broadcast();
+  // An agent records an SDLC event from its own process; draft its next steps without waiting for the page.
+  if (!redraftLoad && summaryDb.hasNewEventTickets()) redraftLoad = dashboard(false).catch(() => {}).finally(() => (redraftLoad = null));
 });
 // Time alone changes a status: a pid dies, or a wait crosses a threshold.
 setInterval(broadcast, 30_000).unref();
@@ -203,8 +214,8 @@ const server = createServer(async (req, res) => {
     if (await resumeRoute.handle(req, res, url, sessions)) return;
     if (await liveControl.handle(req, res, url)) return;
     if (await prRoute.handle(req, res, url)) return;
-    if (await ticketRoute.handle(req, res, url)) return;
-    if (await diagramRoute.handle(req, res, url, sessions)) return;
+    if (await ticketRoute.handle(req, res, url, onDueDate)) return;
+    if (await diagramRoute.handle(req, res, url, sessions, broadcast)) return;
     if (await sdlcRoute.handle(req, res, url, broadcast)) return;
     if (await loginRoute.handle(req, res, url)) return;
     if (await slackRoute.handle(req, res, url)) return;
@@ -336,7 +347,7 @@ const server = createServer(async (req, res) => {
       if (!new RegExp(`^${config.ticketPattern.source}$`).test(ticket)) return json(400, { error: `not a ticket key: ${ticket}` });
       if (!/^[\w-]{8,64}$/.test(session)) return json(400, { error: "not a session id" });
       const { status, reason } = JSON.parse((await readBody(req, 16_000)) || "{}") as { status?: string; reason?: string };
-      if (status !== "resolved" && status !== "relevant") return json(400, { error: "status must be resolved or relevant" });
+      if (status !== "resolved" && status !== "relevant" && status !== "unlinked") return json(400, { error: "status must be resolved, relevant or unlinked" });
       const change = summaryDb.setThreadStatus(ticket, session, status, reason?.trim() || null);
       broadcast();
       json(201, change);
@@ -354,7 +365,7 @@ const server = createServer(async (req, res) => {
       res.writeHead(code, { "Content-Type": "application/json" }).end(JSON.stringify(out));
     } else if (url.pathname === "/api/history") {
       const [parsed, reported, pulls] = await Promise.all([sessions.scan(), readReportedStatuses(config.statusDir), prs.get(false)]);
-      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify(buildHistory(parsed, reported, pulls, Date.now())));
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify(buildHistory(parsed, reported, pulls, Date.now(), undefined, summaryDb.currentThreadStatuses())));
     } else if (url.pathname === "/api/transcript") {
       const sessionId = url.searchParams.get("session") ?? "";
       const file = sessions.fileFor(sessionId) ?? ((await sessions.scan()) && sessions.fileFor(sessionId));

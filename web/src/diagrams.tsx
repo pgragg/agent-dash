@@ -1,23 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dashboard, Diagram, DiagramKind, DiagramWithSource } from "../../shared/types.ts";
 import { age, api, dirLabel, plural, stamp } from "./lib.tsx";
-import { Mermaid } from "./mermaid.tsx";
+import { Mermaid, rawUrl as raw } from "./mermaid.tsx";
 import { href, humanAge } from "./routes.ts";
 
 /** The diagram page (`#/d:ID`), the list (`#/diagrams`), and the cards on the board. */
 
+const ago = (iso: string, now: number) => (humanAge(iso, now) === "just now" ? "just now" : `${humanAge(iso, now)} ago`);
+
 const KIND_LABEL: Record<DiagramKind, string> = { mermaid: "mermaid", svg: "SVG", png: "PNG", jpeg: "JPEG", gif: "GIF", webp: "WebP" };
 
-const raw = (d: Diagram) => `/api/diagram/raw?id=${d.id}`;
-
-/** A preview needs only the source, which never changes, so each one loads once. */
-const sources = new Map<number, Promise<string | null>>();
-function sourceOf(id: number): Promise<string | null> {
-  let p = sources.get(id);
+/** A preview needs only the source, which changes only with an edit, so each version loads once. */
+const sources = new Map<string, Promise<string | null>>();
+function sourceOf(d: Diagram): Promise<string | null> {
+  const key = `${d.id} ${d.editedAt ?? ""}`;
+  let p = sources.get(key);
   if (!p) {
-    p = api.diagram(id).then((d) => d.source);
-    p.catch(() => sources.delete(id));
-    sources.set(id, p);
+    p = api.diagram(d.id).then((x) => x.source);
+    p.catch(() => sources.delete(key));
+    sources.set(key, p);
   }
   return p;
 }
@@ -40,8 +41,8 @@ function DiagramPreview({ d }: { d: Diagram }) {
   const [code, setCode] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
-    if (visible && d.kind === "mermaid") sourceOf(d.id).then(setCode, () => setFailed(true));
-  }, [visible, d.id, d.kind]);
+    if (visible && d.kind === "mermaid") sourceOf(d).then(setCode, () => setFailed(true));
+  }, [visible, d.id, d.kind, d.editedAt]);
   return (
     <div ref={ref} className="diagram-preview">
       {!visible ? null : d.kind !== "mermaid" ? <img src={raw(d)} alt={d.title} /> : code ? <Mermaid code={code} /> : failed ? <span className="meta">Could not load it.</span> : <span className="shimmer" />}
@@ -85,11 +86,79 @@ export function DiagramCards({ diagrams, now, showTicket = false, showConversati
   );
 }
 
+/** Waits for a pause in typing, so the preview does not render on each key. */
+function useSettled<T>(value: T, ms: number): T {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return settled;
+}
+
+/** Fixes an agent's mistake: the title of any diagram, and the source of a mermaid or SVG one. */
+function DiagramEditor({ d, onDone }: { d: DiagramWithSource; onDone: (saved: DiagramWithSource | null) => void }) {
+  const [title, setTitle] = useState(d.title);
+  const [source, setSource] = useState(d.source ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const preview = useSettled(source, 300);
+  const change = { ...(title.trim() !== d.title ? { title } : {}), ...(d.source !== null && source !== d.source ? { source } : {}) };
+  const save = async () => {
+    if (!Object.keys(change).length) return onDone(null);
+    setBusy(true);
+    setError(null);
+    try {
+      onDone(await api.editDiagram(d.id, change));
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(false);
+    }
+  };
+  const keys = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void save();
+    if (e.key === "Escape" && (!Object.keys(change).length || confirm("Throw away your changes?"))) onDone(null);
+  };
+  return (
+    <section className="card diagram-editor" onKeyDown={keys}>
+      <label>
+        <span className="meta">Title</span>
+        <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} autoFocus />
+      </label>
+      {d.source !== null && (
+        <div className="diagram-editor-panes">
+          <label>
+            <span className="meta">{d.kind === "mermaid" ? "Mermaid code" : "SVG"}</span>
+            <textarea value={source} onChange={(e) => setSource(e.target.value)} spellCheck={false} />
+          </label>
+          <div className="diagram-editor-preview">
+            <span className="meta">Preview</span>
+            {/* An SVG in an <img> runs no script. */}
+            {d.kind === "mermaid" ? <Mermaid code={preview} /> : <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(preview)}`} alt="Preview" />}
+          </div>
+        </div>
+      )}
+      <div className="diagram-editor-actions">
+        {error && <span className="error">{error}</span>}
+        <span className="grow" />
+        <button className="btn ghost small" onClick={() => onDone(null)} disabled={busy}>
+          Cancel
+        </button>
+        <button className="btn primary small" onClick={save} disabled={busy || !title.trim() || (d.source !== null && !source.trim())}>
+          {busy ? "Saving…" : "Save"} <kbd>⌘↵</kbd>
+        </button>
+      </div>
+    </section>
+  );
+}
+
 /** Reads only the stored row, so it opens without its conversation or ticket. */
 export function DiagramView({ id, data, now }: { id: number; data: Dashboard; now: number }) {
   const [d, setD] = useState<DiagramWithSource | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showSource, setShowSource] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
     setD(null);
     setError(null);
@@ -99,6 +168,19 @@ export function DiagramView({ id, data, now }: { id: number; data: Dashboard; no
   const ticketKey = data.diagrams.find((x) => x.id === id)?.ticket ?? d?.ticket ?? null;
   const ticket = useMemo(() => [...data.myTickets, ...data.otherTickets].find((g) => g.ticket.key === ticketKey)?.ticket, [data, ticketKey]);
   const siblings = d ? data.diagrams.filter((x) => x.sessionId === d.sessionId && x.id !== d.id) : [];
+
+  // Soft: the row stays, so the next scan of the agent's log does not add it again, and you can restore it.
+  const setDeleted = async (deleted: boolean) => {
+    if (deleted && !confirm(`Delete diagram ${id}? It goes off the board and the list. You can restore it from this page.`)) return;
+    setBusy(true);
+    try {
+      setD(await api.editDiagram(id, { deleted }));
+    } catch (err) {
+      alert((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   if (error) return <article className="workspace"><div className="zero big">Diagram {id}: {error}</div></article>;
   if (!d) return <article className="workspace"><span className="shimmer wide" /></article>;
@@ -126,8 +208,13 @@ export function DiagramView({ id, data, now }: { id: number; data: Dashboard; no
           {d.conversation && <span className="meta">in {dirLabel(d.conversation.cwd)}</span>}
           <span className="sep">·</span>
           <span className="meta" title={stamp(d.createdAt)}>
-            made {humanAge(d.createdAt, now) === "just now" ? "just now" : `${humanAge(d.createdAt, now)} ago`}
+            made {ago(d.createdAt, now)}
           </span>
+          {d.editedAt && (
+            <span className="meta" title={stamp(d.editedAt)}>
+              edited by you {ago(d.editedAt, now)}
+            </span>
+          )}
           {d.origin !== "reply" && (
             <span className="meta" title={d.origin}>
               from <code>{d.origin.split("/").pop()}</code>
@@ -142,8 +229,37 @@ export function DiagramView({ id, data, now }: { id: number; data: Dashboard; no
           <a className="btn ghost small" href={raw(d)} target="_blank" rel="noreferrer" title="Open the stored file in a new tab">
             Open the file ↗
           </a>
+          {!d.deletedAt && !editing && (
+            <>
+              <button className="btn ghost small" onClick={() => setEditing(true)} title={d.source !== null ? "Fix the title or the source" : "Fix the title"}>
+                Edit
+              </button>
+              <button className="btn ghost small" onClick={() => setDeleted(true)} disabled={busy} title="Take it off the board and the list">
+                Delete
+              </button>
+            </>
+          )}
         </div>
       </header>
+      {d.deletedAt && (
+        <div className="card diagram-deleted">
+          <span>
+            You deleted this diagram <span title={stamp(d.deletedAt)}>{ago(d.deletedAt, now)}</span>. It is not on the board or in the list.
+          </span>
+          <button className="btn small" onClick={() => setDeleted(false)} disabled={busy}>
+            Restore
+          </button>
+        </div>
+      )}
+      {editing && (
+        <DiagramEditor
+          d={d}
+          onDone={(saved) => {
+            if (saved) setD(saved);
+            setEditing(false);
+          }}
+        />
+      )}
       <section className="card diagram-full">{d.kind === "mermaid" ? <Mermaid code={d.source ?? ""} /> : <img src={raw(d)} alt={d.title} />}</section>
       {showSource && d.source !== null && <pre className="diagram-source">{d.source}</pre>}
       {siblings.length > 0 && (

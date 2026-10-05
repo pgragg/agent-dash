@@ -40,7 +40,7 @@ export interface Stage {
 
 export interface SdlcProgress {
   stages: Stage[];
-  /** The furthest stage that is done. Ideation is always done. */
+  /** The furthest stage that is done or skipped. Ideation is always done. */
   current: number;
   /** The stage after `current`, or null when the ticket is done. */
   next: Stage | null;
@@ -106,6 +106,7 @@ function smoketestStage(id: StageId, events: SdlcEvent[], envs: SdlcEnvironment[
   const found = tagged(events, "smoketest", envs);
   const last = found[0];
   if (!last) return { id, state: "todo", detail: `No smoketest tagged ${envs.map((e) => ENV_LABEL[e]).join(" or ")} yet`, events: [] };
+  if (last.skippedAt) return { id, state: "skipped", detail: `Smoketest skipped ${last.skippedAt.slice(0, 10)}`, events: found };
   if (isSmoketestRunning(last)) return { id, state: "running", detail: `Smoketest running since ${last.startedAt.slice(0, 16).replace("T", " ")} UTC`, events: found };
   const when = (last.finishedAt ?? last.startedAt).slice(0, 10);
   // The newest run decides: a fix after a failed run shows as done again.
@@ -150,7 +151,8 @@ export function sdlcProgress({ ticket, prs, events }: { ticket: Ticket; prs: Pul
     { id: "done", state: ticket.statusCategory === "done" ? "done" : "todo", detail: `Jira status: ${ticket.status}`, events: [] },
   ];
   const stages: Stage[] = raw.map((s) => ({ ...s, label: LABELS[s.id] }));
-  const current = stages.reduce((at, s, i) => (s.state === "done" ? i : at), 0);
+  // A stage skipped on purpose is passed, so the order goes on after it.
+  const current = stages.reduce((at, s, i) => (s.state === "done" || s.state === "skipped" ? i : at), 0);
   for (const s of stages.slice(0, current)) if (s.state === "todo") s.state = "skipped";
   const next = stages[current + 1] ?? null;
   let hint = next ? HINTS[next.id] : null;

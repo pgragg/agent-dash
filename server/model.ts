@@ -63,6 +63,23 @@ export function toRuns(sessions: ParsedSession[], reported: Map<string, Reported
  * A PR title carries the ticket key more reliably than the chat does, so a run that opened
  * a PR inherits its tickets, and a PR with no key inherits the tickets of the run that opened it.
  */
+type ThreadMap = Map<string, ThreadStatusChange>;
+const threadKey = (ticket: string, sessionId: string) => `${ticket} ${sessionId}`;
+const threadMap = (threads: ThreadStatusChange[]): ThreadMap => new Map(threads.map((t) => [threadKey(t.ticket, t.sessionId), t]));
+
+/**
+ * Link runs and PRs, then take each run off the tickets that you unlinked it from. The first pass
+ * stops a PR with no key from taking an unlinked ticket; the second removes one that a PR named.
+ */
+function linkRuns(runs: Run[], prs: PullRequest[], threads: ThreadMap): void {
+  const unlink = () => {
+    for (const r of runs) r.tickets = r.tickets.filter((k) => threads.get(threadKey(k, r.sessionId))?.status !== "unlinked");
+  };
+  unlink();
+  crossLink(runs, prs);
+  unlink();
+}
+
 export function crossLink(runs: Run[], prs: PullRequest[]): void {
   const byUrl = new Map(prs.map((p) => [p.url, p]));
   for (const run of runs) {
@@ -77,9 +94,9 @@ export function crossLink(runs: Run[], prs: PullRequest[]): void {
 }
 
 /** Every chat, newest first, for the History view. Unlike the board, it has no time window. */
-export function buildHistory(sessions: ParsedSession[], reported: Map<string, ReportedStatus>, prs: PullRequest[], now: number, isAlive?: (pid: number) => boolean): HistoryRun[] {
+export function buildHistory(sessions: ParsedSession[], reported: Map<string, ReportedStatus>, prs: PullRequest[], now: number, isAlive?: (pid: number) => boolean, threads: ThreadStatusChange[] = []): HistoryRun[] {
   const runs = toRuns(sessions, reported, now, isAlive);
-  crossLink(runs, prs.map((p) => ({ ...p, tickets: [...p.tickets] })));
+  linkRuns(runs, prs.map((p) => ({ ...p, tickets: [...p.tickets] })), threadMap(threads));
   return runs.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt)).map(({ lastMessage: _cut, ...rest }) => rest);
 }
 
@@ -95,8 +112,6 @@ export function otherTicketKeys(sessions: ParsedSession[], prs: PullRequest[], m
   return [...keys].filter((k) => !myKeys.has(k)).sort();
 }
 
-type ThreadMap = Map<string, ThreadStatusChange>;
-const threadKey = (ticket: string, sessionId: string) => `${ticket} ${sessionId}`;
 
 function group(ticket: Ticket, runs: Run[], prs: PullRequest[], threads: ThreadMap): TicketGroup {
   const mine = runs.filter((r) => r.tickets.includes(ticket.key)).sort((a, b) => a.startedAt.localeCompare(b.startedAt));
@@ -159,9 +174,8 @@ export function buildDashboard(input: ModelInput): Dashboard {
   const { now, recentDays } = input;
   const runs = toRuns(input.sessions, input.reported, now, input.isAlive);
   const prs = input.prs.map((p) => ({ ...p, tickets: [...p.tickets] }));
-  crossLink(runs, prs);
-
-  const threads: ThreadMap = new Map((input.threads ?? []).map((t) => [threadKey(t.ticket, t.sessionId), t]));
+  const threads = threadMap(input.threads ?? []);
+  linkRuns(runs, prs, threads);
   const recentRuns = runs.filter((r) => r.status !== "finished" || isRecent(r.lastActivityAt, now, recentDays));
   const done = new Set([...input.myTickets, ...input.otherTickets].filter((t) => t.statusCategory === "done").map((t) => t.key));
   const attention = rankAttention(withoutResolved(recentRuns, threads, done), prs, input.myTickets, now, input.jiraServer);
