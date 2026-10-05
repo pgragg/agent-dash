@@ -133,10 +133,11 @@ CREATE INDEX IF NOT EXISTS diagrams_by_ticket ON diagrams (ticket, id);
 CREATE INDEX IF NOT EXISTS diagrams_by_session ON diagrams (session_id, id);
 
 -- Local state per ticket. Jira stays the source of truth for everything else about it.
--- snoozed_until hides the ticket from the board until that time.
+-- snoozed_until hides the ticket from the board until that time. starred_at pins it to the top.
 CREATE TABLE IF NOT EXISTS tickets (
   key           TEXT PRIMARY KEY,
-  snoozed_until TEXT
+  snoozed_until TEXT,
+  starred_at    TEXT
 );
 
 -- One drafted Slack review request per PR, written by a cheap model. Piper can edit it before it is sent.
@@ -220,6 +221,7 @@ export function open(path = DB_PATH): DatabaseSync {
   for (const c of ["edited_at", "deleted_at"]) if (!diagramColumns.has(c)) db.exec(`ALTER TABLE diagrams ADD COLUMN ${c} TEXT`);
   // CREATE TABLE IF NOT EXISTS does not add a column to a table that is already there.
   for (const c of SDLC_EVENT_COLUMNS) if (!db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = ?").get(c)) db.exec(`ALTER TABLE SDLC_Event ADD COLUMN ${c} TEXT`);
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('tickets') WHERE name = 'starred_at'").get()) db.exec("ALTER TABLE tickets ADD COLUMN starred_at TEXT");
   // Before the trigger below: copying the table drops the triggers on it.
   upgradeSdlcEventChecks(db);
   // SQLite cannot change a CHECK, so an older table is copied into one that allows 'unlinked'.
@@ -355,6 +357,19 @@ export function snoozedUntilByTicket(): Record<string, string> {
   const out: Record<string, string> = {};
   for (const r of open().prepare("SELECT key, snoozed_until AS until FROM tickets WHERE snoozed_until IS NOT NULL").all() as { key: string; until: string }[]) out[r.key] = r.until;
   return out;
+}
+
+// ---- star: pin a ticket to the top of the board and the PRs view ----------------------
+
+export function setStarred(ticket: string, starred: boolean): void {
+  open()
+    .prepare("INSERT INTO tickets (key, starred_at) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET starred_at = excluded.starred_at")
+    .run(ticket, starred ? new Date().toISOString() : null);
+}
+
+/** Starred ticket keys, first starred first. */
+export function starredTickets(): string[] {
+  return (open().prepare("SELECT key FROM tickets WHERE starred_at IS NOT NULL ORDER BY starred_at").all() as { key: string }[]).map((r) => r.key);
 }
 
 // ---- thread status: is a pi thread still relevant to a ticket? -----------------------

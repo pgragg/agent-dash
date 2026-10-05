@@ -127,6 +127,7 @@ async function dashboard(force: boolean) {
     summaries,
     notes: summaryDb.notesByTicket(),
     snoozedUntil: summaryDb.snoozedUntilByTicket(),
+    starred: summaryDb.starredTickets(),
     threads: summaryDb.currentThreadStatuses(),
     jiraServer: config.jira.server,
   });
@@ -264,6 +265,15 @@ const server = createServer(async (req, res) => {
       summaryDb.setSnoozedUntil(ticket, at);
       broadcast();
       json(200, { ok: true, snoozedUntil: at?.toISOString() ?? null });
+    } else if (url.pathname === "/api/star" && req.method === "POST") {
+      if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
+      const json = (code: number, body: unknown) => void res.writeHead(code, { "Content-Type": "application/json" }).end(JSON.stringify(body));
+      const ticket = url.searchParams.get("ticket") ?? "";
+      if (!new RegExp(`^${config.ticketPattern.source}$`).test(ticket)) return json(400, { error: `not a ticket key: ${ticket}` });
+      const { starred } = JSON.parse((await readBody(req, 4_000)) || "{}") as { starred?: boolean };
+      summaryDb.setStarred(ticket, starred === true);
+      broadcast();
+      json(200, { ok: true, starred: starred === true });
     } else if (url.pathname === "/api/agents/context" || (url.pathname === "/api/agents" && req.method === "POST")) {
       // A new pi agent that starts with the ticket's context. The context route is a preview.
       if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();

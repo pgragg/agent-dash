@@ -151,3 +151,12 @@ test("a ticket's snoozedUntil is saved, replaced, and cleared", () => {
   db.setSnoozedUntil("FSDK-21", null);
   assert.equal("FSDK-21" in db.snoozedUntilByTicket(), false);
 });
+
+test("a star is saved and cleared, and does not touch the snooze", () => {
+  db.setStarred("FSDK-20", true);
+  db.setStarred("FSDK-22", true);
+  assert.deepEqual(db.starredTickets(), ["FSDK-20", "FSDK-22"]);
+  assert.equal(db.snoozedUntilByTicket()["FSDK-20"], "2026-10-06T09:00:00.000Z");
+  db.setStarred("FSDK-20", false);
+  assert.deepEqual(db.starredTickets(), ["FSDK-22"]);
+});
