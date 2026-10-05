@@ -14,6 +14,7 @@ import * as exitRoutes from "./routes/exits.ts";
 import { agentMessage, agentName, buildHandoff, stepMessage } from "./handoff.ts";
 import * as resumeRoute from "./routes/resume.ts";
 import * as liveControl from "./routes/liveControl.ts";
+import * as prRoute from "./routes/pr.ts";
 import { fetchMyPrs } from "./sources/github.ts";
 import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
 import { SessionIndex, transcriptTurns } from "./sources/sessions.ts";
@@ -183,6 +184,7 @@ const server = createServer(async (req, res) => {
     if (await exitRoutes.handle(req, res, url)) return;
     if (await resumeRoute.handle(req, res, url, sessions)) return;
     if (await liveControl.handle(req, res, url)) return;
+    if (await prRoute.handle(req, res, url)) return;
     if (url.pathname === "/api/dashboard") {
       const body = JSON.stringify(await dashboard(url.searchParams.has("refresh")));
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(body);

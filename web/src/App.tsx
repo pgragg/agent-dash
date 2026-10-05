@@ -4,6 +4,8 @@ import { prRef } from "../../shared/refs.ts";
 import type { Action, ActionKind, AttentionItem, AttentionKind, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState, Turn } from "../../shared/types.ts";
 import { conversationHash, launchAgent, ResumeHere, resuming } from "./agents.tsx";
 import { filterHistory, groupByDay } from "./history.ts";
+import { PrPanel, PrVerbButton } from "./prPanel.tsx";
+import { ciTag } from "./prView.ts";
 import { countPrs, groupOpenPrs } from "./prs.ts";
 import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, resumeCommand, runTitle, shortDate, stamp, useDashboard, useFlash, useNow, useWaitNotifications } from "./lib.tsx";
 import { Composer, LivePanel } from "./liveControl.tsx";
@@ -619,16 +621,22 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket }: { run: R
 function PrRow({ pr, now }: { pr: PullRequest; now: number }) {
   const open = pr.state === "open";
   const review = pr.reviewDecision === "APPROVED" ? ["approved", "good"] : pr.reviewDecision === "CHANGES_REQUESTED" ? ["changes requested", "bad"] : pr.reviewDecision === "REVIEW_REQUIRED" ? ["needs review", "muted"] : null;
+  const ci = open ? ciTag(pr) : null;
   return (
-    <a className={`pr-row ${open ? "" : "closed"}`} href={pr.url} target="_blank" rel="noreferrer">
-      <span className={`pr-state state-${pr.isDraft && open ? "draft" : pr.state}`}>{pr.isDraft && open ? "draft" : pr.state}</span>
-      <span className="pr-name">{prName(pr.url)}</span>
-      <span className="pr-title">{pr.title}</span>
-      {open && pr.checks !== "none" && <span className={`tag tone-${pr.checks === "success" ? "good" : pr.checks === "failure" ? "bad" : "warn"}`}>CI {pr.checks}</span>}
-      {open && review && <span className={`tag tone-${review[1]}`}>{review[0]}</span>}
-      {open && pr.mergeable === "CONFLICTING" && <span className="tag tone-bad">conflict</span>}
-      <span className="meta">{age(pr.updatedAt, now)}</span>
-    </a>
+    <div className="pr-line">
+      <a className={`pr-row ${open ? "" : "closed"}`} href={href(prRef(pr.url) ?? "prs")} title="Open the PR panel">
+        <span className={`pr-state state-${pr.isDraft && open ? "draft" : pr.state}`}>{pr.isDraft && open ? "draft" : pr.state}</span>
+        <span className="pr-name">{prName(pr.url)}</span>
+        <span className="pr-title">{pr.title}</span>
+        {ci && <span className={`tag tone-${ci.tone}`} title={ci.title}>{ci.text}</span>}
+        {open && review && <span className={`tag tone-${review[1]}`}>{review[0]}</span>}
+        {open && pr.mergeable === "CONFLICTING" && <span className="tag tone-bad">conflict</span>}
+        <span className="meta">{age(pr.updatedAt, now)}</span>
+      </a>
+      <a className="ext-link pr-ext" href={pr.url} target="_blank" rel="noreferrer" title="Open on GitHub" aria-label="Open on GitHub">
+        ↗
+      </a>
+    </div>
   );
 }
 
@@ -783,9 +791,14 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
           {t?.priority && <span className="meta">{t.priority}</span>}
           {due && <span className={`tone-text-${due.tone}`}>{due.text}</span>}
           {s.prUrl && !t && (
-            <a className="key-link" href={s.prUrl} target="_blank" rel="noreferrer">
-              {prName(s.prUrl)} ↗
-            </a>
+            <>
+              <a className="key-link" href={href(prRef(s.prUrl) ?? "prs")} title="Open the PR panel">
+                {prName(s.prUrl)}
+              </a>
+              <a className="ext-link" href={s.prUrl} target="_blank" rel="noreferrer" title="Open on GitHub" aria-label="Open on GitHub">
+                ↗
+              </a>
+            </>
           )}
           <span className="grow" />
           {actionable(s) &&
@@ -802,9 +815,11 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
         {s.items.length > 0 && (
           <ul className="why">
             {s.items.map((a, i) => (
-              <li key={i}>
+              // A stable key: the verb button keeps its "Started" state when the list changes order.
+              <li key={`${a.kind}:${a.prUrl ?? a.sessionId ?? a.ticketKey ?? i}`}>
                 <Dot tone={KIND[a.kind].tone} />
                 <span>{a.reason}</span>
+                <PrVerbButton item={a} data={data} />
               </li>
             ))}
           </ul>
@@ -864,10 +879,8 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
 
 // ---- PRs view -----------------------------------------------------------------------
 
-function PrsView({ data, now, focus }: { data: Dashboard; now: number; focus: string | null }) {
-  useFlash(focus);
+function PrsView({ data, now }: { data: Dashboard; now: number }) {
   const groups = useMemo(() => groupOpenPrs(data), [data]);
-  const missing = focus && !groups.some((g) => g.prs.some((e) => prRef(e.pr.url) === focus)) ? focus.slice(3) : null;
   const total = countPrs(groups);
   const ticketCount = groups.filter((g) => g.ticket).length;
   return (
@@ -880,14 +893,6 @@ function PrsView({ data, now, focus }: { data: Dashboard; now: number; focus: st
           </span>
         </div>
       </header>
-      {missing && (
-        <div className="toast">
-          {missing} is not an open PR of yours from the last 14 days.{" "}
-          <a href={`https://github.com/${missing.replace(/\/(\d+)$/, "/pull/$1")}`} target="_blank" rel="noreferrer">
-            Open it on GitHub ↗
-          </a>
-        </div>
-      )}
       {groups.length === 0 && <div className="zero big">You have no open PRs.</div>}
       {groups.map((g) => {
         const t = g.ticket;
@@ -924,6 +929,7 @@ function PrsView({ data, now, focus }: { data: Dashboard; now: number; focus: st
                           <li key={a.kind}>
                             <Dot tone={KIND[a.kind].tone} />
                             <span>{a.reason}</span>
+                            <PrVerbButton item={a} data={data} />
                           </li>
                         ))}
                       </ul>
@@ -1478,7 +1484,7 @@ export function App() {
         </main>
       ) : route.view === "prs" ? (
         <main className="main">
-          <PrsView data={data} now={now} focus={route.pr} />
+          {route.pr ? <PrPanel key={route.pr} refId={route.pr} data={data} now={now} /> : <PrsView data={data} now={now} />}
         </main>
       ) : view === "history" ? (
         <main className="main">
