@@ -49,6 +49,9 @@ export function Mermaid({ code }: { code: string }) {
 
 // ---- which diagram a fence or an image on the page is ---------------------------------
 
+/** An edit changes the URL, so the browser never shows an old copy from its cache. */
+export const rawUrl = (d: Diagram) => `/api/diagram/raw?id=${d.id}${d.editedAt ? `&v=${encodeURIComponent(d.editedAt)}` : ""}`;
+
 /** Every diagram, set by each dashboard load, as the ticket keys are for links. */
 let known: Diagram[] = [];
 export function setKnownDiagrams(diagrams: Diagram[]): void {
@@ -86,7 +89,10 @@ export function MermaidFence({ code }: { code: string }) {
       <Mermaid code={code} />
       {d && (
         <figcaption>
-          <a href={href(`d:${d.id}`)}>Diagram {d.id} ↗</a>
+          <a href={href(`d:${d.id}`)} title={d.editedAt ? "You edited this diagram: its page shows your version" : undefined}>
+            Diagram {d.id}
+            {d.editedAt ? " · edited" : ""} ↗
+          </a>
         </figcaption>
       )}
     </figure>
@@ -99,7 +105,7 @@ export function EmbeddedImage({ alt, path }: { alt: string; path: string }) {
   if (!d) return <code title="This image is not stored as a diagram">{alt || path}</code>;
   return (
     <a className="md-image" href={href(`d:${d.id}`)} title={`${d.title} · open the diagram`}>
-      <img src={`/api/diagram/raw?id=${d.id}`} alt={alt || d.title} loading="lazy" />
+      <img src={rawUrl(d)} alt={alt || d.title} loading="lazy" />
     </a>
   );
 }

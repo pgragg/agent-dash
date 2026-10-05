@@ -95,6 +95,8 @@ CREATE INDEX IF NOT EXISTS sdlc_event_ticket_by_ticket ON SDLC_Event_Ticket (tic
 
 -- One row per diagram an agent made. It keeps the source, so the diagram outlives its log and its file.
 -- key is "<session_id> <hash>": the same diagram twice in one conversation is one row.
+-- hash stays the agent's own, so its fence in a message still finds an edited row.
+-- A deleted row stays, with deleted_at, so the next scan of its log does not add it again.
 CREATE TABLE IF NOT EXISTS diagrams (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   key        TEXT NOT NULL UNIQUE,
@@ -105,7 +107,9 @@ CREATE TABLE IF NOT EXISTS diagrams (
   origin     TEXT NOT NULL,
   hash       TEXT NOT NULL,
   source     TEXT NOT NULL, -- mermaid or SVG text, or base64 for a raster image
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  edited_at  TEXT,
+  deleted_at TEXT
 );
 CREATE INDEX IF NOT EXISTS diagrams_by_ticket ON diagrams (ticket, id);
 CREATE INDEX IF NOT EXISTS diagrams_by_session ON diagrams (session_id, id);
@@ -159,6 +163,8 @@ export function open(path = DB_PATH): DatabaseSync {
   // WAL lets the server read while a summary run writes from its own process.
   db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
   db.exec(SCHEMA);
+  const diagramColumns = new Set((db.prepare("PRAGMA table_info(diagrams)").all() as { name: string }[]).map((c) => c.name));
+  for (const c of ["edited_at", "deleted_at"]) if (!diagramColumns.has(c)) db.exec(`ALTER TABLE diagrams ADD COLUMN ${c} TEXT`);
   // CREATE TABLE IF NOT EXISTS does not add a column to a table that is already there.
   if (!(db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = 'skipped_at'").get())) db.exec("ALTER TABLE SDLC_Event ADD COLUMN skipped_at TEXT");
   // Summaries saved before steps were stored get their rows once.
@@ -348,7 +354,7 @@ export function syncActions(current: ActionKey[], keepMissing: (key: string) => 
 
 // ---- diagrams: the diagrams and charts that agents made ------------------------------
 
-const DIAGRAM_COLUMNS = "id, kind, title, session_id AS sessionId, ticket, origin, hash, created_at AS createdAt";
+const DIAGRAM_COLUMNS = "id, kind, title, session_id AS sessionId, ticket, origin, hash, created_at AS createdAt, edited_at AS editedAt";
 
 export interface NewDiagram {
   key: string;
@@ -381,19 +387,32 @@ export function addDiagrams(rows: NewDiagram[]): void {
   }
 }
 
-/** Newest first, without the source. */
+/** Newest first, without the source or the deleted ones. */
 export function listDiagrams(): Diagram[] {
-  return (open().prepare(`SELECT ${DIAGRAM_COLUMNS} FROM diagrams ORDER BY created_at DESC, id DESC`).all() as unknown as Diagram[]).map((r) => ({ ...r }));
+  return (open().prepare(`SELECT ${DIAGRAM_COLUMNS} FROM diagrams WHERE deleted_at IS NULL ORDER BY created_at DESC, id DESC`).all() as unknown as Diagram[]).map((r) => ({ ...r }));
 }
 
-/** Without `raw`, raster base64 stays put: the page loads the image as a file. */
-export function getDiagram(id: number, raw = false): (Diagram & { source: string | null }) | null {
+export type StoredDiagram = Diagram & { source: string | null; deletedAt: string | null };
+
+/** A deleted one too, so its page can restore it. Without `raw`, raster base64 stays put: the page loads the image as a file. */
+export function getDiagram(id: number, raw = false): StoredDiagram | null {
   const source = raw ? "source" : "CASE WHEN kind IN ('mermaid', 'svg') THEN source END AS source";
-  const row = open().prepare(`SELECT ${DIAGRAM_COLUMNS}, ${source} FROM diagrams WHERE id = ?`).get(id) as unknown as (Diagram & { source: string | null }) | undefined;
+  const row = open().prepare(`SELECT ${DIAGRAM_COLUMNS}, deleted_at AS deletedAt, ${source} FROM diagrams WHERE id = ?`).get(id) as unknown as StoredDiagram | undefined;
   return row ? { ...row } : null;
 }
 
-/** A conversation can get its ticket later, from a PR that names one. */
+/** Your fix for an agent's mistake. The caller checks that the source fits the kind. */
+export function updateDiagram(id: number, change: { title?: string; source?: string; deleted?: boolean }, now = new Date()): boolean {
+  const at = now.toISOString();
+  const sets: [string, string | null][] = [];
+  if (change.title !== undefined) sets.push(["title", change.title]);
+  if (change.source !== undefined) sets.push(["source", change.source]);
+  if (sets.length) sets.push(["edited_at", at]);
+  if (change.deleted !== undefined) sets.push(["deleted_at", change.deleted ? at : null]);
+  if (!sets.length) return false;
+  return Number(open().prepare(`UPDATE diagrams SET ${sets.map(([c]) => `${c} = ?`).join(", ")} WHERE id = ?`).run(...sets.map(([, v]) => v), id).changes) > 0;
+}
+
 /** Drops a conversation's diagrams from file writes that a newer write of the same file replaced. */
 export function dropReplacedDiagrams(sessionId: string, keep: Set<string>): number {
   const rows = open().prepare("SELECT key FROM diagrams WHERE session_id = ? AND origin != 'reply' AND kind IN ('mermaid', 'svg')").all(sessionId) as { key: string }[];
@@ -403,6 +422,7 @@ export function dropReplacedDiagrams(sessionId: string, keep: Set<string>): numb
   return n;
 }
 
+/** A conversation can get its ticket later, from a PR that names one. */
 export function setDiagramTicket(sessionId: string, ticket: string): number {
   return Number(open().prepare("UPDATE diagrams SET ticket = ? WHERE session_id = ? AND ticket IS NOT ?").run(ticket, sessionId, ticket).changes);
 }
