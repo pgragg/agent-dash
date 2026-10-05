@@ -1,3 +1,4 @@
+import { REVIEW_CHANNEL } from "./reviewRequest.ts";
 import type { PullRequest, SdlcEnvironment, SdlcEvent, Ticket } from "./types.ts";
 
 /**
@@ -23,7 +24,7 @@ export function parseEnvironment(s: string): SdlcEnvironment | null {
   return ENVIRONMENTS.find((e) => e.id === norm || e.label.toLowerCase().replace(/\s+/g, "_") === norm)?.id ?? null;
 }
 
-export type StageId = "ideation" | "pr" | "local_smoketest" | "in_beta" | "beta_smoketest" | "in_prod" | "prod_smoketest" | "done";
+export type StageId = "ideation" | "pr" | "local_smoketest" | "review_requested" | "in_beta" | "beta_smoketest" | "in_prod" | "prod_smoketest" | "done";
 
 /** "waiting": a deploy PR merged, unconfirmed in Argo. "running": a smoketest has no result yet. */
 export type StageState = "done" | "failed" | "blocked" | "running" | "waiting" | "skipped" | "todo";
@@ -71,6 +72,7 @@ const HINTS: Record<StageId, string> = {
   ideation: "",
   pr: "Open a PR for the change.",
   local_smoketest: "Run a smoketest on localhost before you ask for a PR review.",
+  review_requested: `Ask for a review in #${REVIEW_CHANNEL.name}: the PRs view has a drafted message for each open PR.`,
   in_beta: "Deploy to Postman Beta (merge the PR, then the us-beta deploy PR), and confirm the deploy in Argo.",
   beta_smoketest: "Run a smoketest on Postman Beta before you open the prod chart version update PR.",
   in_prod: "Open the prod chart version update PR, and confirm the deploy in Argo after it merges.",
@@ -82,6 +84,7 @@ export const STAGE_LABELS: Record<StageId, string> = {
   ideation: "Ideation",
   pr: "PR exists",
   local_smoketest: "Local smoketest",
+  review_requested: "Review requested",
   in_beta: "In Beta",
   beta_smoketest: "Beta smoketest",
   in_prod: "In Prod",
@@ -125,6 +128,22 @@ function deployStage(id: StageId, events: SdlcEvent[], prs: PullRequest[], stage
   return { id, state: "todo", detail: open ? `Deploy PR #${open.number} is open` : "No confirmed deploy", events: [] };
 }
 
+/** "postman-eng/repo#12" from a PR URL. */
+function prLabel(url: string): string {
+  const m = url.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
+  return m ? `${m[1]}#${m[2]}` : url;
+}
+
+/** Done once agent-dash posted a Slack review request for any of the ticket's PRs. */
+function reviewStage(events: SdlcEvent[]): Omit<Stage, "label"> {
+  const found = newestFirst(events.filter((e) => e.eventType === "review_request"));
+  const last = found[0];
+  if (!last) return { id: "review_requested", state: "todo", detail: `No review request posted to #${REVIEW_CHANNEL.name} yet`, events: [] };
+  const prs = [...new Set(found.map((e) => e.prUrl).filter((u): u is string => !!u))];
+  const more = prs.length > 1 ? ` and ${prs.length - 1} more PR${prs.length > 2 ? "s" : ""}` : "";
+  return { id: "review_requested", state: "done", detail: `Review requested for ${last.prUrl ? prLabel(last.prUrl) : "a PR"}${more} on ${last.startedAt.slice(0, 10)}`, events: found };
+}
+
 /** The dashboard's PRs plus the ticket's own GitHub search, once each. */
 export function mergePrs(...lists: PullRequest[][]): PullRequest[] {
   const byUrl = new Map<string, PullRequest>();
@@ -145,6 +164,7 @@ export function sdlcProgress({ ticket, prs, events }: { ticket: Ticket; prs: Pul
       events: [],
     },
     smoketestStage("local_smoketest", events, STAGE_ENVS.local),
+    reviewStage(events),
     deployStage("in_beta", events, prs, "beta"),
     smoketestStage("beta_smoketest", events, STAGE_ENVS.beta),
     deployStage("in_prod", events, prs, "prod"),

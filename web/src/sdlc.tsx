@@ -177,6 +177,18 @@ function StageActions({ stage, group, cwd, onError }: { stage: Stage; group: Tic
       </>
     );
   }
+  if (stage.id === "review_requested") {
+    const last = stage.events[0];
+    return last?.messageUrl ? (
+      <a className="btn ghost small" href={last.messageUrl} target="_blank" rel="noreferrer">
+        Open in Slack ↗
+      </a>
+    ) : stage.state !== "done" ? (
+      <a className="btn small" href={href("prs")} title="The PRs view has a drafted Slack review request under each open PR">
+        Request review
+      </a>
+    ) : null;
+  }
   if (stage.id === "pr") {
     const pr = group.prs.find((p) => p.state !== "closed");
     const ref = pr && prRef(pr.url);

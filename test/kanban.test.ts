@@ -14,7 +14,12 @@ const smoketest = (over: Partial<SdlcEvent> = {}): SdlcEvent => ({
   outcome: "passed",
   testDetails: null,
   testResults: null,
+  sessionId: null,
   skippedAt: null,
+  prUrl: null,
+  channel: null,
+  message: null,
+  messageUrl: null,
   environments: ["localhost"],
   tickets: ["FSDK-1"],
   createdAt: "2026-10-02T10:00:00.000Z",
@@ -34,7 +39,7 @@ test("one column per stage in order, then No ticket; each column keeps the order
   const cols = kanbanColumns(["a", "b", "c", "d"], (x) => (x === "d" ? null : x === "b" ? "in_beta" : "pr"));
   assert.deepEqual(
     cols.map((c) => c.label),
-    ["Ideation", "PR exists", "Local smoketest", "In Beta", "Beta smoketest", "In Prod", "Prod smoketest", "Ticket done", "No ticket"],
+    ["Ideation", "PR exists", "Local smoketest", "Review requested", "In Beta", "Beta smoketest", "In Prod", "Prod smoketest", "Ticket done", "No ticket"],
   );
   assert.deepEqual(cols.find((c) => c.id === "pr")!.items, ["a", "c"]);
   assert.deepEqual(cols.find((c) => c.id === "in_beta")!.items, ["b"]);
