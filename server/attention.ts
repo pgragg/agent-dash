@@ -65,6 +65,9 @@ function prItems(prs: PullRequest[], now: number): Draft[] {
     if (pr.mergeable === "CONFLICTING") items.push({ ...base, kind: "merge_conflict", score: 80 * weight, reason: `${name}: merge conflict` });
     if (pr.reviewDecision === "APPROVED" && !pr.isDraft && pr.checks !== "failure" && pr.checks !== "pending" && pr.mergeable !== "CONFLICTING") {
       items.push({ ...base, kind: "ready_to_merge", score: 70, reason: `${name}: approved and green — merge it` });
+    } else if (pr.reviewDecision === null && !pr.isDraft && pr.mergeStateStatus === "CLEAN") {
+      // The repo requires no review, so a green PR waits only for me.
+      items.push({ ...base, kind: "ready_to_merge", score: 70, reason: `${name}: needs no review and is green — merge it` });
     }
     // Healthy and waiting for a reviewer: the ball is with them, until it has sat too long.
     if (pr.reviewDecision === "REVIEW_REQUIRED" && !pr.isDraft && pr.checks !== "failure" && pr.mergeable !== "CONFLICTING") {

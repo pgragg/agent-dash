@@ -29,8 +29,8 @@ test("the message is the team's format, and the model's phrase is cleaned to one
   assert.ok(prompt.length < 4_000);
 });
 
-test("each open PR is drafted once, in parallel; a failure is kept, and tried again only later", async () => {
-  const prs = [pr({ url: "u/1" }), pr({ url: "u/2" }), pr({ url: "u/3", state: "merged" }), pr({ url: "u/4" })];
+test("each open PR outside agent-dash is drafted once, in parallel; a failure is kept, and tried again only later", async () => {
+  const prs = [pr({ url: "u/1" }), pr({ url: "u/2" }), pr({ url: "u/3", state: "merged" }), pr({ url: "u/4" }), pr({ url: "u/5", repo: "pgragg/agent-dash" })];
   const seen: string[] = [];
   let active = 0;
   let most = 0;

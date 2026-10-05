@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fallbackMessage, REVIEW_CHANNEL } from "../../shared/reviewRequest.ts";
+import { fallbackMessage, REVIEW_CHANNEL, wantsReviewRequest } from "../../shared/reviewRequest.ts";
 import type { PullRequest, ReviewDraft, SdlcEvent } from "../../shared/types.ts";
 import { age, post } from "./lib.tsx";
 
@@ -12,7 +12,7 @@ import { age, post } from "./lib.tsx";
 export function useReviewDrafts(prs: PullRequest[], drafts: Record<string, ReviewDraft>): void {
   // Only the PRs with no draft row: a finished draft changes the key once, and then it is stable.
   const missing = prs
-    .filter((p) => p.state === "open" && !drafts[p.url])
+    .filter((p) => wantsReviewRequest(p) && !drafts[p.url])
     .map((p) => p.url)
     .sort()
     .join(" ");

@@ -6,6 +6,11 @@
 /** The Fern AWS migration team asks for PR reviews here. */
 export const REVIEW_CHANNEL = { id: "C0BFE2ABFA9", name: "proj-fern-aws-migration-devs" };
 
+/** Piper's own repos: no one else reviews them, so a Slack review request has no reader. */
+const NO_REVIEW_REPOS = new Set(["pgragg/agent-dash"]);
+
+export const wantsReviewRequest = (pr: { repo: string; state: string }): boolean => pr.state === "open" && !NO_REVIEW_REPOS.has(pr.repo);
+
 const MAX_SUMMARY = 160;
 
 /** The format the team already uses: "PR: bind slack token env vars https://github.com/…/pull/13612". */

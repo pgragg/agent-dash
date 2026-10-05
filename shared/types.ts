@@ -98,6 +98,8 @@ export interface PullRequest {
   reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
   checks: CheckState;
   mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN";
+  /** GitHub's own verdict: "CLEAN" means every branch rule passes, so the PR can merge now. */
+  mergeStateStatus?: string;
   updatedAt: string;
   tickets: string[];
   /** Names of the failing checks and status contexts on the head commit. */

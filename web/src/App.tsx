@@ -14,6 +14,7 @@ import { href, humanAge, parseHash, resolveBoardRef, type Route } from "./routes
 import { FixLogin } from "./fixLogin.tsx";
 import { rowKey } from "./rowNav.ts";
 import { ReviewRequest, useReviewDrafts } from "./reviewRequest.tsx";
+import { wantsReviewRequest } from "../../shared/reviewRequest.ts";
 import { SdlcBar, Smoketests } from "./sdlc.tsx";
 import { Chat, useLoad } from "./chat.tsx";
 import { SlackQuotes } from "./slackQuotes.tsx";
@@ -1074,7 +1075,7 @@ function PrsView({ data, now }: { data: Dashboard; now: number }) {
                 return (
                   <div key={pr.url} className="pr-entry" id={prRef(pr.url) ?? undefined}>
                     <PrRow pr={pr} now={now} />
-                    <ReviewRequest pr={pr} draft={data.reviewDrafts[pr.url]} sent={data.reviewRequests[pr.url]} now={now} />
+                    {wantsReviewRequest(pr) && <ReviewRequest pr={pr} draft={data.reviewDrafts[pr.url]} sent={data.reviewRequests[pr.url]} now={now} />}
                     {todo.length > 0 && (
                       <ul className="pr-why">
                         {todo.map((a) => (

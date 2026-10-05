@@ -9,7 +9,7 @@ const QUERY = `query($q: String!) {
   search(query: $q, type: ISSUE, first: 100) {
     nodes {
       ... on PullRequest {
-        url number title state isDraft headRefName reviewDecision mergeable updatedAt
+        url number title state isDraft headRefName reviewDecision mergeable mergeStateStatus updatedAt
         repository { nameWithOwner }
         commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 50) { nodes { ... on CheckRun { name conclusion } ... on StatusContext { context state } } } } } } }
       }
@@ -68,6 +68,7 @@ async function searchPrs(q: string, ticketPattern: RegExp): Promise<PullRequest[
       checks: checkState(n.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state),
       failedChecks: failedCheckNames(n.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts?.nodes ?? []),
       mergeable: n.mergeable ?? "UNKNOWN",
+      mergeStateStatus: n.mergeStateStatus ?? "UNKNOWN",
       updatedAt: n.updatedAt,
       tickets: extractTickets(`${n.title} ${n.headRefName}`, ticketPattern),
     }));
