@@ -38,6 +38,16 @@ The navbar at the top switches between the views: **Board** (`#/`, the queue and
 - **Fix login**: when Jira or GitHub is down, the top bar shows **Fix Jira login** or **Fix GitHub login**. It runs `~/pi/auth/pi-auth ensure <target>` on the server (`POST /api/login?source=jira|github`, with the `X-Agent-Dash` guard), then refreshes. The target comes from a fixed list, never from the request. pi-auth can open your Chrome; it changes nothing remote. If pi-auth has no target for the source, the button tells you how to log in by hand.
 - `#/t:FSDK-123` or `#/r:<sessionId>` in the URL selects an entry. See [Addresses](#addresses) for the other objects.
 
+### Needs you
+
+A click on **N things need you** in the top bar opens `#/needs`: the same N entries as **Up next** on the board, in the same order. "Done for now" entries are not on it. Each row shows:
+
+- **What it is**: the most urgent signal and its reason, for example "Agent is waiting on you", with the other signals as tags.
+- **Its ticket**: the key (it opens the ticket on the board) and the title, or "no ticket" and the run or PR name.
+- **The next step in agent-dash**: one button that opens the place to act. An agent signal opens the agent card (`#/r:`), a PR signal opens the [PR panel](#pr-panel) with its [verb button](#pr-verbs) next to it, **Overdue** and **Due soon** open the ticket (its "why" list has **New due date…**), and **Stalled** opens the drafted step (`#/step:`), else the ticket. The ticket's first drafted next step also shows under the row.
+
+The rules are in `web/src/needs.ts`.
+
 ### Actions
 
 One short list of what to do next, first to do first. It has two kinds of action:
@@ -106,6 +116,7 @@ Every object in agent-dash has an address in the URL hash. A link opens the obje
 | `#/note:<id>` | A note, in its ticket's Notes card |
 | `#/pr:<owner>/<repo>/<number>` | The [PR panel](#pr-panel) |
 | `#/a:<id>` | The action on the Actions view |
+| `#/needs` | The [Needs you](#needs-you) list |
 | `#/c:<sessionId>` | The conversation's page |
 
 An object that is not on the page any more (an old run, a merged PR, a cleared action) shows a note that says so.
