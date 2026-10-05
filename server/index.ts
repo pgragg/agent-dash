@@ -7,9 +7,11 @@ import type { Dashboard, PullRequest, SourceHealth, Ticket } from "../shared/typ
 import { actionCandidates, keepWhenDown, toActions } from "./actions.ts";
 import { config } from "./config.ts";
 import { startConversation } from "./conversations.ts";
+import { recordExit, wroteRecently } from "./exits.ts";
 import { buildHandoff, stepMessage } from "./handoff.ts";
 import { focusItermSession, piCommand, runInNewItermTab } from "./iterm.ts";
 import { buildDashboard, buildHistory, otherTicketKeys } from "./model.ts";
+import * as exitRoutes from "./routes/exits.ts";
 import { fetchMyPrs } from "./sources/github.ts";
 import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
 import { SessionIndex, transcriptTurns } from "./sources/sessions.ts";
@@ -137,7 +139,7 @@ watch(config.sessionsDir, { recursive: true }, broadcast);
 watch(config.statusDir, broadcast);
 // A summary run saves into SQLite from its own process; WAL writes touch agent-dash.db-wal.
 watch(dirname(summaryDb.DB_PATH), (_e, file) => {
-  if (file?.startsWith(basename(summaryDb.DB_PATH))) broadcast();
+  if (file?.startsWith(basename(summaryDb.DB_PATH)) && !wroteRecently()) broadcast();
 });
 // Time alone changes a status: a pid dies, or a wait crosses a threshold.
 setInterval(broadcast, 30_000).unref();
@@ -173,6 +175,7 @@ async function serveStatic(path: string, res: ServerResponse): Promise<void> {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   try {
+    if (await exitRoutes.handle(req, res, url)) return;
     if (url.pathname === "/api/dashboard") {
       const body = JSON.stringify(await dashboard(url.searchParams.has("refresh")));
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(body);
@@ -289,6 +292,7 @@ const server = createServer(async (req, res) => {
       const tab = (await readReportedStatuses(config.statusDir)).get(sessionId)?.itermSessionId;
       if (!tab) return void res.writeHead(404, { "Content-Type": "application/json" }).end(JSON.stringify({ result: "missing" }));
       const out = await focusItermSession(tab);
+      if (out.result === "ok") recordExit({ kind: "iterm_focus", host: "iterm", view: null, section: null, ticket: null });
       const code = out.result === "ok" ? 200 : out.result === "missing" ? 404 : 500;
       res.writeHead(code, { "Content-Type": "application/json" }).end(JSON.stringify(out));
     } else if (url.pathname === "/api/history") {
