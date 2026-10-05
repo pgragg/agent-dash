@@ -387,9 +387,9 @@ export function addDiagrams(rows: NewDiagram[]): void {
   }
 }
 
-/** Newest first, without the source or the deleted ones. */
-export function listDiagrams(): Diagram[] {
-  return (open().prepare(`SELECT ${DIAGRAM_COLUMNS} FROM diagrams WHERE deleted_at IS NULL ORDER BY created_at DESC, id DESC`).all() as unknown as Diagram[]).map((r) => ({ ...r }));
+/** Newest first, without the source. Without `withDeleted`, without the ones you deleted. */
+export function listDiagrams({ withDeleted = false } = {}): Diagram[] {
+  return (open().prepare(`SELECT ${DIAGRAM_COLUMNS} FROM diagrams ${withDeleted ? "" : "WHERE deleted_at IS NULL"} ORDER BY created_at DESC, id DESC`).all() as unknown as Diagram[]).map((r) => ({ ...r }));
 }
 
 export type StoredDiagram = Diagram & { source: string | null; deletedAt: string | null };
@@ -413,9 +413,9 @@ export function updateDiagram(id: number, change: { title?: string; source?: str
   return Number(open().prepare(`UPDATE diagrams SET ${sets.map(([c]) => `${c} = ?`).join(", ")} WHERE id = ?`).run(...sets.map(([, v]) => v), id).changes) > 0;
 }
 
-/** Drops a conversation's diagrams from file writes that a newer write of the same file replaced. */
+/** Drops a conversation's diagrams from file writes that a newer write of the same file replaced. Your edit is yours, so it stays. */
 export function dropReplacedDiagrams(sessionId: string, keep: Set<string>): number {
-  const rows = open().prepare("SELECT key FROM diagrams WHERE session_id = ? AND origin != 'reply' AND kind IN ('mermaid', 'svg')").all(sessionId) as { key: string }[];
+  const rows = open().prepare("SELECT key FROM diagrams WHERE session_id = ? AND origin != 'reply' AND kind IN ('mermaid', 'svg') AND edited_at IS NULL").all(sessionId) as { key: string }[];
   const del = open().prepare("DELETE FROM diagrams WHERE key = ?");
   let n = 0;
   for (const r of rows) if (!keep.has(r.key)) n += Number(del.run(r.key).changes);

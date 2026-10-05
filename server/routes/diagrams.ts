@@ -21,9 +21,16 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   if (!d) return json(404, { error: "no such diagram" });
 
   if (req.method === "POST") {
-    const change = JSON.parse((await readBody(req, 2 * MAX_TEXT + 4_000)) || "{}") as { title?: unknown; source?: unknown; deleted?: unknown };
+    let change: { title?: unknown; source?: unknown; deleted?: unknown };
+    try {
+      change = JSON.parse((await readBody(req, 2 * MAX_TEXT + 4_000)) || "{}");
+    } catch {
+      return json(400, { error: "send JSON, smaller than the size limit" });
+    }
     const title = typeof change.title === "string" ? change.title.trim() : undefined;
     const source = typeof change.source === "string" ? change.source : undefined;
+    const deleted = typeof change.deleted === "boolean" ? change.deleted : undefined;
+    if (title === undefined && source === undefined && deleted === undefined) return json(400, { error: "send a title, a source, or deleted" });
     if (title !== undefined && (!title || title.length > 200)) return json(400, { error: "a title needs 1 to 200 characters" });
     if (source !== undefined) {
       if (d.kind !== "mermaid" && d.kind !== "svg") return json(400, { error: `a ${d.kind} image has no text to edit` });
@@ -31,7 +38,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
       // The raw route serves it as image/svg+xml, so it must stay an SVG.
       if (d.kind === "svg" && sniffImage(Buffer.from(source)) !== "svg") return json(400, { error: "the source is not an SVG" });
     }
-    db.updateDiagram(id, { title, source, deleted: typeof change.deleted === "boolean" ? change.deleted : undefined });
+    db.updateDiagram(id, { title, source, deleted });
     onChange();
     return json(200, withConversation(db.getDiagram(id)!, sessions));
   }
