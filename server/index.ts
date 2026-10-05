@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, statSync, watch, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, normalize } from "node:path";
 import type { Dashboard, PullRequest, SourceHealth, Ticket } from "../shared/types.ts";
@@ -27,7 +28,7 @@ import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
 import { SessionIndex, transcriptTurns } from "./sources/sessions.ts";
 import { isAlive, readReportedStatuses } from "./sources/status.ts";
 import * as summaryDb from "./summaries/db.ts";
-import { reconcile, requestSummary } from "./summaries/runner.ts";
+import { reconcile, redraftAfterNewEvents, requestSummary } from "./summaries/runner.ts";
 
 const WEB_DIST = new URL("../web/dist/", import.meta.url).pathname;
 /** Agents record smoketests and deploys with this script, into this dash's database. */
@@ -137,6 +138,7 @@ async function dashboard(force: boolean) {
   await syncDiagrams(parsed, (s) => runTicket.get(s.sessionId) ?? s.tickets[0] ?? null, new Date(now));
   d.diagrams = summaryDb.listDiagrams();
   d.sdlcEvents = summaryDb.sdlcEventsByTicket();
+  redraftAfterNewEvents([...d.myTickets, ...d.otherTickets], broadcast);
   return d;
 }
 
@@ -163,9 +165,13 @@ function broadcast(): void {
 mkdirSync(config.statusDir, { recursive: true });
 watch(config.sessionsDir, { recursive: true }, broadcast);
 watch(config.statusDir, broadcast);
+let redraftLoad: Promise<unknown> | null = null;
 // A summary run saves into SQLite from its own process; WAL writes touch agent-dash.db-wal.
 watch(dirname(summaryDb.DB_PATH), (_e, file) => {
-  if (file?.startsWith(basename(summaryDb.DB_PATH)) && !wroteRecently()) broadcast();
+  if (!file?.startsWith(basename(summaryDb.DB_PATH))) return;
+  if (!wroteRecently()) broadcast();
+  // An agent records an SDLC event from its own process; draft its next steps without waiting for the page.
+  if (!redraftLoad && summaryDb.hasNewEventTickets()) redraftLoad = dashboard(false).catch(() => {}).finally(() => (redraftLoad = null));
 });
 // Time alone changes a status: a pid dies, or a wait crosses a threshold.
 setInterval(broadcast, 30_000).unref();
@@ -273,30 +279,50 @@ const server = createServer(async (req, res) => {
       const env = body.sdlc?.kind === "smoketest" ? parseEnvironment(body.sdlc.env ?? "") : null;
       const stage = body.sdlc?.kind === "confirm_deploy" && (body.sdlc.stage === "beta" || body.sdlc.stage === "prod") ? body.sdlc.stage : null;
       if (body.sdlc && !env && !stage) return json(400, { error: "unknown SDLC verb" });
-      const message = step
-        ? stepMessage(key, step.body)
-        : env
-          ? smoketestMessage(key, env, SDLC_SCRIPT)
-          : stage
-            ? confirmDeployMessage(key, stage, group.prs.filter((p) => deployStageOf(p) === stage && p.state === "merged").map((p) => p.url), SDLC_SCRIPT)
-            : body.message;
-      if (!message?.trim()) return json(400, { error: "write the first message" });
+      if (!step && !body.sdlc && !body.message?.trim()) return json(400, { error: "write the first message" });
       const dir = cwd.replace(/^~(?=\/|$)/, homedir());
       if (!dir.startsWith("/") || !existsSync(dir) || !statSync(dir).isDirectory()) return json(400, { error: `not a folder: ${cwd}` });
-
-      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const base = join(config.handoffDir, `${key}-${stamp}`);
-      mkdirSync(config.handoffDir, { recursive: true });
-      writeFileSync(`${base}.md`, context);
-      const name = agentName(key, step?.body ?? message);
-      // Headless by default, so the page is where you talk to the agent.
-      if (!body.terminal) return json(201, { ok: true, contextFile: `${base}.md`, sessionId: startConversation({ cwd: dir, message: agentMessage(context, message), name }) });
-      // A leading "-" would read as a pi option; the space keeps it a message.
-      writeFileSync(`${base}.txt`, message.trim().startsWith("-") ? ` ${message.trim()}` : message.trim());
-      const command = piCommand(dir, name, `${base}.md`, `${base}.txt`);
-      const out = await runInNewItermTab(command);
-      if (out.result !== "ok") return json(500, { error: out.result === "not_authorized" ? "Allow it in System Settings → Privacy & Security → Automation → iTerm2." : (out.detail ?? "could not open iTerm") });
-      json(201, { ok: true, contextFile: `${base}.md` });
+      // Picked here, so a smoketest's running event can link to its agent before pi starts.
+      const sessionId = randomUUID();
+      // Saved before pi starts, so the stage is yellow from the click.
+      const running = env && !step ? summaryDb.addSdlcEvent({ eventType: "smoketest", startedAt: new Date().toISOString(), environments: [env], tickets: [key], sessionId }) : null;
+      const message = step
+        ? stepMessage(key, step.body)
+        : env && running
+          ? smoketestMessage(key, env, SDLC_SCRIPT, running.id)
+          : stage
+            ? confirmDeployMessage(key, stage, group.prs.filter((p) => deployStageOf(p) === stage && p.state === "merged").map((p) => p.url), SDLC_SCRIPT)
+            : (body.message ?? "");
+      // A smoketest whose agent never started must not stay yellow.
+      const dropRunning = () => {
+        if (running && summaryDb.deleteSdlcEvent(running.id)) broadcast();
+      };
+      try {
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const base = join(config.handoffDir, `${key}-${stamp}`);
+        mkdirSync(config.handoffDir, { recursive: true });
+        writeFileSync(`${base}.md`, context);
+        const name = agentName(key, step?.body ?? message);
+        // Headless by default, so the page is where you talk to the agent.
+        if (!body.terminal) {
+          startConversation({ cwd: dir, message: agentMessage(context, message), name, sessionId, onSpawnError: dropRunning });
+          if (running) broadcast();
+          return json(201, { ok: true, contextFile: `${base}.md`, sessionId });
+        }
+        // A leading "-" would read as a pi option; the space keeps it a message.
+        writeFileSync(`${base}.txt`, message.trim().startsWith("-") ? ` ${message.trim()}` : message.trim());
+        const command = piCommand(dir, name, `${base}.md`, `${base}.txt`, sessionId);
+        const out = await runInNewItermTab(command);
+        if (out.result !== "ok") {
+          dropRunning();
+          return json(500, { error: out.result === "not_authorized" ? "Allow it in System Settings → Privacy & Security → Automation → iTerm2." : (out.detail ?? "could not open iTerm") });
+        }
+        if (running) broadcast();
+        json(201, { ok: true, contextFile: `${base}.md` });
+      } catch (err) {
+        dropRunning();
+        json(500, { error: (err as Error).message });
+      }
     } else if (url.pathname === "/api/conversations" && req.method === "POST") {
       // A plain pi with no ticket and no context file, run headless so the page is its UI.
       if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
@@ -321,7 +347,7 @@ const server = createServer(async (req, res) => {
       if (!new RegExp(`^${config.ticketPattern.source}$`).test(ticket)) return json(400, { error: `not a ticket key: ${ticket}` });
       if (!/^[\w-]{8,64}$/.test(session)) return json(400, { error: "not a session id" });
       const { status, reason } = JSON.parse((await readBody(req, 16_000)) || "{}") as { status?: string; reason?: string };
-      if (status !== "resolved" && status !== "relevant") return json(400, { error: "status must be resolved or relevant" });
+      if (status !== "resolved" && status !== "relevant" && status !== "unlinked") return json(400, { error: "status must be resolved, relevant or unlinked" });
       const change = summaryDb.setThreadStatus(ticket, session, status, reason?.trim() || null);
       broadcast();
       json(201, change);
@@ -339,7 +365,7 @@ const server = createServer(async (req, res) => {
       res.writeHead(code, { "Content-Type": "application/json" }).end(JSON.stringify(out));
     } else if (url.pathname === "/api/history") {
       const [parsed, reported, pulls] = await Promise.all([sessions.scan(), readReportedStatuses(config.statusDir), prs.get(false)]);
-      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify(buildHistory(parsed, reported, pulls, Date.now())));
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify(buildHistory(parsed, reported, pulls, Date.now(), undefined, summaryDb.currentThreadStatuses())));
     } else if (url.pathname === "/api/transcript") {
       const sessionId = url.searchParams.get("session") ?? "";
       const file = sessions.fileFor(sessionId) ?? ((await sessions.scan()) && sessions.fileFor(sessionId));

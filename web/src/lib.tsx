@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import type { Dashboard, DiagramWithSource, HistoryRun, PrDetail, Transcript } from "../../shared/types.ts";
+import type { Dashboard, DiagramWithSource, HistoryRun, PrDetail, ThreadStatus, Transcript } from "../../shared/types.ts";
 import { internalHref, JIRA_BROWSE, splitTrailing } from "./links.ts";
 import { EmbeddedImage, MermaidFence, setKnownDiagrams } from "./mermaid.tsx";
 import { boardHash, newlyWaiting, runsOf, type Seen, snapshot } from "./notify.ts";
@@ -262,8 +262,8 @@ export const api = {
     if (!res.ok) throw new Error(`could not load the chat (${res.status})`);
     return res.json();
   },
-  setThread: (ticket: string, sessionId: string, status: "resolved" | "relevant", reason?: string) =>
-    post(`/api/threads?ticket=${encodeURIComponent(ticket)}&session=${encodeURIComponent(sessionId)}`, { status, reason }),
+  setThread: (ticket: string, sessionId: string, status: ThreadStatus) =>
+    post(`/api/threads?ticket=${encodeURIComponent(ticket)}&session=${encodeURIComponent(sessionId)}`, { status }),
 };
 
 // ---- markdown -----------------------------------------------------------------------

@@ -551,45 +551,26 @@ function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd:
   );
 }
 
-/** "Resolve" with an optional reason: the thread stops counting for this ticket. */
-function ResolveButton({ ticket, run, onError, className = "btn ghost" }: { ticket: string; run: Run; onError: (m: string | null) => void; className?: string }) {
-  const [open, setOpen] = useState(false);
-  const [reason, setReason] = useState("");
+/**
+ * "Resolve" keeps the thread on the ticket but stops it counting. "Unlink" takes it off the
+ * ticket, for a thread that only named the key.
+ */
+function ThreadButtons({ ticket, run, onError, className = "btn ghost" }: { ticket: string; run: Run; onError: (m: string | null) => void; className?: string }) {
   const [saving, setSaving] = useState(false);
-  const submit = async () => {
+  const set = async (status: "resolved" | "unlinked") => {
     setSaving(true);
-    onError(await api.setThread(ticket, run.sessionId, "resolved", reason));
+    onError(await api.setThread(ticket, run.sessionId, status));
     setSaving(false);
-    setOpen(false);
-    setReason("");
   };
-  if (!open) {
-    return (
-      <button className={className} onClick={() => setOpen(true)} title={`This thread no longer matters to ${ticket}`}>
-        Resolve
-      </button>
-    );
-  }
   return (
-    <span className="resolve-form">
-      <input
-        autoFocus
-        value={reason}
-        maxLength={500}
-        placeholder="Why? (optional)"
-        onChange={(e) => setReason(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") submit();
-          if (e.key === "Escape") setOpen(false);
-        }}
-      />
-      <button className="btn small primary" onClick={submit} disabled={saving}>
+    <>
+      <button className={className} onClick={() => set("resolved")} disabled={saving} title={`This thread no longer matters to ${ticket}`}>
         Resolve
       </button>
-      <button className="btn ghost small" onClick={() => setOpen(false)}>
-        Cancel
+      <button className={className} onClick={() => set("unlinked")} disabled={saving} title={`This thread has nothing to do with ${ticket}: take it off the ticket`}>
+        Unlink
       </button>
-    </span>
+    </>
   );
 }
 
@@ -608,7 +589,7 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket }: { run: R
           </span>
         </div>
         <span className="grow" />
-        {ticket && <ResolveButton ticket={ticket} run={run} onError={onError} />}
+        {ticket && <ThreadButtons ticket={ticket} run={run} onError={onError} />}
         <OpenTab run={run} onError={onError} hotkey={primary} />
       </header>
       <LivePanel run={run} now={now} onError={onError} />
@@ -692,7 +673,7 @@ function History({ runs: allRuns, now, onError, ticket, threads = {}, focus = nu
             </span>
             <span className="grow" />
             <span className="meta">{statusText(r, now)}</span>
-            {ticket && <ResolveButton ticket={ticket} run={r} onError={onError} className="btn ghost small" />}
+            {ticket && <ThreadButtons ticket={ticket} run={r} onError={onError} className="btn ghost small" />}
             <OpenTab run={r} onError={onError} className="btn ghost small" label="Open" />
           </div>
           {open === r.sessionId && r.lastMessage && (
@@ -913,7 +894,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
 
       {s.ticket && <NextSteps s={s} state={data.summaries[s.ticket.ticket.key]} notes={data.notes[s.ticket.ticket.key] ?? []} now={now} cwd={cwd} onError={setError} />}
 
-      {s.ticket && <Smoketests ticket={s.ticket.ticket.key} events={data.sdlcEvents[s.ticket.ticket.key] ?? []} now={now} cwd={cwd} onError={setError} />}
+      {s.ticket && <Smoketests ticket={s.ticket.ticket.key} events={data.sdlcEvents[s.ticket.ticket.key] ?? []} runs={s.ticket.runs} now={now} cwd={cwd} onError={setError} />}
 
       {s.ticket && <StartAgent key={s.id} s={s} cwd={cwd} setCwd={setCwd} onError={setError} focusSignal={agentSignal} />}
 

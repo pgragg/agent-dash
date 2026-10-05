@@ -117,7 +117,7 @@ function DiagramEditor({ d, onDone }: { d: DiagramWithSource; onDone: (saved: Di
   };
   const keys = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void save();
-    if (e.key === "Escape") onDone(null);
+    if (e.key === "Escape" && (!Object.keys(change).length || confirm("Throw away your changes?"))) onDone(null);
   };
   return (
     <section className="card diagram-editor" onKeyDown={keys}>

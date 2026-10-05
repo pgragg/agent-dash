@@ -171,6 +171,24 @@ test("a thread resolved for one of its tickets still counts for the others", () 
   assert.equal(d.attention.find((a) => a.kind === "awaiting_input")?.ticketKey, "FSDK-2");
 });
 
+test("an unlinked thread leaves the ticket, and so does a PR with no key that it opened", () => {
+  const url = "https://github.com/o/r/pull/9";
+  const waiting = session({ sessionId: "w", tickets: ["FSDK-1"], createdPrs: [url], lastActivityAt: minutesAgo(5), lastStopReason: "stop", midRun: false });
+  const unlinked: ThreadStatusChange = { id: 1, ticket: "FSDK-1", sessionId: "w", status: "unlinked", reason: null, createdAt: minutesAgo(1) };
+  const d = build([waiting], [pr({ url, tickets: [] })], [ticket()], [unlinked]);
+  assert.deepEqual(d.myTickets[0].runs, []);
+  assert.deepEqual(d.myTickets[0].prs, []);
+  assert.equal(d.attention.find((a) => a.kind === "awaiting_input")?.ticketKey, null, "the waiting run shows on its own");
+  assert.deepEqual(d.unlinkedRuns.map((r) => r.sessionId), ["w"]);
+
+  // A PR that names the key does not link the run again.
+  const named = build([waiting], [pr({ url, tickets: ["FSDK-1"] })], [ticket()], [unlinked]);
+  assert.deepEqual(named.myTickets[0].runs, []);
+
+  const relinked = build([waiting], [pr({ url, tickets: [] })], [ticket()], [{ ...unlinked, id: 2, status: "relevant" }]);
+  assert.deepEqual(relinked.myTickets[0].runs.map((r) => r.sessionId), ["w"]);
+});
+
 test("a waiting run counts for its open ticket first; on a Done ticket it is context only", () => {
   const waiting = (tickets: string[]) => session({ sessionId: "w", tickets, lastActivityAt: minutesAgo(5), lastStopReason: "stop", midRun: false });
   const closed = ticket({ key: "FSDK-9", statusCategory: "done", status: "Done", assignedToMe: false });

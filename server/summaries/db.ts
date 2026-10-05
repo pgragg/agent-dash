@@ -3,9 +3,21 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { splitSummary } from "../../shared/nextSteps.ts";
-import type { Diagram, DiagramKind, NextStep, Note, SdlcEnvironment, SdlcEvent, SdlcEventType, ThreadStatus, ThreadStatusChange, TicketSummary } from "../../shared/types.ts";
+import type { Diagram, DiagramKind, NextStep, Note, SdlcEnvironment, SdlcEvent, SdlcEventType, SmoketestOutcome, ThreadStatus, ThreadStatusChange, TicketSummary } from "../../shared/types.ts";
 
 export const DB_PATH = process.env.AGENT_DASH_DB ?? join(homedir(), ".agent-dash/agent-dash.db");
+
+const THREAD_TABLE = `
+CREATE TABLE IF NOT EXISTS PiConversationStatusChange (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket     TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  status     TEXT NOT NULL CHECK (status IN ('relevant', 'resolved', 'unlinked')),
+  reason     TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS pi_conversation_status_by_thread ON PiConversationStatusChange (ticket, session_id, id);
+`;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS summaries (
@@ -40,15 +52,7 @@ CREATE TABLE IF NOT EXISTS notes (
 CREATE INDEX IF NOT EXISTS notes_by_ticket ON notes (ticket, id);
 
 -- Append-only: each row is one change; the newest row per (ticket, session_id) is the current state.
-CREATE TABLE IF NOT EXISTS PiConversationStatusChange (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  ticket     TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  status     TEXT NOT NULL CHECK (status IN ('relevant', 'resolved')),
-  reason     TEXT,
-  created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS pi_conversation_status_by_thread ON PiConversationStatusChange (ticket, session_id, id);
+${THREAD_TABLE}
 
 -- One row per action on the Actions view, from it first showing to it going away.
 -- key names what the action is about ("ci_failing pr:<url>"), so the same action keeps its row and age.
@@ -72,6 +76,8 @@ CREATE TABLE IF NOT EXISTS SDLC_Event (
   outcome      TEXT CHECK (outcome IN ('passed', 'failed', 'blocked')),
   test_details TEXT,
   test_results TEXT,
+  -- The pi session that runs the smoketest, when agent-dash started it, so the page can link to it.
+  session_id   TEXT,
   -- Set when Piper chose not to run the smoketest: the stage then counts as passed by on purpose.
   skipped_at   TEXT,
   created_at   TEXT NOT NULL
@@ -89,6 +95,10 @@ CREATE TABLE IF NOT EXISTS SDLC_Event_Ticket (
   sdlc_event_id INTEGER NOT NULL REFERENCES SDLC_Event (id),
   ticket        TEXT NOT NULL,
   created_at    TEXT NOT NULL,
+  -- Set when the server started a next-steps draft for this link; empty means not yet.
+  summary_requested_at TEXT,
+  -- When the event last changed after it was made; empty if it never did.
+  changed_at    TEXT,
   UNIQUE (sdlc_event_id, ticket)
 );
 CREATE INDEX IF NOT EXISTS sdlc_event_ticket_by_ticket ON SDLC_Event_Ticket (ticket);
@@ -161,7 +171,7 @@ function allowBlockedOutcome(d: DatabaseSync): void {
   const row = d.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'SDLC_Event'").get() as { sql: string } | undefined;
   if (!row || row.sql.includes("'blocked'")) return;
   const create = SCHEMA.slice(SCHEMA.indexOf("CREATE TABLE IF NOT EXISTS SDLC_Event ("), SCHEMA.indexOf("-- The environments under test"));
-  const cols = "id, event_type, started_at, finished_at, outcome, test_details, test_results, skipped_at, created_at";
+  const cols = "id, event_type, started_at, finished_at, outcome, test_details, test_results, session_id, skipped_at, created_at";
   // The other SDLC tables refer to SDLC_Event by name, so the checks must be off while it is gone.
   d.exec("PRAGMA foreign_keys = OFF");
   try {
@@ -183,14 +193,37 @@ export function open(path = DB_PATH): DatabaseSync {
   if (db) return db;
   mkdirSync(dirname(path), { recursive: true });
   db = new DatabaseSync(path);
-  // WAL lets the server read while a summary run writes from its own process.
-  db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
+  // WAL lets the server read while a summary run writes from its own process. The timeout comes
+  // first, so a write from another process makes the WAL switch wait instead of crash the server.
+  db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL;");
   db.exec(SCHEMA);
   const diagramColumns = new Set((db.prepare("PRAGMA table_info(diagrams)").all() as { name: string }[]).map((c) => c.name));
   for (const c of ["edited_at", "deleted_at"]) if (!diagramColumns.has(c)) db.exec(`ALTER TABLE diagrams ADD COLUMN ${c} TEXT`);
   // CREATE TABLE IF NOT EXISTS does not add a column to a table that is already there.
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = 'session_id'").get()) db.exec("ALTER TABLE SDLC_Event ADD COLUMN session_id TEXT");
   if (!(db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = 'skipped_at'").get())) db.exec("ALTER TABLE SDLC_Event ADD COLUMN skipped_at TEXT");
+  // Before the trigger below: copying the table drops the triggers on it.
   allowBlockedOutcome(db);
+  // SQLite cannot change a CHECK, so an older table is copied into one that allows 'unlinked'.
+  const threadTable = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'PiConversationStatusChange'").get() as { sql: string };
+  if (!threadTable.sql.includes("'unlinked'")) {
+    db.exec(`BEGIN IMMEDIATE;
+      ALTER TABLE PiConversationStatusChange RENAME TO PiConversationStatusChange_old;
+      DROP INDEX pi_conversation_status_by_thread;
+      ${THREAD_TABLE}
+      INSERT INTO PiConversationStatusChange SELECT * FROM PiConversationStatusChange_old;
+      DROP TABLE PiConversationStatusChange_old;
+      COMMIT;`);
+  }
+  // Links that are already there count as drafted, so an upgrade does not start a paid run per ticket.
+  if (!(db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event_Ticket') WHERE name = 'summary_requested_at'").get())) {
+    db.exec("ALTER TABLE SDLC_Event_Ticket ADD COLUMN summary_requested_at TEXT; UPDATE SDLC_Event_Ticket SET summary_requested_at = created_at");
+  }
+  if (!(db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event_Ticket') WHERE name = 'changed_at'").get())) db.exec("ALTER TABLE SDLC_Event_Ticket ADD COLUMN changed_at TEXT");
+  // A changed event needs a new draft too. A trigger catches every writer, also the script's own process.
+  db.exec(`CREATE TRIGGER IF NOT EXISTS sdlc_event_changed AFTER UPDATE ON SDLC_Event BEGIN
+    UPDATE SDLC_Event_Ticket SET summary_requested_at = NULL, changed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE sdlc_event_id = NEW.id;
+  END`);
   // Summaries saved before steps were stored get their rows once.
   for (const r of db.prepare("SELECT id, ticket, summary FROM summaries WHERE status = 'done' AND id NOT IN (SELECT summary_id FROM next_steps)").all() as unknown as Row[]) {
     insertSteps(r.id, r.ticket, r.summary ?? "");
@@ -411,9 +444,9 @@ export function addDiagrams(rows: NewDiagram[]): void {
   }
 }
 
-/** Newest first, without the source or the deleted ones. */
-export function listDiagrams(): Diagram[] {
-  return (open().prepare(`SELECT ${DIAGRAM_COLUMNS} FROM diagrams WHERE deleted_at IS NULL ORDER BY created_at DESC, id DESC`).all() as unknown as Diagram[]).map((r) => ({ ...r }));
+/** Newest first, without the source. Without `withDeleted`, without the ones you deleted. */
+export function listDiagrams({ withDeleted = false } = {}): Diagram[] {
+  return (open().prepare(`SELECT ${DIAGRAM_COLUMNS} FROM diagrams ${withDeleted ? "" : "WHERE deleted_at IS NULL"} ORDER BY created_at DESC, id DESC`).all() as unknown as Diagram[]).map((r) => ({ ...r }));
 }
 
 export type StoredDiagram = Diagram & { source: string | null; deletedAt: string | null };
@@ -437,9 +470,9 @@ export function updateDiagram(id: number, change: { title?: string; source?: str
   return Number(open().prepare(`UPDATE diagrams SET ${sets.map(([c]) => `${c} = ?`).join(", ")} WHERE id = ?`).run(...sets.map(([, v]) => v), id).changes) > 0;
 }
 
-/** Drops a conversation's diagrams from file writes that a newer write of the same file replaced. */
+/** Drops a conversation's diagrams from file writes that a newer write of the same file replaced. Your edit is yours, so it stays. */
 export function dropReplacedDiagrams(sessionId: string, keep: Set<string>): number {
-  const rows = open().prepare("SELECT key FROM diagrams WHERE session_id = ? AND origin != 'reply' AND kind IN ('mermaid', 'svg')").all(sessionId) as { key: string }[];
+  const rows = open().prepare("SELECT key FROM diagrams WHERE session_id = ? AND origin != 'reply' AND kind IN ('mermaid', 'svg') AND edited_at IS NULL").all(sessionId) as { key: string }[];
   const del = open().prepare("DELETE FROM diagrams WHERE key = ?");
   let n = 0;
   for (const r of rows) if (!keep.has(r.key)) n += Number(del.run(r.key).changes);
@@ -464,6 +497,7 @@ export interface NewSdlcEvent {
   outcome?: SdlcEvent["outcome"];
   testDetails?: string | null;
   testResults?: string | null;
+  sessionId?: string | null;
   skippedAt?: string | null;
   environments: SdlcEnvironment[];
   tickets: string[];
@@ -475,18 +509,39 @@ export function addSdlcEvent(e: NewSdlcEvent, now = new Date()): SdlcEvent {
   d.exec("BEGIN IMMEDIATE");
   try {
     const { id } = d
-      .prepare("INSERT INTO SDLC_Event (event_type, started_at, finished_at, outcome, test_details, test_results, skipped_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
-      .get(e.eventType, e.startedAt, e.finishedAt ?? null, e.outcome ?? null, e.testDetails ?? null, e.testResults ?? null, e.skippedAt ?? null, created) as { id: number };
+      .prepare("INSERT INTO SDLC_Event (event_type, started_at, finished_at, outcome, test_details, test_results, session_id, skipped_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
+      .get(e.eventType, e.startedAt, e.finishedAt ?? null, e.outcome ?? null, e.testDetails ?? null, e.testResults ?? null, e.sessionId ?? null, e.skippedAt ?? null, created) as { id: number };
     const env = d.prepare("INSERT OR IGNORE INTO SDLC_Event_Environment (sdlc_event_id, environment) VALUES (?, ?)");
     for (const x of e.environments) env.run(id, x);
-    const link = d.prepare("INSERT OR IGNORE INTO SDLC_Event_Ticket (sdlc_event_id, ticket, created_at) VALUES (?, ?, ?)");
-    for (const t of e.tickets) link.run(id, t, created);
+    // A smoketest that only started moves no stage yet, so it gets its draft when it finishes.
+    const drafted = e.sessionId && !e.finishedAt && !e.outcome && !e.skippedAt ? created : null;
+    const link = d.prepare("INSERT OR IGNORE INTO SDLC_Event_Ticket (sdlc_event_id, ticket, created_at, summary_requested_at) VALUES (?, ?, ?, ?)");
+    for (const t of e.tickets) link.run(id, t, created, drafted);
     d.exec("COMMIT");
     return sdlcEvents("WHERE e.id = ?", id)[0];
   } catch (err) {
     d.exec("ROLLBACK");
     throw err;
   }
+}
+
+export interface SdlcFinish {
+  finishedAt: string;
+  outcome: SmoketestOutcome;
+  testDetails: string | null;
+  testResults: string | null;
+}
+
+/** Ends a running smoketest. Null when there is no such smoketest, or it already ended. */
+export function finishSdlcEvent(id: number, f: SdlcFinish): SdlcEvent | null {
+  const changed = open()
+    .prepare("UPDATE SDLC_Event SET finished_at = ?, outcome = ?, test_details = coalesce(?, test_details), test_results = coalesce(?, test_results) WHERE id = ? AND event_type = 'smoketest' AND finished_at IS NULL AND outcome IS NULL AND skipped_at IS NULL")
+    .run(f.finishedAt, f.outcome, f.testDetails, f.testResults, id).changes;
+  return changed ? getSdlcEvent(id) : null;
+}
+
+export function getSdlcEvent(id: number): SdlcEvent | null {
+  return sdlcEvents("WHERE e.id = ?", id)[0] ?? null;
 }
 
 export function deleteSdlcEvent(id: number): boolean {
@@ -508,13 +563,34 @@ export function deleteSdlcEvent(id: number): boolean {
 function sdlcEvents(where = "", ...params: number[]): SdlcEvent[] {
   const rows = open()
     .prepare(
-      `SELECT e.id, e.event_type AS eventType, e.started_at AS startedAt, e.finished_at AS finishedAt, e.outcome, e.test_details AS testDetails, e.test_results AS testResults, e.skipped_at AS skippedAt, e.created_at AS createdAt,
+      `SELECT e.id, e.event_type AS eventType, e.started_at AS startedAt, e.finished_at AS finishedAt, e.outcome, e.test_details AS testDetails, e.test_results AS testResults, e.session_id AS sessionId, e.skipped_at AS skippedAt, e.created_at AS createdAt,
         (SELECT group_concat(environment) FROM SDLC_Event_Environment WHERE sdlc_event_id = e.id) AS envs,
         (SELECT group_concat(ticket) FROM SDLC_Event_Ticket WHERE sdlc_event_id = e.id) AS keys
        FROM SDLC_Event e ${where} ORDER BY e.started_at DESC, e.id DESC`,
     )
     .all(...params) as unknown as (Omit<SdlcEvent, "environments" | "tickets"> & { envs: string | null; keys: string | null })[];
   return rows.map(({ envs, keys, ...r }) => ({ ...r, environments: (envs?.split(",") ?? []) as SdlcEnvironment[], tickets: keys?.split(",") ?? [] }));
+}
+
+/**
+ * Marks every event link that has no next-steps draft yet as drafted, and returns its tickets,
+ * with the newest time that an event was made or changed. Read and mark are one step, so two
+ * callers never both draft.
+ */
+export function claimNewEventTickets(now = new Date()): Map<string, string> {
+  const rows = open()
+    .prepare("UPDATE SDLC_Event_Ticket SET summary_requested_at = ? WHERE summary_requested_at IS NULL RETURNING ticket, coalesce(changed_at, created_at) AS at")
+    .all(now.toISOString()) as { ticket: string; at: string }[];
+  const out = new Map<string, string>();
+  for (const r of rows) {
+    const prev = out.get(r.ticket);
+    if (!prev || r.at > prev) out.set(r.ticket, r.at);
+  }
+  return out;
+}
+
+export function hasNewEventTickets(): boolean {
+  return !!open().prepare("SELECT 1 FROM SDLC_Event_Ticket WHERE summary_requested_at IS NULL LIMIT 1").get();
 }
 
 /** Every ticket's events, newest first. An event on two tickets shows under both. */

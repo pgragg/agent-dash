@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { buildHandoff } from "../server/handoff.ts";
 import { validateSdlcEvent } from "../server/sdlc.ts";
 import * as db from "../server/summaries/db.ts";
-import { buildContext, buildPrompt } from "../server/summaries/runner.ts";
+import { buildContext, buildPrompt, redraftAfterNewEvents } from "../server/summaries/runner.ts";
 import { confirmDeployMessage, parseEnvironment, sdlcProgress, smoketestMessage } from "../shared/sdlc.ts";
 import type { SdlcEvent } from "../shared/types.ts";
 import { NOW, PATTERN, pr, ticket } from "./helpers.ts";
@@ -27,6 +27,7 @@ function ev(over: Partial<SdlcEvent> = {}): SdlcEvent {
     outcome: "passed",
     testDetails: null,
     testResults: null,
+    sessionId: null,
     skippedAt: null,
     environments: ["localhost"],
     tickets: ["FSDK-1"],
@@ -111,6 +112,20 @@ test("Done comes from Jira, and then there is no next stage", () => {
   assert.equal(states(p).prod_smoketest, "skipped");
 });
 
+test("a smoketest with a start and no end is running: the stage is yellow until its agent records the result", () => {
+  const running = ev({ outcome: null, finishedAt: null, sessionId: "s-1", startedAt: "2026-10-02T11:00:00.000Z" });
+  const p = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev({ outcome: "failed" }), running] });
+  assert.equal(states(p).local_smoketest, "running");
+  assert.equal(p.next?.id, "local_smoketest");
+  assert.equal(p.next?.events[0].sessionId, "s-1");
+  assert.match(p.hint!, /Smoketest running since 2026-10-02 11:00 UTC/);
+  // A running smoketest is not progress yet.
+  assert.equal(sdlcProgress({ ticket: ticket(), prs: [], events: [running] }).current, 0);
+  // A hand record with no outcome has no session id, so it counts as passed.
+  assert.equal(states(sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev({ finishedAt: null })] })).local_smoketest, "done");
+  assert.equal(states(sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev({ outcome: null, finishedAt: null })] })).local_smoketest, "done");
+});
+
 test("an environment is an id or a label", () => {
   assert.equal(parseEnvironment("postman_beta"), "postman_beta");
   assert.equal(parseEnvironment("Postman Beta"), "postman_beta");
@@ -149,9 +164,9 @@ test("a database from before skips gets the skipped_at column", () => {
 test("a database from before blocked keeps its events and accepts a blocked smoketest", () => {
   const old = join(dir, "old-check.db");
   const d = new DatabaseSync(old);
-  d.exec(`CREATE TABLE SDLC_Event (id INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT NOT NULL CHECK (event_type IN ('smoketest', 'deploy')), started_at TEXT NOT NULL, finished_at TEXT, outcome TEXT CHECK (outcome IN ('passed', 'failed')), test_details TEXT, test_results TEXT, skipped_at TEXT, created_at TEXT NOT NULL);
+  d.exec(`CREATE TABLE SDLC_Event (id INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT NOT NULL CHECK (event_type IN ('smoketest', 'deploy')), started_at TEXT NOT NULL, finished_at TEXT, outcome TEXT CHECK (outcome IN ('passed', 'failed')), test_details TEXT, test_results TEXT, session_id TEXT, skipped_at TEXT, created_at TEXT NOT NULL);
 CREATE TABLE SDLC_Event_Ticket (id INTEGER PRIMARY KEY AUTOINCREMENT, sdlc_event_id INTEGER NOT NULL REFERENCES SDLC_Event (id), ticket TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE (sdlc_event_id, ticket));
-INSERT INTO SDLC_Event (id, event_type, started_at, outcome, created_at) VALUES (7, 'smoketest', '2026-10-01T10:00:00.000Z', 'failed', '2026-10-01T10:00:00.000Z');
+INSERT INTO SDLC_Event (id, event_type, started_at, outcome, session_id, created_at) VALUES (7, 'smoketest', '2026-10-01T10:00:00.000Z', 'failed', 's-7', '2026-10-01T10:00:00.000Z');
 INSERT INTO SDLC_Event_Ticket (sdlc_event_id, ticket, created_at) VALUES (7, 'FSDK-32', '2026-10-01T10:00:00.000Z');`);
   d.close();
   const script = new URL("../scripts/sdlc-event.ts", import.meta.url).pathname;
@@ -160,6 +175,10 @@ INSERT INTO SDLC_Event_Ticket (sdlc_event_id, ticket, created_at) VALUES (7, 'FS
   assert.equal(out.id, 8);
   const rows = new DatabaseSync(old).prepare("SELECT e.id, e.outcome FROM SDLC_Event e JOIN SDLC_Event_Ticket t ON t.sdlc_event_id = e.id WHERE t.ticket = 'FSDK-32' ORDER BY e.id").all();
   assert.deepEqual(rows.map((r) => [r.id, r.outcome]), [[7, "failed"], [8, "blocked"]]);
+  const after = new DatabaseSync(old);
+  assert.equal((after.prepare("SELECT session_id AS s FROM SDLC_Event WHERE id = 7").get() as { s: string }).s, "s-7");
+  // The copy drops the table's triggers, so open() must add the change trigger after it.
+  assert.ok(after.prepare("SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = 'sdlc_event_changed'").get());
 });
 
 test("a new event is checked: a known type, real keys, known environments, and times in order", () => {
@@ -191,12 +210,34 @@ test("the script that agents call writes into the same database", () => {
   assert.throws(() => execFileSync("node", [script, "smoketest", "--ticket", "FSDK-30"], { env, stdio: "pipe" }));
 });
 
+test("the agent finishes its running event once, with the script", () => {
+  const script = new URL("../scripts/sdlc-event.ts", import.meta.url).pathname;
+  const env = { ...process.env, AGENT_DASH_DB: dbPath };
+  const running = db.addSdlcEvent({ eventType: "smoketest", startedAt: "2026-10-02T10:00:00.000Z", environments: ["localhost"], tickets: ["FSDK-31"], sessionId: "abc-123" });
+  assert.equal(running.sessionId, "abc-123");
+  assert.equal(running.finishedAt, null);
+  const out = JSON.parse(execFileSync("node", [script, "finish", "--id", String(running.id), "--outcome", "failed", "--results", "500 on /publish"], { env }).toString());
+  assert.equal(out.outcome, "failed");
+  assert.ok(out.finishedAt);
+  const saved = db.sdlcEventsByTicket()["FSDK-31"][0];
+  assert.equal(saved.testResults, "500 on /publish");
+  assert.equal(saved.sessionId, "abc-123");
+  // A second result does not overwrite the first, and a result needs an outcome.
+  assert.throws(() => execFileSync("node", [script, "finish", "--id", String(running.id), "--outcome", "passed"], { env, stdio: "pipe" }));
+  const other = db.addSdlcEvent({ eventType: "smoketest", startedAt: "2026-10-02T10:00:00.000Z", environments: ["localhost"], tickets: ["FSDK-31"] });
+  assert.throws(() => execFileSync("node", [script, "finish", "--id", String(other.id)], { env, stdio: "pipe" }));
+  assert.throws(() => execFileSync("node", [script, "finish", "--id", "999999", "--outcome", "passed"], { env, stdio: "pipe" }));
+  assert.throws(() => execFileSync("node", [script, "finish", "--outcome", "passed"], { env, stdio: "pipe" }));
+  const deploy = db.addSdlcEvent({ eventType: "deploy", startedAt: "2026-10-02T10:00:00.000Z", environments: ["postman_beta"], tickets: ["FSDK-31"] });
+  assert.throws(() => execFileSync("node", [script, "finish", "--id", String(deploy.id), "--outcome", "passed"], { env, stdio: "pipe" }));
+});
+
 test("verb messages name the environment and the record command; the summary prompt carries the order", async () => {
-  const m = smoketestMessage("FSDK-1", "localhost", "/dash/scripts/sdlc-event.ts");
+  const m = smoketestMessage("FSDK-1", "localhost", "/dash/scripts/sdlc-event.ts", 12);
   assert.match(m, /^Run a smoketest of FSDK-1 on localhost\./);
   assert.match(m, /Local smoketesting\.md/);
-  assert.match(m, /node \/dash\/scripts\/sdlc-event\.ts smoketest --ticket FSDK-1 --env localhost/);
-  assert.match(smoketestMessage("FSDK-1", "postman_prod", "/s"), /real customer traffic/);
+  assert.match(m, /node \/dash\/scripts\/sdlc-event\.ts finish --id 12 --outcome passed\|failed/);
+  assert.match(smoketestMessage("FSDK-1", "postman_prod", "/s", 1), /real customer traffic/);
   const c = confirmDeployMessage("FSDK-1", "beta", ["https://github.com/postman-eng/cloud9-parcels-deployments/pull/7"], "/s");
   assert.match(c, /Do not sync, roll back, or change anything/);
   assert.match(c, /deploy --ticket FSDK-1 --env postman_beta/);
@@ -207,4 +248,60 @@ test("verb messages name the environment and the record command; the summary pro
   assert.match(ctx, /Next stage: Local smoketest\./);
   const handoff = buildHandoff({ group: { ticket: ticket(), runs: [], prs: [pr()], threads: {} }, notes: [], summary: undefined, events: [ev()], now: new Date(NOW) });
   assert.match(handoff, /\[x\] Local smoketest/);
+});
+
+test("a new event starts one next-steps draft per ticket on the board, and replaces a draft that started before it", () => {
+  db.claimNewEventTickets(); // the events of the tests above
+  db.createRequest("FSDK-40", new Date(Date.now() - 60_000));
+  db.addSdlcEvent({ eventType: "smoketest", startedAt: "2026-10-02T10:00:00.000Z", environments: ["localhost"], tickets: ["FSDK-40", "FSDK-41"] });
+  db.addSdlcEvent({ eventType: "deploy", startedAt: "2026-10-02T11:00:00.000Z", environments: ["postman_beta"], tickets: ["FSDK-40"] });
+  const calls: { key: string; force?: boolean }[] = [];
+  const start = async (g: { ticket: { key: string } }, opts?: { force?: boolean }) => (calls.push({ key: g.ticket.key, force: opts?.force }), {} as db.SummaryRecord);
+  const groups = [{ ticket: ticket({ key: "FSDK-40" }), runs: [], prs: [] }];
+  // FSDK-41 is not on the board, so it gets no draft, and does not stay pending.
+  assert.deepEqual(redraftAfterNewEvents(groups, undefined, start), ["FSDK-40"]);
+  assert.deepEqual(calls, [{ key: "FSDK-40", force: true }]);
+  assert.equal(db.hasNewEventTickets(), false);
+  assert.deepEqual(redraftAfterNewEvents(groups, undefined, start), []);
+});
+
+test("a running smoketest starts its next-steps draft when it finishes, not when it starts", () => {
+  db.claimNewEventTickets();
+  const e = db.addSdlcEvent({ eventType: "smoketest", startedAt: new Date().toISOString(), environments: ["localhost"], tickets: ["FSDK-42"], sessionId: "s-42" });
+  assert.equal(db.hasNewEventTickets(), false);
+  db.finishSdlcEvent(e.id, { finishedAt: new Date().toISOString(), outcome: "passed", testDetails: null, testResults: null });
+  assert.deepEqual([...db.claimNewEventTickets().keys()], ["FSDK-42"]);
+});
+
+test("a skipped smoketest cannot be finished", () => {
+  const now = new Date().toISOString();
+  const e = db.addSdlcEvent({ eventType: "smoketest", startedAt: now, skippedAt: now, environments: ["localhost"], tickets: ["FSDK-43"] });
+  assert.equal(db.finishSdlcEvent(e.id, { finishedAt: now, outcome: "passed", testDetails: null, testResults: null }), null);
+});
+
+test("an upgrade counts the event links that are already there as drafted", () => {
+  const old = join(dir, "old-links.db");
+  const o = new DatabaseSync(old);
+  o.exec("CREATE TABLE SDLC_Event_Ticket (id INTEGER PRIMARY KEY AUTOINCREMENT, sdlc_event_id INTEGER NOT NULL, ticket TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE (sdlc_event_id, ticket))");
+  o.exec("INSERT INTO SDLC_Event_Ticket (sdlc_event_id, ticket, created_at) VALUES (99, 'FSDK-50', '2026-10-01T00:00:00.000Z')");
+  const script = new URL("../scripts/sdlc-event.ts", import.meta.url).pathname;
+  execFileSync("node", [script, "smoketest", "--ticket", "FSDK-51", "--env", "localhost"], { env: { ...process.env, AGENT_DASH_DB: old } });
+  const rows = o.prepare("SELECT ticket, summary_requested_at AS at FROM SDLC_Event_Ticket ORDER BY id").all() as { ticket: string; at: string | null }[];
+  assert.deepEqual(rows.map((r) => ({ ...r })), [{ ticket: "FSDK-50", at: "2026-10-01T00:00:00.000Z" }, { ticket: "FSDK-51", at: null }]);
+});
+
+test("a changed event starts a new draft for each of its tickets, from any writer, and replaces a draft that started before the change", () => {
+  const e = db.addSdlcEvent({ eventType: "smoketest", startedAt: "2026-10-02T10:00:00.000Z", environments: ["localhost"], tickets: ["FSDK-60", "FSDK-61"] });
+  db.addSdlcEvent({ eventType: "smoketest", startedAt: "2026-10-02T10:00:00.000Z", environments: ["localhost"], tickets: ["FSDK-62"] });
+  db.claimNewEventTickets();
+  db.createRequest("FSDK-60", new Date(Date.now() - 60_000));
+  // Another connection, as the script's own process would write.
+  new DatabaseSync(dbPath).prepare("UPDATE SDLC_Event SET outcome = 'passed', finished_at = ? WHERE id = ?").run(new Date().toISOString(), e.id);
+  assert.equal(db.hasNewEventTickets(), true);
+  const calls: { key: string; force?: boolean }[] = [];
+  const start = async (g: { ticket: { key: string } }, opts?: { force?: boolean }) => (calls.push({ key: g.ticket.key, force: opts?.force }), {} as db.SummaryRecord);
+  const groups = ["FSDK-60", "FSDK-61", "FSDK-62"].map((key) => ({ ticket: ticket({ key }), runs: [], prs: [] }));
+  assert.deepEqual(redraftAfterNewEvents(groups, undefined, start), ["FSDK-60", "FSDK-61"]);
+  assert.deepEqual(calls, [{ key: "FSDK-60", force: true }, { key: "FSDK-61", force: false }]);
+  assert.equal(db.hasNewEventTickets(), false);
 });

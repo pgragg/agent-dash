@@ -236,7 +236,8 @@ export interface Note {
   body: string;
 }
 
-export type ThreadStatus = "relevant" | "resolved";
+/** "unlinked" takes the thread off the ticket, as if it never named it. */
+export type ThreadStatus = "relevant" | "resolved" | "unlinked";
 
 /** One change to whether a pi thread still matters to a ticket. The newest change is the current state. */
 export interface ThreadStatusChange {
@@ -320,10 +321,12 @@ export interface SdlcEvent {
   eventType: SdlcEventType;
   startedAt: string;
   finishedAt: string | null;
-  /** No outcome counts as passed: the event exists. "blocked": the test could not run or could not see the result. */
+  /** No outcome counts as passed, except on a dash-started smoketest: that one is still running. "blocked": the test could not run or could not see the result. */
   outcome: SmoketestOutcome | null;
   testDetails: string | null;
   testResults: string | null;
+  /** The pi session that runs it, when agent-dash started that session. */
+  sessionId: string | null;
   /** Set on a smoketest that Piper chose to skip. It has no outcome. */
   skippedAt: string | null;
   environments: SdlcEnvironment[];

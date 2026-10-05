@@ -1,6 +1,6 @@
 import { parseEnvironment } from "../shared/sdlc.ts";
 import type { SdlcEnvironment, SmoketestOutcome } from "../shared/types.ts";
-import type { NewSdlcEvent } from "./summaries/db.ts";
+import type { NewSdlcEvent, SdlcFinish } from "./summaries/db.ts";
 
 const OUTCOMES: SmoketestOutcome[] = ["passed", "failed", "blocked"];
 
@@ -59,4 +59,12 @@ export function validateSdlcEvent(input: SdlcEventInput, ticketPattern: RegExp, 
     environments: [...new Set(envs as SdlcEnvironment[])],
     tickets,
   };
+}
+
+/** An agent result must not end a smoketest before it started. */
+export function validateSdlcFinish(input: { finishedAt?: unknown; outcome?: unknown; testDetails?: unknown; testResults?: unknown }, startedAt: string, now = new Date()): SdlcFinish {
+  if (!OUTCOMES.includes(input.outcome as SmoketestOutcome)) throw new Error("outcome must be passed, failed or blocked");
+  const finishedAt = isoOrNull(input.finishedAt, "finishedAt") ?? now.toISOString();
+  if (finishedAt < startedAt) throw new Error("finishedAt is before startedAt");
+  return { finishedAt, outcome: input.outcome as SmoketestOutcome, testDetails: text(input.testDetails, "testDetails"), testResults: text(input.testResults, "testResults") };
 }
