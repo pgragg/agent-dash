@@ -106,6 +106,18 @@ test("a newer write of a file replaces the diagrams of its older writes", async 
   ]);
 });
 
+test("a newer write of a file keeps the diagram you edited, and a deleted diagram still follows its conversation's ticket", async () => {
+  const write = (id: string, content: string) => ({ type: "message", message: { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id, name: "write", arguments: { path: "/r/plan.md", content } }] } });
+  const lines = [header("rewrite-2", "/repo"), user("FSDK-12 draw it"), write("w1", fence("graph LR\n P-->Q"))];
+  await syncDiagrams([parseSession(jsonl(...lines), "/f", new Date(), PATTERN)!], () => "FSDK-12");
+  const mine = db.listDiagrams().find((d) => d.sessionId === "rewrite-2")!;
+  db.updateDiagram(mine.id, { title: "My fix", deleted: true });
+  lines.push(write("w2", fence("graph LR\n P-->R")));
+  await syncDiagrams([parseSession(jsonl(...lines), "/f", new Date(), PATTERN)!], () => "FSDK-13");
+  const kept = db.getDiagram(mine.id)!;
+  assert.deepEqual([kept.title, kept.ticket], ["My fix", "FSDK-13"]);
+});
+
 test("the routes serve a diagram on its own, and its file with a policy that runs no script", async () => {
   mkdirSync(join(tmp, "sessions", "p"), { recursive: true });
   writeFileSync(join(tmp, "sessions", "p", "s.jsonl"), jsonl(header("live-session", "/repo"), name("Draw the flow"), user("draw"), reply("ok")));
@@ -162,6 +174,9 @@ test("you can fix a diagram's title and source, and delete or restore it; the ne
   assert.equal((await post(d.id, { title: "  " })).status, 400);
   assert.equal((await post(pngId, { source: "graph TD" })).status, 400);
   assert.equal((await post(99999, { title: "x" })).status, 404);
+  assert.equal((await fetch(`${base}/api/diagram?id=${d.id}`, { method: "POST", headers: { "X-Agent-Dash": "1" }, body: "{not json" })).status, 400);
+  assert.equal((await post(d.id, { title: 123 })).status, 400);
+  assert.equal(changes, 0);
 
   const edited = await (await post(d.id, { title: " The real flow ", source: "graph LR\n A-->C" })).json();
   assert.deepEqual([edited.title, edited.source, edited.hash], ["The real flow", "graph LR\n A-->C", d.hash]);

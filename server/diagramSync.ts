@@ -12,7 +12,8 @@ export async function syncDiagrams(sessions: ParsedSession[], ticketOf: (s: Pars
   const rows: db.NewDiagram[] = [];
   // The tickets that each conversation's stored diagrams have, to see when the conversation's ticket moved.
   const storedTickets = new Map<string, Set<string | null>>();
-  for (const d of db.listDiagrams()) (storedTickets.get(d.sessionId) ?? storedTickets.set(d.sessionId, new Set()).get(d.sessionId)!).add(d.ticket);
+  // A deleted diagram follows too, so a restore brings it back under the right ticket.
+  for (const d of db.listDiagrams({ withDeleted: true })) (storedTickets.get(d.sessionId) ?? storedTickets.set(d.sessionId, new Set()).get(d.sessionId)!).add(d.ticket);
   for (const s of sessions) {
     const found = s.diagrams ?? [];
     if (!found.length) continue;
