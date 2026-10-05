@@ -16,6 +16,7 @@ export interface ModelInput {
   summaries?: Dashboard["summaries"];
   notes?: Dashboard["notes"];
   snoozedUntil?: Dashboard["snoozedUntil"];
+  starred?: Dashboard["starred"];
   /** Current status of each (ticket, thread) pair that has one. */
   threads?: ThreadStatusChange[];
   isAlive?: (pid: number) => boolean;
@@ -221,6 +222,7 @@ export function buildDashboard(input: ModelInput): Dashboard {
     summaries: input.summaries ?? {},
     notes: input.notes ?? {},
     snoozedUntil: input.snoozedUntil ?? {},
+    starred: input.starred ?? [],
     // Filled by the server, which keeps each action's row in SQLite.
     actions: [],
     diagrams: [],

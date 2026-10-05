@@ -46,6 +46,14 @@ test("open PRs group by ticket, most urgent group first; closed PRs and keyless 
   assert.equal(groups[0].prs[0].items[0].kind, "ci_failing");
 });
 
+test("a starred ticket's PRs come first, ahead of more urgent ones", () => {
+  const d = build([
+    pr({ url: url(1), tickets: ["FSDK-1"], reviewDecision: "REVIEW_REQUIRED" }),
+    pr({ url: url(2), tickets: ["FSDK-2"], checks: "failure" }),
+  ]);
+  assert.deepEqual(groupOpenPrs({ ...d, starred: ["FSDK-1"] }).map((g) => g.ticket?.key), ["FSDK-1", "FSDK-2"]);
+});
+
 test("a keyless PR takes the ticket of the run that opened it", () => {
   const groups = groupOpenPrs(build([pr({ url: url(5), tickets: [] })], [url(5)]));
   assert.deepEqual(

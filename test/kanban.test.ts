@@ -14,6 +14,7 @@ const smoketest = (over: Partial<SdlcEvent> = {}): SdlcEvent => ({
   outcome: "passed",
   testDetails: null,
   testResults: null,
+  sessionId: null,
   skippedAt: null,
   environments: ["localhost"],
   tickets: ["FSDK-1"],

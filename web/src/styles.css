@@ -21,6 +21,7 @@
   --warn-bg: #fbf3e2;
   /* A smoketest in progress: plain yellow, so it does not read as the amber of a warning. */
   --running: #f5c400;
+  --star: #f5b400;
   --running-bg: #fff6c2;
   --running-ink: #4a3b00;
   --good: #12925b;
@@ -187,7 +188,13 @@ kbd {
   padding: 10px 12px 10px 4px; border-radius: 11px; border: 1px solid transparent;
   background: transparent; cursor: pointer; transition: background .1s;
 }
+.q-item { position: relative; }
 .q-item:hover { background: var(--hover); }
+/* A starred ticket: a yellow star in the top-left corner of its card. */
+.q-star { position: absolute; top: 5px; left: 6px; font-size: 13px; line-height: 1; color: var(--star); pointer-events: none; }
+.q-item.starred .q-rank { padding-top: 18px; }
+.star-mark { color: var(--star); }
+.star-btn.on { color: var(--star); border-color: var(--star); }
 .q-item.selected { background: var(--select); border-color: var(--line); box-shadow: var(--shadow); }
 .q-rank { width: 18px; flex: none; font: 500 11px var(--mono); color: var(--muted); text-align: right; padding-top: 2px; opacity: .7; }
 .q-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; padding-left: 6px; }
