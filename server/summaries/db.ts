@@ -166,8 +166,9 @@ export function open(path = DB_PATH): DatabaseSync {
   if (db) return db;
   mkdirSync(dirname(path), { recursive: true });
   db = new DatabaseSync(path);
-  // WAL lets the server read while a summary run writes from its own process.
-  db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
+  // WAL lets the server read while a summary run writes from its own process. The timeout comes
+  // first, so a write from another process makes the WAL switch wait instead of crash the server.
+  db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL;");
   db.exec(SCHEMA);
   const diagramColumns = new Set((db.prepare("PRAGMA table_info(diagrams)").all() as { name: string }[]).map((c) => c.name));
   for (const c of ["edited_at", "deleted_at"]) if (!diagramColumns.has(c)) db.exec(`ALTER TABLE diagrams ADD COLUMN ${c} TEXT`);
