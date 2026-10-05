@@ -43,7 +43,7 @@ export function parseHash(hash: string): Route {
   return { view: "board", ref: path || null };
 }
 
-/** `#/t:FSDK-1`: the ref stays readable, and only what would break the hash is escaped. */
+/** `#/t:ABC-123`: the ref stays readable, and only what would break the hash is escaped. */
 export function href(ref: string): string {
   return `#/${encodeURIComponent(ref).replace(/%3A/gi, ":").replace(/%2F/gi, "/")}`;
 }

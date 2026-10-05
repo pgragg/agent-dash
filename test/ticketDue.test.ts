@@ -10,8 +10,8 @@ const jira = createServer((req, res) => {
   let body = "";
   req.on("data", (c) => (body += c));
   req.on("end", () => {
-    if (req.method === "GET" && req.url === "/rest/api/3/issue/FSDK-1?fields=duedate") return void res.writeHead(200).end(JSON.stringify({ fields: { duedate: due } }));
-    if (req.method === "PUT" && req.url === "/rest/api/3/issue/FSDK-1") {
+    if (req.method === "GET" && req.url === "/rest/api/3/issue/FSDK-99999?fields=duedate") return void res.writeHead(200).end(JSON.stringify({ fields: { duedate: due } }));
+    if (req.method === "PUT" && req.url === "/rest/api/3/issue/FSDK-99999") {
       writes.push(JSON.parse(body));
       due = JSON.parse(body).fields.duedate;
       return void res.writeHead(204).end();
@@ -49,31 +49,31 @@ beforeEach(() => {
 });
 
 test("a due date needs the header, a real key, and real dates", async () => {
-  assert.equal((await call("FSDK-1", { date: "2026-10-30", from: null }, {})).code, 403);
+  assert.equal((await call("FSDK-99999", { date: "2026-10-30", from: null }, {})).code, 403);
   assert.equal((await call("FSM-1", { date: "2026-10-30", from: null })).code, 400);
-  assert.equal((await call("FSDK-1", { date: "next week", from: null })).code, 400);
-  assert.equal((await call("FSDK-1", { date: "2026-10-30" })).code, 400);
-  assert.equal((await call("FSDK-1", { date: "2026-10-30", from: "soon" })).code, 400);
+  assert.equal((await call("FSDK-99999", { date: "next week", from: null })).code, 400);
+  assert.equal((await call("FSDK-99999", { date: "2026-10-30" })).code, 400);
+  assert.equal((await call("FSDK-99999", { date: "2026-10-30", from: "soon" })).code, 400);
   assert.deepEqual(writes, []);
 });
 
 test("the server sets the due date in Jira, and tells the board", async () => {
   due = "2026-09-22";
-  const r = await call("FSDK-1", { date: "2026-10-30", from: "2026-09-22" });
+  const r = await call("FSDK-99999", { date: "2026-10-30", from: "2026-09-22" });
   assert.equal(r.code, 200);
-  assert.deepEqual(r.body, { key: "FSDK-1", from: "2026-09-22", dueDate: "2026-10-30" });
+  assert.deepEqual(r.body, { key: "FSDK-99999", from: "2026-09-22", dueDate: "2026-10-30" });
   assert.deepEqual(writes, [{ fields: { duedate: "2026-10-30" } }]);
-  assert.deepEqual(changed, [["FSDK-1", "2026-10-30"]]);
+  assert.deepEqual(changed, [["FSDK-99999", "2026-10-30"]]);
 });
 
 test("a first due date works the same way", async () => {
-  assert.equal((await call("FSDK-1", { date: "2026-10-30", from: null })).code, 200);
+  assert.equal((await call("FSDK-99999", { date: "2026-10-30", from: null })).code, 200);
   assert.equal(due, "2026-10-30");
 });
 
 test("a click does not replace a due date that the page did not show", async () => {
   due = "2026-11-15";
-  const r = await call("FSDK-1", { date: "2026-10-30", from: "2026-09-22" });
+  const r = await call("FSDK-99999", { date: "2026-10-30", from: "2026-09-22" });
   assert.equal(r.code, 409);
   assert.match(r.body?.error ?? "", /now due 2026-11-15/);
   assert.deepEqual(writes, []);
