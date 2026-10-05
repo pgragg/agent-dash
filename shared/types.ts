@@ -302,6 +302,27 @@ export interface TicketGroup {
   threads: Record<string, ThreadStatusChange>;
 }
 
+/** An environment under test. A tag names what the event tested, not every system it touched. */
+export type SdlcEnvironment = "localhost" | "fern_dev" | "fern_prod" | "postman_beta" | "postman_prod";
+
+/** "deploy" is a deploy that Argo or Piper confirmed: the In Beta and In Prod stages. */
+export type SdlcEventType = "smoketest" | "deploy";
+
+/** One thing that happened to a ticket's change on its way to prod. One `SDLC_Event` row. */
+export interface SdlcEvent {
+  id: number;
+  eventType: SdlcEventType;
+  startedAt: string;
+  finishedAt: string | null;
+  /** No outcome counts as passed: the event exists. */
+  outcome: "passed" | "failed" | null;
+  testDetails: string | null;
+  testResults: string | null;
+  environments: SdlcEnvironment[];
+  tickets: string[];
+  createdAt: string;
+}
+
 export interface SourceHealth {
   ok: boolean;
   error?: string;
@@ -330,6 +351,8 @@ export interface Dashboard {
   actions: Action[];
   /** Every diagram an agent made, newest first, without its source. */
   diagrams: Diagram[];
+  /** SDLC events (smoketests, confirmed deploys) by ticket key, newest first. */
+  sdlcEvents: Record<string, SdlcEvent[]>;
   sources: { jira: SourceHealth; github: SourceHealth; sessions: SourceHealth };
   extensionInstalled: boolean;
 }

@@ -1,0 +1,54 @@
+/**
+ * Record an SDLC event on one or more tickets. Agents call this after a smoketest, or after
+ * they confirm a deploy in Argo:
+ *
+ *   node scripts/sdlc-event.ts smoketest --ticket FSDK-1 --env localhost \
+ *     --started 2026-10-05T10:00:00Z --finished 2026-10-05T10:20:00Z --outcome passed \
+ *     --details-file details.md --results-file results.md
+ *   node scripts/sdlc-event.ts deploy --ticket FSDK-1 --env postman_beta --details "<app>: Synced, Healthy, 1.2.3"
+ *
+ * --ticket and --env can repeat. An environment is an id (postman_beta) or a label ("Postman Beta").
+ * Prints the new event as JSON.
+ */
+import { readFileSync } from "node:fs";
+import { parseArgs } from "node:util";
+import { config } from "../server/config.ts";
+import { validateSdlcEvent } from "../server/sdlc.ts";
+import * as db from "../server/summaries/db.ts";
+
+const USAGE = "usage: node scripts/sdlc-event.ts smoketest|deploy --ticket KEY [--ticket KEY] --env ENV [--env ENV] [--started ISO] [--finished ISO] [--outcome passed|failed] [--details TEXT | --details-file F] [--results TEXT | --results-file F]";
+
+try {
+  const { values, positionals } = parseArgs({
+    allowPositionals: true,
+    options: {
+      ticket: { type: "string", multiple: true },
+      env: { type: "string", multiple: true },
+      started: { type: "string" },
+      finished: { type: "string" },
+      outcome: { type: "string" },
+      details: { type: "string" },
+      "details-file": { type: "string" },
+      results: { type: "string" },
+      "results-file": { type: "string" },
+    },
+  });
+  const read = (f: string | undefined, v: string | undefined) => (f ? readFileSync(f, "utf8") : v);
+  const event = validateSdlcEvent(
+    {
+      eventType: positionals[0],
+      tickets: values.ticket,
+      environments: values.env,
+      startedAt: values.started,
+      finishedAt: values.finished,
+      outcome: values.outcome,
+      testDetails: read(values["details-file"], values.details),
+      testResults: read(values["results-file"], values.results),
+    },
+    config.ticketPattern,
+  );
+  console.log(JSON.stringify(db.addSdlcEvent(event), null, 2));
+} catch (err) {
+  console.error(`${(err as Error).message}\n${USAGE}`);
+  process.exit(2);
+}

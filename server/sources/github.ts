@@ -51,14 +51,8 @@ export function failedCheckNames(contexts: RawContext[]): string[] {
   return [...new Set(contexts.filter((c) => contextState(c) === "failure").map(contextName))];
 }
 
-/** My PRs updated in the window. Uses the `gh` login, so no token is stored here. */
-export async function fetchMyPrs(sinceDays: number, ticketPattern: RegExp): Promise<PullRequest[]> {
-  const since = new Date(Date.now() - sinceDays * 86_400_000).toISOString().slice(0, 10);
-  const { stdout } = await run(
-    "gh",
-    ["api", "graphql", "-f", `query=${QUERY}`, "-f", `q=is:pr author:@me updated:>=${since}`],
-    { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 },
-  );
+async function searchPrs(q: string, ticketPattern: RegExp): Promise<PullRequest[]> {
+  const { stdout } = await run("gh", ["api", "graphql", "-f", `query=${QUERY}`, "-f", `q=${q}`], { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 });
   const nodes: any[] = JSON.parse(stdout).data?.search?.nodes ?? [];
   return nodes
     .filter((n) => n?.url)
@@ -77,4 +71,19 @@ export async function fetchMyPrs(sinceDays: number, ticketPattern: RegExp): Prom
       updatedAt: n.updatedAt,
       tickets: extractTickets(`${n.title} ${n.headRefName}`, ticketPattern),
     }));
+}
+
+/** My PRs updated in the window. Uses the `gh` login, so no token is stored here. */
+export function fetchMyPrs(sinceDays: number, ticketPattern: RegExp): Promise<PullRequest[]> {
+  const since = new Date(Date.now() - sinceDays * 86_400_000).toISOString().slice(0, 10);
+  return searchPrs(`is:pr author:@me updated:>=${since}`, ticketPattern);
+}
+
+/**
+ * Every PR by anyone, of any age, with the key in its title. The dashboard's list holds only my
+ * recent PRs, so an old merged PR or a deploy PR by someone else would be missing from it.
+ */
+export async function fetchTicketPrs(key: string, ticketPattern: RegExp): Promise<PullRequest[]> {
+  // Search matches words, so FSDK-12 would also find FSDK-123; keep only exact keys.
+  return (await searchPrs(`is:pr in:title "${key}"`, ticketPattern)).filter((p) => p.tickets.includes(key));
 }
