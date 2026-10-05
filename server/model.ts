@@ -15,6 +15,7 @@ export interface ModelInput {
   extensionInstalled: boolean;
   summaries?: Dashboard["summaries"];
   notes?: Dashboard["notes"];
+  snoozedUntil?: Dashboard["snoozedUntil"];
   /** Current status of each (ticket, thread) pair that has one. */
   threads?: ThreadStatusChange[];
   isAlive?: (pid: number) => boolean;
@@ -205,6 +206,7 @@ export function buildDashboard(input: ModelInput): Dashboard {
     counts,
     summaries: input.summaries ?? {},
     notes: input.notes ?? {},
+    snoozedUntil: input.snoozedUntil ?? {},
     // Filled by the server, which keeps each action's row in SQLite.
     actions: [],
     diagrams: [],

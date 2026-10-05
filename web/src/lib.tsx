@@ -213,6 +213,8 @@ export const api = {
   reply: (sessionId: string, text: string, steer = false) => post(`/api/reply?session=${encodeURIComponent(sessionId)}`, { text, steer }),
   addNote: (ticket: string, body: string) => post(`/api/notes?ticket=${encodeURIComponent(ticket)}`, { body }),
   deleteNote: (id: number) => post(`/api/notes?id=${id}`, undefined, "DELETE"),
+  /** `until` null wakes the ticket. */
+  snooze: (ticket: string, until: string | null) => post(`/api/snooze?ticket=${encodeURIComponent(ticket)}`, { until }),
   /** Starts a headless pi with the first message; resolves to its session id, or throws the reason. */
   newConversation: async (message: string, cwd: string): Promise<string> => {
     const res = await fetch("/api/conversations", { method: "POST", headers: { "X-Agent-Dash": "1", "Content-Type": "application/json" }, body: JSON.stringify({ message, cwd }) });
