@@ -313,14 +313,16 @@ export type SdlcEnvironment = "localhost" | "fern_dev" | "fern_prod" | "postman_
 /** "deploy" is a deploy that Argo or Piper confirmed: the In Beta and In Prod stages. */
 export type SdlcEventType = "smoketest" | "deploy";
 
+export type SmoketestOutcome = "passed" | "failed" | "blocked";
+
 /** One thing that happened to a ticket's change on its way to prod. One `SDLC_Event` row. */
 export interface SdlcEvent {
   id: number;
   eventType: SdlcEventType;
   startedAt: string;
   finishedAt: string | null;
-  /** No outcome counts as passed, except on a dash-started smoketest: that one is still running. */
-  outcome: "passed" | "failed" | null;
+  /** No outcome counts as passed, except on a dash-started smoketest: that one is still running. "blocked": the test could not run or could not see the result. */
+  outcome: SmoketestOutcome | null;
   testDetails: string | null;
   testResults: string | null;
   /** The pi session that runs it, when agent-dash started that session. */

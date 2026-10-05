@@ -118,7 +118,7 @@ RULES
 - Read-only. Do not write to Jira, GitHub, Slack, or any repo: no comments, transitions, reviews, messages, reactions, commits, or pushes.
 - Spend at most 10 minutes. If a source fails, skip it and note it under "Gaps".
 - Piper's private notes (in the context file) are the most trusted source: when a newer note disagrees with an older source, follow the note. They are private, so never copy them anywhere outside the summary.
-- Follow the SDLC order in the context file's "SDLC progress": PR, local smoketest, in Beta, Beta smoketest, in Prod, Prod smoketest, Done. A local smoketest comes before a PR review request, and a Beta smoketest comes before the prod chart version update deploy PR. When the next stage is a smoketest, one step must say to run a smoketest and name the environment (localhost, Postman Beta, or Postman Prod). Piper can skip a stage: never plan a step for a stage that shows as skipped.
+- Follow the SDLC order in the context file's "SDLC progress": PR, local smoketest, in Beta, Beta smoketest, in Prod, Prod smoketest, Done. A local smoketest comes before a PR review request, and a Beta smoketest comes before the prod chart version update deploy PR. When the next stage is a smoketest, one step must say to run a smoketest and name the environment (localhost, Postman Beta, or Postman Prod). When the next stage is a blocked smoketest, one step must say what blocks it and how to remove the blocker. Piper can skip a stage: never plan a step for a stage that shows as skipped.
 
 STEPS
 1. Read ${contextFile}. agent-dash already put Piper's private notes, the ticket fields, linked PRs, and digests of the pi sessions about ${key} in it.

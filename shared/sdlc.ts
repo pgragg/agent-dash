@@ -26,7 +26,7 @@ export function parseEnvironment(s: string): SdlcEnvironment | null {
 export type StageId = "ideation" | "pr" | "local_smoketest" | "in_beta" | "beta_smoketest" | "in_prod" | "prod_smoketest" | "done";
 
 /** "waiting": a deploy PR merged, unconfirmed in Argo. "running": a smoketest has no result yet. */
-export type StageState = "done" | "failed" | "running" | "waiting" | "skipped" | "todo";
+export type StageState = "done" | "failed" | "blocked" | "running" | "waiting" | "skipped" | "todo";
 
 export interface Stage {
   id: StageId;
@@ -111,6 +111,7 @@ function smoketestStage(id: StageId, events: SdlcEvent[], envs: SdlcEnvironment[
   const when = (last.finishedAt ?? last.startedAt).slice(0, 10);
   // The newest run decides: a fix after a failed run shows as done again.
   if (last.outcome === "failed") return { id, state: "failed", detail: `The newest smoketest failed (${when})`, events: found };
+  if (last.outcome === "blocked") return { id, state: "blocked", detail: `The newest smoketest was blocked (${when})`, events: found };
   return { id, state: "done", detail: `Smoketest ${last.outcome ?? "recorded"} ${when}`, events: found };
 }
 
@@ -157,6 +158,7 @@ export function sdlcProgress({ ticket, prs, events }: { ticket: Ticket; prs: Pul
   const next = stages[current + 1] ?? null;
   let hint = next ? HINTS[next.id] : null;
   if (next?.state === "failed") hint = `The newest ${next.label.toLowerCase()} failed. Fix it, then run it again.`;
+  if (next?.state === "blocked") hint = `The newest ${next.label.toLowerCase()} was blocked. Remove the blocker, then run it again, or skip it.`;
   if (next?.state === "waiting") hint = `${next.detail}.`;
   if (next?.state === "running") hint = `${next.detail}. An agent runs it and records the result here.`;
   return { stages, current, next, hint };
@@ -171,7 +173,7 @@ export const SMOKETEST_ENV: Partial<Record<StageId, SdlcEnvironment>> = {
 
 /** For a summary run's or an agent's context: one line per stage. */
 export function progressLines(p: SdlcProgress): string[] {
-  const mark: Record<StageState, string> = { done: "[x]", failed: "[!] failed", running: "[~] running", waiting: "[~] waiting", skipped: "[-] skipped", todo: "[ ]" };
+  const mark: Record<StageState, string> = { done: "[x]", failed: "[!] failed", blocked: "[?] blocked", running: "[~] running", waiting: "[~] waiting", skipped: "[-] skipped", todo: "[ ]" };
   return [
     ...p.stages.map((s, i) => `${i + 1}. ${mark[s.state]} ${s.label}${s.detail ? ` — ${s.detail}` : ""}`),
     "",
@@ -206,9 +208,9 @@ export function smoketestMessage(key: string, env: SdlcEnvironment, script: stri
 
 Work out from the context what the change does, and test that it works on ${label} from a user's point of view. ${how}
 
-agent-dash shows this smoketest as running (SDLC event ${eventId}) until you record the result. When you finish, pass or fail, record it:
-node ${script} finish --id ${eventId} --outcome passed|failed --details-file <file> --results-file <file>
-The details file says what you tested and how (stack, commands, URLs, versions). The results file says what you saw, with the evidence. Then reply with the outcome and a short summary.`;
+agent-dash shows this smoketest as running (SDLC event ${eventId}) until you record the result. When you finish, record the result:
+node ${script} finish --id ${eventId} --outcome passed|failed|blocked --details-file <file> --results-file <file>
+Use blocked, not failed, when you could not run the test or could not see the result (no access, no test data, the environment is down): failed means the change does not work. The details file says what you tested and how (stack, commands, URLs, versions). The results file says what you saw, with the evidence, or what blocked you. Then reply with the outcome and a short summary.`;
 }
 
 /** The first message of an agent that confirms a deploy in Argo, read-only, and records it. */

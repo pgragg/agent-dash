@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { splitSummary } from "../../shared/nextSteps.ts";
-import type { Diagram, DiagramKind, NextStep, Note, SdlcEnvironment, SdlcEvent, SdlcEventType, ThreadStatus, ThreadStatusChange, TicketSummary } from "../../shared/types.ts";
+import type { Diagram, DiagramKind, NextStep, Note, SdlcEnvironment, SdlcEvent, SdlcEventType, SmoketestOutcome, ThreadStatus, ThreadStatusChange, TicketSummary } from "../../shared/types.ts";
 
 export const DB_PATH = process.env.AGENT_DASH_DB ?? join(homedir(), ".agent-dash/agent-dash.db");
 
@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS SDLC_Event (
   event_type   TEXT NOT NULL CHECK (event_type IN ('smoketest', 'deploy')),
   started_at   TEXT NOT NULL,
   finished_at  TEXT,
-  outcome      TEXT CHECK (outcome IN ('passed', 'failed')),
+  outcome      TEXT CHECK (outcome IN ('passed', 'failed', 'blocked')),
   test_details TEXT,
   test_results TEXT,
   -- The pi session that runs the smoketest, when agent-dash started it, so the page can link to it.
@@ -166,6 +166,29 @@ function toRecord(r: Row): SummaryRecord {
 
 let db: DatabaseSync | null = null;
 
+/** SQLite cannot change a CHECK, so an older SDLC_Event table is copied into a new one with the same ids. */
+function allowBlockedOutcome(d: DatabaseSync): void {
+  const row = d.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'SDLC_Event'").get() as { sql: string } | undefined;
+  if (!row || row.sql.includes("'blocked'")) return;
+  const create = SCHEMA.slice(SCHEMA.indexOf("CREATE TABLE IF NOT EXISTS SDLC_Event ("), SCHEMA.indexOf("-- The environments under test"));
+  const cols = "id, event_type, started_at, finished_at, outcome, test_details, test_results, session_id, skipped_at, created_at";
+  // The other SDLC tables refer to SDLC_Event by name, so the checks must be off while it is gone.
+  d.exec("PRAGMA foreign_keys = OFF");
+  try {
+    d.exec(`BEGIN;
+${create.replace("SDLC_Event (", "SDLC_Event_new (")}
+INSERT INTO SDLC_Event_new (${cols}) SELECT ${cols} FROM SDLC_Event;
+DROP TABLE SDLC_Event;
+ALTER TABLE SDLC_Event_new RENAME TO SDLC_Event;
+COMMIT;`);
+  } catch (e) {
+    d.exec("ROLLBACK");
+    throw e;
+  } finally {
+    d.exec("PRAGMA foreign_keys = ON");
+  }
+}
+
 export function open(path = DB_PATH): DatabaseSync {
   if (db) return db;
   mkdirSync(dirname(path), { recursive: true });
@@ -179,6 +202,8 @@ export function open(path = DB_PATH): DatabaseSync {
   // CREATE TABLE IF NOT EXISTS does not add a column to a table that is already there.
   if (!db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = 'session_id'").get()) db.exec("ALTER TABLE SDLC_Event ADD COLUMN session_id TEXT");
   if (!(db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = 'skipped_at'").get())) db.exec("ALTER TABLE SDLC_Event ADD COLUMN skipped_at TEXT");
+  // Before the trigger below: copying the table drops the triggers on it.
+  allowBlockedOutcome(db);
   // SQLite cannot change a CHECK, so an older table is copied into one that allows 'unlinked'.
   const threadTable = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'PiConversationStatusChange'").get() as { sql: string };
   if (!threadTable.sql.includes("'unlinked'")) {
@@ -502,7 +527,7 @@ export function addSdlcEvent(e: NewSdlcEvent, now = new Date()): SdlcEvent {
 
 export interface SdlcFinish {
   finishedAt: string;
-  outcome: "passed" | "failed";
+  outcome: SmoketestOutcome;
   testDetails: string | null;
   testResults: string | null;
 }

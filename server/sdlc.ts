@@ -1,6 +1,8 @@
 import { parseEnvironment } from "../shared/sdlc.ts";
-import type { SdlcEnvironment } from "../shared/types.ts";
+import type { SdlcEnvironment, SmoketestOutcome } from "../shared/types.ts";
 import type { NewSdlcEvent, SdlcFinish } from "./summaries/db.ts";
+
+const OUTCOMES: SmoketestOutcome[] = ["passed", "failed", "blocked"];
 
 /** The text fields hold a test's notes and evidence, not its whole log. */
 const TEXT_MAX = 20_000;
@@ -40,7 +42,7 @@ export function validateSdlcEvent(input: SdlcEventInput, ticketPattern: RegExp, 
   const envs = Array.isArray(input.environments) ? input.environments.map((e) => parseEnvironment(String(e))) : [];
   if (!envs.length) throw new Error("name at least one environment under test");
   if (envs.includes(null)) throw new Error(`unknown environment in ${JSON.stringify(input.environments)}`);
-  if (input.outcome !== undefined && input.outcome !== null && input.outcome !== "passed" && input.outcome !== "failed") throw new Error("outcome must be passed or failed");
+  if (input.outcome !== undefined && input.outcome !== null && !OUTCOMES.includes(input.outcome as SmoketestOutcome)) throw new Error("outcome must be passed, failed or blocked");
   const startedAt = isoOrNull(input.startedAt, "startedAt") ?? now.toISOString();
   const finishedAt = isoOrNull(input.finishedAt, "finishedAt");
   if (finishedAt && finishedAt < startedAt) throw new Error("finishedAt is before startedAt");
@@ -61,8 +63,8 @@ export function validateSdlcEvent(input: SdlcEventInput, ticketPattern: RegExp, 
 
 /** An agent result must not end a smoketest before it started. */
 export function validateSdlcFinish(input: { finishedAt?: unknown; outcome?: unknown; testDetails?: unknown; testResults?: unknown }, startedAt: string, now = new Date()): SdlcFinish {
-  if (input.outcome !== "passed" && input.outcome !== "failed") throw new Error("outcome must be passed or failed");
+  if (!OUTCOMES.includes(input.outcome as SmoketestOutcome)) throw new Error("outcome must be passed, failed or blocked");
   const finishedAt = isoOrNull(input.finishedAt, "finishedAt") ?? now.toISOString();
   if (finishedAt < startedAt) throw new Error("finishedAt is before startedAt");
-  return { finishedAt, outcome: input.outcome, testDetails: text(input.testDetails, "testDetails"), testResults: text(input.testResults, "testResults") };
+  return { finishedAt, outcome: input.outcome as SmoketestOutcome, testDetails: text(input.testDetails, "testDetails"), testResults: text(input.testResults, "testResults") };
 }

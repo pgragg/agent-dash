@@ -74,6 +74,17 @@ test("the newest smoketest decides: a failure shows red, a later pass makes it d
   assert.equal(sdlcProgress({ ticket: ticket(), prs: [], events: [failed] }).current, 0);
 });
 
+test("a blocked smoketest is not a failure and not progress: it shows grey and stays next", () => {
+  const blocked = ev({ outcome: "blocked", environments: ["postman_beta"], finishedAt: "2026-10-02T10:30:00.000Z" });
+  const p = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev({ eventType: "deploy", environments: ["postman_beta"] }), blocked] });
+  assert.equal(states(p).beta_smoketest, "blocked");
+  assert.match(p.stages.find((s) => s.id === "beta_smoketest")!.detail, /was blocked \(2026-10-02\)/);
+  assert.equal(p.next?.id, "beta_smoketest");
+  assert.match(p.hint!, /was blocked\. Remove the blocker/);
+  const ran = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [blocked, ev({ environments: ["postman_beta"], startedAt: "2026-10-02T11:00:00.000Z" })] });
+  assert.equal(states(ran).beta_smoketest, "done");
+});
+
 test("a merged deploy PR with no confirmed deploy waits for Argo; Fern Dev counts for Beta", () => {
   const deploy = pr({ url: "https://github.com/postman-eng/cloud9-parcels-deployments/pull/7", repo: "postman-eng/cloud9-parcels-deployments", number: 7, state: "merged" });
   const p = sdlcProgress({ ticket: ticket(), prs: [pr(), deploy], events: [ev()] });
@@ -150,6 +161,26 @@ test("a database from before skips gets the skipped_at column", () => {
   assert.equal(out.skippedAt, null);
 });
 
+test("a database from before blocked keeps its events and accepts a blocked smoketest", () => {
+  const old = join(dir, "old-check.db");
+  const d = new DatabaseSync(old);
+  d.exec(`CREATE TABLE SDLC_Event (id INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT NOT NULL CHECK (event_type IN ('smoketest', 'deploy')), started_at TEXT NOT NULL, finished_at TEXT, outcome TEXT CHECK (outcome IN ('passed', 'failed')), test_details TEXT, test_results TEXT, session_id TEXT, skipped_at TEXT, created_at TEXT NOT NULL);
+CREATE TABLE SDLC_Event_Ticket (id INTEGER PRIMARY KEY AUTOINCREMENT, sdlc_event_id INTEGER NOT NULL REFERENCES SDLC_Event (id), ticket TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE (sdlc_event_id, ticket));
+INSERT INTO SDLC_Event (id, event_type, started_at, outcome, session_id, created_at) VALUES (7, 'smoketest', '2026-10-01T10:00:00.000Z', 'failed', 's-7', '2026-10-01T10:00:00.000Z');
+INSERT INTO SDLC_Event_Ticket (sdlc_event_id, ticket, created_at) VALUES (7, 'FSDK-32', '2026-10-01T10:00:00.000Z');`);
+  d.close();
+  const script = new URL("../scripts/sdlc-event.ts", import.meta.url).pathname;
+  const out = JSON.parse(execFileSync("node", [script, "smoketest", "--ticket", "FSDK-32", "--env", "postman_beta", "--outcome", "blocked"], { env: { ...process.env, AGENT_DASH_DB: old } }).toString());
+  assert.equal(out.outcome, "blocked");
+  assert.equal(out.id, 8);
+  const rows = new DatabaseSync(old).prepare("SELECT e.id, e.outcome FROM SDLC_Event e JOIN SDLC_Event_Ticket t ON t.sdlc_event_id = e.id WHERE t.ticket = 'FSDK-32' ORDER BY e.id").all();
+  assert.deepEqual(rows.map((r) => [r.id, r.outcome]), [[7, "failed"], [8, "blocked"]]);
+  const after = new DatabaseSync(old);
+  assert.equal((after.prepare("SELECT session_id AS s FROM SDLC_Event WHERE id = 7").get() as { s: string }).s, "s-7");
+  // The copy drops the table's triggers, so open() must add the change trigger after it.
+  assert.ok(after.prepare("SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = 'sdlc_event_changed'").get());
+});
+
 test("a new event is checked: a known type, real keys, known environments, and times in order", () => {
   const now = new Date(NOW);
   const ok = validateSdlcEvent({ eventType: "smoketest", tickets: ["FSDK-1"], environments: ["Postman Beta"] }, PATTERN, now);
@@ -164,6 +195,8 @@ test("a new event is checked: a known type, real keys, known environments, and t
   assert.throws(() => validateSdlcEvent({ eventType: "deploy", tickets: ["FSDK-1"], environments: ["localhost"], skippedAt: new Date(NOW).toISOString() }, PATTERN), /only a smoketest/);
   assert.throws(() => validateSdlcEvent({ eventType: "smoketest", tickets: ["FSDK-1"], environments: ["localhost"], skippedAt: new Date(NOW).toISOString(), outcome: "passed" }, PATTERN), /no outcome/);
   assert.throws(() => validateSdlcEvent({ eventType: "smoketest", tickets: ["FSDK-1"], environments: ["localhost"], startedAt: "2026-10-02T12:00:00Z", finishedAt: "2026-10-02T11:00:00Z" }, PATTERN), /before startedAt/);
+  assert.equal(validateSdlcEvent({ eventType: "smoketest", tickets: ["FSDK-1"], environments: ["localhost"], outcome: "blocked" }, PATTERN, now).outcome, "blocked");
+  assert.throws(() => validateSdlcEvent({ eventType: "smoketest", tickets: ["FSDK-1"], environments: ["localhost"], outcome: "inconclusive" }, PATTERN), /passed, failed or blocked/);
 });
 
 test("the script that agents call writes into the same database", () => {
