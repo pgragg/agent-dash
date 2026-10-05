@@ -15,7 +15,7 @@ import { parseArgs } from "node:util";
 const ADAPTER = process.env.AGENT_DASH_MCP_ADAPTER ?? join(homedir(), ".pi/agent/npm/node_modules/pi-mcp-adapter/dist");
 const SERVER = "slack";
 const SEND_TOOL = "slack_send_message";
-const RELOGIN = "Run `node ~/pi/slack/bin/mcp-slack-login.mjs` and click Allow in Chrome.";
+const RELOGIN = "Run `node ~/pi/slack/bin/mcp-slack-login.mjs --force` and click Allow in Chrome.";
 
 async function readStdin(): Promise<string> {
   let s = "";
