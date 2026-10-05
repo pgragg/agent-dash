@@ -147,7 +147,8 @@ export function parseSession(raw: string, sessionFile: string, mtime: Date, tick
           mention(args);
           if (part.name === "bash" && args.includes("gh pr create") && part.id) prCreateCalls.add(part.id);
         }
-        lastStopReason = msg.stopReason ?? null;
+        // An abort during a tool call is logged as an error; it is a stop, not an API failure.
+        lastStopReason = msg.stopReason === "error" && msg.errorMessage === "This operation was aborted" ? "aborted" : (msg.stopReason ?? null);
         midRun = msg.stopReason === "toolUse";
       } else if (msg.role === "toolResult") {
         if (prCreateCalls.has(msg.toolCallId) && !msg.isError) {

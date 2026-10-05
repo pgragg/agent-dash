@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, renameSync, statSync, watch, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, statSync, watch, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
@@ -13,6 +13,7 @@ import { buildDashboard, buildHistory, otherTicketKeys } from "./model.ts";
 import * as exitRoutes from "./routes/exits.ts";
 import { agentMessage, agentName, buildHandoff, stepMessage } from "./handoff.ts";
 import * as resumeRoute from "./routes/resume.ts";
+import * as liveControl from "./routes/liveControl.ts";
 import { fetchMyPrs } from "./sources/github.ts";
 import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
 import { SessionIndex, transcriptTurns } from "./sources/sessions.ts";
@@ -152,7 +153,10 @@ function readBody(req: IncomingMessage, max: number): Promise<string> {
     let body = "";
     req.on("data", (chunk) => {
       body += chunk;
-      if (body.length > max) reject(new Error("request body too large"));
+      if (body.length > max) {
+        reject(new Error("request body too large"));
+        req.destroy();
+      }
     });
     req.on("end", () => resolve(body));
     req.on("error", reject);
@@ -178,6 +182,7 @@ const server = createServer(async (req, res) => {
   try {
     if (await exitRoutes.handle(req, res, url)) return;
     if (await resumeRoute.handle(req, res, url, sessions)) return;
+    if (await liveControl.handle(req, res, url)) return;
     if (url.pathname === "/api/dashboard") {
       const body = JSON.stringify(await dashboard(url.searchParams.has("refresh")));
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(body);
@@ -269,23 +274,6 @@ const server = createServer(async (req, res) => {
       const change = summaryDb.setThreadStatus(ticket, session, status, reason?.trim() || null);
       broadcast();
       json(201, change);
-    } else if (url.pathname === "/api/reply" && req.method === "POST") {
-      if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
-      const sessionId = url.searchParams.get("session") ?? "";
-      const status = (await readReportedStatuses(config.statusDir)).get(sessionId);
-      // Deliver only to a live session whose extension watches the inbox; otherwise the text would sit unread.
-      if (!status?.inbox || status.state === "closed" || !isAlive(status.pid)) {
-        return void res.writeHead(409, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "this session cannot take replies; open its tab" }));
-      }
-      const { text } = JSON.parse((await readBody(req, 64_000)) || "{}") as { text?: string };
-      if (!text?.trim()) return void res.writeHead(400, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "empty reply" }));
-      const dir = join(config.inboxDir, sessionId);
-      mkdirSync(dir, { recursive: true });
-      const file = join(dir, `${Date.now()}-${process.pid}.txt`);
-      // The extension reads *.txt only, so the rename makes the reply appear whole.
-      writeFileSync(`${file}.tmp`, text.trim());
-      renameSync(`${file}.tmp`, file);
-      res.writeHead(202, { "Content-Type": "application/json" }).end(JSON.stringify({ ok: true }));
     } else if (url.pathname === "/api/focus" && req.method === "POST") {
       // A custom header forces a CORS preflight, which this server never answers,
       // so another web page cannot make the browser call this endpoint.

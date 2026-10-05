@@ -7,7 +7,7 @@ It answers one question: **what do I look at next?**
 
 It reads your pi session logs, your Jira tickets, and your GitHub PRs. You can act on the answer without leaving the page.
 
-The dashboard never writes to Jira or GitHub. The only thing it sends anywhere is a reply that you type to one of your own pi sessions.
+The dashboard never writes to Jira or GitHub. The only things it sends anywhere go to your own pi sessions: a reply that you type, a Stop, and the answer to an extension dialog.
 
 ## Run it
 
@@ -26,7 +26,7 @@ The navbar at the top switches between the views: **Board** (`#/`, the queue and
 ### Board
 
 - **Left: the queue.** One entry per ticket (or per ticket-less run or PR), ranked by its most urgent signal (see [Queue ranking](#queue-ranking)). Under it: **Waiting on others** (only context left, such as a PR out for review), **Done in Jira** (closed tickets that still have agents open, tagged green **done**; never in the queue), **Agents at work**, **Done for now**, and **Quiet tickets** (your tickets with nothing going on). An entry with several signals shows the most urgent one, with the others as tags: for example "Agent is waiting on you" with **in review**.
-- **Right: a workspace for the selected entry.** In order: why the entry is in the queue, the drafted [next steps](#next-steps-summaries), **Start a new agent**, your notes, each live agent's whole last message with a reply box, the PRs, and the run history. **Show the conversation** on an agent card shows the whole chat in the card (prompts and replies, no tool traffic), so you can read an agent on the board or on its page.
+- **Right: a workspace for the selected entry.** In order: why the entry is in the queue, the drafted [next steps](#next-steps-summaries), **Start a new agent**, your notes, each live agent's whole last message with a reply box (see [Live control](#live-control)), the PRs, and the run history. **Show the conversation** on an agent card shows the whole chat in the card (prompts and replies, no tool traffic), so you can read an agent on the board or on its page.
 - **Done for now** (`E`) hides an entry until one of its signals changes, so the queue works like an inbox. It is saved in the browser's localStorage.
 - **Notes**: each ticket's workspace has a private, timestamped notes list (`N`). Notes are saved in SQLite (`notes` table: `ticket`, `created_at`, `body`) and never leave your machine, except that a next-steps draft reads them first and trusts them over older sources. A note newer than the draft marks it **out of date**.
 - **Resolve a thread**: **Resolve** on an agent card or a history row says "this pi thread no longer matters to this ticket", with an optional reason. A resolved thread moves to **Resolved** under the ticket's history, with its reason, and **Mark relevant** undoes it. A resolved thread no longer puts the ticket in the queue or shows as its agent, and next-steps drafts see only its name and reason. If it still waits for you and is resolved for all its tickets, it shows in the queue on its own.
@@ -78,7 +78,8 @@ An object that is not on the page any more (an old run, a merged PR, a cleared a
 - **End conversation** (`POST /api/conversations/end?session=<id>`) stops the pi process with SIGTERM. The server takes the pid from the status file, and stops only a session in rpc mode. A terminal pi is closed from its tab.
 - **Resume here** (`POST /api/conversations/resume?session=<id>`, with the `X-Agent-Dash` guard) continues a finished session headless: `pi --mode rpc --session <file>`, which keeps the session id. Then the page opens `#/c:<sessionId>`. The server takes the log file from its own scan, never from the request. Two pi processes on one log would mix their entries, so it resumes only a session that is known to be closed: it has a status file, its pid is gone, and this server is not already running it. A session with no status file (it started before the extension) can still be open in a terminal, so it shows only **Copy resume**. **Copy resume** stays, to continue the chat in a terminal.
 - A conversation is a normal pi session, so it also shows on the board and in History. Its **Open** button goes to its page, not to iTerm.
-- **Limit:** a dialog from an extension (`ctx.ui.select`, `confirm`, `input`) gets no answer on the page. It waits until its timeout, or for ever if it has none.
+- **Extension dialogs** (`ctx.ui.select`, `confirm`, `input`, `editor`) show on the page as a card, and you answer them there. See [Live control](#live-control).
+- **Limit:** the page answers a dialog only in a conversation on the page. A dialog in a terminal session shows on its card as "Waiting on a dialog in iTerm", and you answer it in the tab: a tui dialog reads the terminal's keys, and the dash cannot type into it. A dialog that was open when you typed `/reload` drops off the card, but still waits in the session. A pi that started with an extension older than version 2 does not report its dialogs, so they get no answer on the page; they wait until their timeout, or for ever if they have none.
 
 ## Storage
 
@@ -98,6 +99,15 @@ Everything you write lives in SQLite at `~/.agent-dash/agent-dash.db`:
 `POST /api/reply?session=<id>` writes the text to `~/.agent-dash/inbox/<sessionId>/<n>.txt`. The status extension in that session watches the folder, and sends each file to the agent as your message with `pi.sendUserMessage`. While the agent works, the message waits until the agent finishes.
 
 The server takes a reply only for a live session whose status file says `inbox: true`: a terminal (tui) session, or a [conversation on the page](#conversations-on-the-page) (rpc). A `pi -p` run does not watch an inbox. A session that started before the extension changed needs `/reload` once; until then, its card says so.
+
+## Live control
+
+The status extension writes `"version": 2` in its status file. From version 2, the page can see what a live agent does and control it, so you do not need its iTerm tab. A session that started with an older extension shows "Type /reload in the session for Stop and Steer" instead.
+
+- **Activity**: on `tool_execution_start`, the extension writes the tool, a one-line summary of its arguments and the start time to the status file. The summary is the command for `bash` (cut to 80 characters), the path for `read`, `edit`, `write` and `ls`, and the pattern for `grep` and `find`. Values that look like tokens, keys or passwords, and the password in a URL, show as `***`. The card shows it as "running `pnpm test` · 40s". The extension clears it on `tool_execution_end` and `agent_settled`. It writes at most once every 1.5 s, so a run with many tools does not reload the page many times a second.
+- **Stop** (in the reply box, while the agent works or a dialog is open): `POST /api/stop?session=<id>` writes `<n>.abort` to the inbox, and the extension calls `ctx.abort()`, as Esc does. It also closes every open extension dialog (through the dialog's abort signal), so a run that waits on a dialog in iTerm can still be stopped from the page. An editor dialog takes no abort signal: in a conversation on the page, Stop cancels it through the FIFO; in a terminal, the page says to close it in the tab. pi logs a stop during a tool call as an error ("This operation was aborted"); the dash counts it as a stop by you, not an API error.
+- **Send after it finishes** or **Steer now** (in the reply box, while the agent works): `POST /api/reply` with `{text, steer: true}` writes `<n>.steer` instead of `<n>.txt`. The extension sends it with `deliverAs: "steer"`: the agent reads it after its current tool calls, before its next model call. A plain reply stays `<n>.txt` (`deliverAs: "followUp"`), so an older extension still takes it. The server refuses a steer for an older extension.
+- **Dialogs**: pi has no event for a dialog, so the extension wraps the dialog methods of the shared `ctx.ui` object. While a dialog is open, the status file holds its method, title, message and options. The run then counts as waiting for you, and asked a question, so it goes to the top of the queue. In a [conversation on the page](#conversations-on-the-page), the card shows the options (select), **Yes** / **No** (confirm) or a text box (input, editor), and **Dismiss**. An editor whose text is too long for the status file (over 4000 characters) offers only **Dismiss**, so the page never sends back a cut copy. `POST /api/dialog?session=<id>` (body `{index}` for a select, `{value}`, `{confirmed}` or `{cancelled: true}`) finds the newest unanswered `extension_ui_request` in the end of `<id>.log`, checks that it is the dialog that the status file names, and writes an `extension_ui_response` line to the FIFO `<id>.in` (`server/rpc.ts`). It opens the FIFO without blocking: pi holds it open, and with no reader the open fails at once.
 
 The server listens on `127.0.0.1` only, because the page shows prompts and replies from every session.
 
@@ -137,7 +147,7 @@ PRs link to tickets by the key in their title or branch. Then two rules cross th
 | Status | With the extension | Without it (guess) |
 |---|---|---|
 | working | `agent_start` fired and the pi process is alive | The log ends mid-run and changed in the last 10 min |
-| awaiting input | `agent_settled` fired and the pi process is alive | The log ends on a finished reply less than 4 h old |
+| awaiting input | `agent_settled` fired, or an extension dialog is open, and the pi process is alive | The log ends on a finished reply less than 4 h old |
 | finished | `session_shutdown` fired, or the pid is gone | Everything else |
 
 The extension writes its status file on `agent_settled`, not on `agent_end`, because pi can still retry or run queued messages after `agent_end`.
@@ -225,7 +235,7 @@ Optional: `AGENT_DASH_SUMMARY_MODEL` and `AGENT_DASH_SUMMARY_THINKING` choose th
 
 ## Configuration
 
-Environment variables, all optional: `AGENT_DASH_PORT`, `AGENT_DASH_SESSIONS_DIR`, `AGENT_DASH_STATUS_DIR`, `AGENT_DASH_INBOX_DIR`, `AGENT_DASH_PROJECTS` (default `FSDK|EFSUP`), `AGENT_DASH_EXCLUDE_PROJECTS` (default `FSM`), `AGENT_DASH_RECENT_DAYS` (default 14), `JIRA_SERVER`, `JIRA_LOGIN`, `JIRA_API_TOKEN`.
+Environment variables, all optional: `AGENT_DASH_PORT`, `AGENT_DASH_SESSIONS_DIR`, `AGENT_DASH_STATUS_DIR`, `AGENT_DASH_INBOX_DIR`, `AGENT_DASH_CONVERSATIONS_DIR`, `AGENT_DASH_PROJECTS` (default `FSDK|EFSUP`), `AGENT_DASH_EXCLUDE_PROJECTS` (default `FSM`), `AGENT_DASH_RECENT_DAYS` (default 14), `JIRA_SERVER`, `JIRA_LOGIN`, `JIRA_API_TOKEN`.
 
 ## Develop
 
