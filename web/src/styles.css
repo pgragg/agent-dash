@@ -169,8 +169,8 @@ kbd {
 /* ---- rail ---- */
 .rail { background: var(--rail); border-right: 1px solid var(--line); overflow-y: auto; padding: 10px 10px 0; display: flex; flex-direction: column; }
 .rail-section + .rail-section { margin-top: 10px; }
-.new-conversation { padding: 4px 4px 8px; }
-.new-conversation .btn { width: 100%; justify-content: center; }
+.new-conversation { padding: 4px 4px 8px; display: flex; align-items: center; gap: 8px; }
+.new-conversation > .btn { flex: 1; justify-content: center; }
 .new-conversation-error { margin: 6px 4px 0; font-size: 12.5px; color: var(--bad); }
 .rail-title {
   display: flex; align-items: center; gap: 6px; width: 100%;
@@ -563,3 +563,22 @@ a.btn.verb { text-decoration: none; }
 .check { display: inline-flex; align-items: center; gap: 5px; }
 .smoke-results summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
 .smoketests select, .smoke-form select, .smoke-form input[type="datetime-local"] { height: 26px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--bg); font: 12.5px var(--sans); color: var(--ink); }
+
+/* ---- kanban: the board's entries in one column per SDLC stage ---- */
+.kanban-view { flex: 1; display: flex; flex-direction: column; min-height: 0; position: relative; }
+.kanban-bar { display: flex; align-items: center; gap: 12px; padding: 10px 20px; border-bottom: 1px solid var(--line); flex: none; }
+.kanban-bar .meta { font-size: 12.5px; color: var(--muted); }
+.kanban { flex: 1; display: flex; gap: 12px; overflow-x: auto; padding: 14px 20px; min-height: 0; }
+.k-col { flex: 1 0 240px; max-width: 340px; display: flex; flex-direction: column; min-height: 0; background: var(--rail); border-radius: 12px; }
+.k-col-head { cursor: default; margin: 0; padding: 10px 12px 6px; }
+/* An empty column stays as a narrow strip, so the stage order still reads left to right. */
+.k-col.empty { flex: 0 0 112px; }
+.k-col.empty .k-col-head { white-space: normal; }
+.k-col-list { flex: 1; overflow-y: auto; padding: 2px 6px 8px; display: flex; flex-direction: column; gap: 6px; }
+.q-item.k-card { background: var(--surface); border-color: var(--line); }
+.q-item.k-card:hover { border-color: var(--line-2); }
+.q-item.k-card.selected { border-color: var(--muted); }
+.q-item.dim { opacity: .6; }
+.q-item.dim:hover, .q-item.dim.selected { opacity: 1; }
+.kanban-drawer { position: absolute; top: 0; right: 0; bottom: 0; width: min(900px, 64vw); overflow-y: auto; background: var(--bg); border-left: 1px solid var(--line); box-shadow: -12px 0 32px #0000001f; z-index: 5; animation: rise .18s ease-out; }
+.drawer-close { position: sticky; top: 10px; float: right; margin: 10px 14px 0 0; z-index: 1; background: var(--bg); }
