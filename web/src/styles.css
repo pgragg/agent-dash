@@ -322,11 +322,8 @@ a.pr-group-title:hover { text-decoration: underline; text-underline-offset: 3px;
 
 /* resolved threads */
 /* The reason box takes its own line, so it does not squeeze the row it sits in. */
-.resolve-form { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-basis: 100%; order: 10; padding: 0 0 10px; }
 .h-row, .agent .card-head { flex-wrap: wrap; }
 .h-row .meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.resolve-form input { height: 26px; flex: 1; max-width: 420px; padding: 0 9px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--bg); font: 13px var(--sans); color: var(--ink); outline: 0; }
-.resolve-form input:focus { border-color: var(--ink-2); background: var(--surface); }
 .history > li.resolved-group { padding: 4px 12px; }
 .history > li.resolved { background: var(--hover); }
 .history > li.resolved .h-title { cursor: default; color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line-2); }
