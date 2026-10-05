@@ -11,7 +11,7 @@ import { handle } from "../server/routes/diagrams.ts";
 import { parseSession, SessionIndex } from "../server/sources/sessions.ts";
 import * as db from "../server/summaries/db.ts";
 import { parseHash } from "../web/src/routes.ts";
-import { header, jsonl, PATTERN, reply, user } from "./helpers.ts";
+import { header, jsonl, name, PATTERN, reply, user } from "./helpers.ts";
 
 const tmp = mkdtempSync(join(tmpdir(), "agent-dash-diagrams-"));
 db.open(join(tmp, "test.db"));
@@ -83,8 +83,10 @@ test("sync stores each diagram once with its conversation and ticket, reads embe
     ["mermaid", "Chart", "FSDK-9"],
     ["png", "p95", "FSDK-9"],
   ]);
-  const png = db.getDiagram(rows.find((d) => d.kind === "png")!.id)!;
-  assert.equal(Buffer.from(png.source, "base64").equals(PNG), true);
+  const pngId = rows.find((d) => d.kind === "png")!.id;
+  assert.equal(Buffer.from(db.getDiagram(pngId, true)!.source!, "base64").equals(PNG), true);
+  // The JSON route never loads a raster image's base64.
+  assert.equal(db.getDiagram(pngId)!.source, null);
 
   // The conversation opened a PR for another ticket: its diagrams follow it.
   await syncDiagrams([s], () => "FSDK-10");
@@ -92,8 +94,11 @@ test("sync stores each diagram once with its conversation and ticket, reads embe
 });
 
 test("the routes serve a diagram on its own, and its file with a policy that runs no script", async () => {
-  const sessions = new SessionIndex(join(tmp, "no-sessions"), PATTERN);
-  mkdirSync(join(tmp, "no-sessions"));
+  mkdirSync(join(tmp, "sessions", "p"), { recursive: true });
+  writeFileSync(join(tmp, "sessions", "p", "s.jsonl"), jsonl(header("live-session", "/repo"), name("Draw the flow"), user("draw"), reply("ok")));
+  const sessions = new SessionIndex(join(tmp, "sessions"), PATTERN);
+  await sessions.scan();
+  db.addDiagrams([{ key: "live-session png", sessionId: "live-session", ticket: null, kind: "png", title: "p", origin: "p.png", hash: "png", source: PNG.toString("base64"), createdAt: "2026-01-01T00:00:00Z" }]);
   db.addDiagrams([{ key: "gone-session abc", sessionId: "gone-session", ticket: "FSDK-1", kind: "svg", title: "a", origin: "/r/a.svg", hash: "abc", source: "<svg><script>alert(1)</script></svg>", createdAt: "2026-01-01T00:00:00Z" }]);
   const id = db.listDiagrams().find((d) => d.sessionId === "gone-session")!.id;
   const server = createServer(async (req, res) => {
@@ -112,6 +117,14 @@ test("the routes serve a diagram on its own, and its file with a policy that run
   assert.equal(raw.headers.get("content-type"), "image/svg+xml");
   assert.match(raw.headers.get("content-security-policy") ?? "", /default-src 'none'.*sandbox/);
   assert.equal((await fetch(`${base}/api/diagram?id=99999`)).status, 404);
+
+  // A conversation from the last scan is named; a raster file comes back as its bytes.
+  const pngId = db.listDiagrams().find((d) => d.sessionId === "live-session")!.id;
+  assert.equal((await (await fetch(`${base}/api/diagram?id=${pngId}`)).json()).conversation.title, "Draw the flow");
+  const png = await fetch(`${base}/api/diagram/raw?id=${pngId}`);
+  assert.equal(png.headers.get("content-type"), "image/png");
+  assert.equal(Buffer.from(await png.arrayBuffer()).equals(PNG), true);
+  assert.equal((await fetch(`${base}/api/diagram?id=${pngId}`, { method: "POST" })).status, 404);
 });
 
 test("diagram hashes open the diagram views", () => {
