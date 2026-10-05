@@ -27,6 +27,17 @@ export async function jiraGet(path: string): Promise<any> {
   return res.json();
 }
 
+/** The one Jira write the dash makes itself: a ticket's due date. Jira answers 204. */
+export async function setJiraDueDate(key: string, date: string): Promise<void> {
+  const res = await fetch(`${config.jira.server}/rest/api/3/issue/${key}`, {
+    method: "PUT",
+    headers: { Authorization: basicAuth(), "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ fields: { duedate: date } }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) throw new Error(`Jira ${res.status}: ${(await res.text()).slice(0, 200)}`);
+}
+
 /** Read-only: POST /search/jql is a query, not a write. */
 async function search(jql: string): Promise<any[]> {
   const issues: any[] = [];

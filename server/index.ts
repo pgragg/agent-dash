@@ -140,6 +140,12 @@ async function dashboard(force: boolean) {
   return d;
 }
 
+/** Show a due date the dash just set at once, without a new Jira search. */
+function onDueDate(key: string, date: string): void {
+  for (const t of [...myTickets.value, ...others.values()]) if (t.key === key) t.dueDate = date;
+  broadcast();
+}
+
 // ---- live updates -------------------------------------------------------------------
 
 const clients = new Set<ServerResponse>();
@@ -202,7 +208,7 @@ const server = createServer(async (req, res) => {
     if (await resumeRoute.handle(req, res, url, sessions)) return;
     if (await liveControl.handle(req, res, url)) return;
     if (await prRoute.handle(req, res, url)) return;
-    if (await ticketRoute.handle(req, res, url)) return;
+    if (await ticketRoute.handle(req, res, url, onDueDate)) return;
     if (await diagramRoute.handle(req, res, url, sessions)) return;
     if (await sdlcRoute.handle(req, res, url, broadcast)) return;
     if (await loginRoute.handle(req, res, url)) return;
