@@ -23,7 +23,7 @@ function note(s: ConversationSummary, now: number): string {
  */
 export function ConversationGist({ run, summary, now, open, onToggle }: { run: Run; summary: ConversationSummary | undefined; now: number; open?: boolean; onToggle?: () => void }) {
   // The server drafts live runs by itself; a finished one is drafted when it shows.
-  const wanted = run.status === "finished" && (!summary || (summary.stale && summary.status !== "in_progress"));
+  const wanted = run.status === "finished" && !!run.lastMessage && (!summary || (summary.stale && summary.status !== "in_progress"));
   useEffect(() => {
     if (wanted) void api.summarizeConversation(run.sessionId);
   }, [wanted, run.sessionId, run.lastActivityAt]);
