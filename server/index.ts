@@ -19,6 +19,8 @@ import * as loginRoute from "./routes/login.ts";
 import * as slackRoute from "./routes/slack.ts";
 import * as ticketRoute from "./routes/ticket.ts";
 import * as diagramRoute from "./routes/diagrams.ts";
+import * as sdlcRoute from "./routes/sdlc.ts";
+import { confirmDeployMessage, deployStageOf, parseEnvironment, smoketestMessage } from "../shared/sdlc.ts";
 import { syncDiagrams } from "./diagramSync.ts";
 import { fetchMyPrs } from "./sources/github.ts";
 import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
@@ -28,6 +30,8 @@ import * as summaryDb from "./summaries/db.ts";
 import { reconcile, requestSummary } from "./summaries/runner.ts";
 
 const WEB_DIST = new URL("../web/dist/", import.meta.url).pathname;
+/** Agents record smoketests and deploys with this script, into this dash's database. */
+const SDLC_SCRIPT = new URL("../scripts/sdlc-event.ts", import.meta.url).pathname;
 const EXTENSION_PATH = join(homedir(), ".pi/agent/extensions/agent-dash-status.ts");
 
 /**
@@ -131,6 +135,7 @@ async function dashboard(force: boolean) {
   for (const g of [...d.myTickets, ...d.otherTickets]) for (const r of g.runs) if (r.tickets[0]) runTicket.set(r.sessionId, r.tickets[0]);
   await syncDiagrams(parsed, (s) => runTicket.get(s.sessionId) ?? s.tickets[0] ?? null, new Date(now));
   d.diagrams = summaryDb.listDiagrams();
+  d.sdlcEvents = summaryDb.sdlcEventsByTicket();
   return d;
 }
 
@@ -198,6 +203,7 @@ const server = createServer(async (req, res) => {
     if (await prRoute.handle(req, res, url)) return;
     if (await ticketRoute.handle(req, res, url)) return;
     if (await diagramRoute.handle(req, res, url, sessions)) return;
+    if (await sdlcRoute.handle(req, res, url, broadcast)) return;
     if (await loginRoute.handle(req, res, url)) return;
     if (await slackRoute.handle(req, res, url)) return;
     if (url.pathname === "/api/dashboard") {
@@ -237,15 +243,25 @@ const server = createServer(async (req, res) => {
       const d = await dashboard(false);
       const group = [...d.myTickets, ...d.otherTickets].find((g) => g.ticket.key === key);
       if (!group) return json(404, { error: `unknown ticket ${key}` });
-      const context = buildHandoff({ group, notes: d.notes[key] ?? [], summary: d.summaries[key], now: new Date() });
+      const context = buildHandoff({ group, notes: d.notes[key] ?? [], summary: d.summaries[key], events: d.sdlcEvents[key] ?? [], now: new Date() });
       if (url.pathname === "/api/agents/context") return void res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8" }).end(context);
 
-      const body = JSON.parse((await readBody(req, 64_000)) || "{}") as { message?: string; step?: number; cwd?: string; terminal?: boolean };
+      const body = JSON.parse((await readBody(req, 64_000)) || "{}") as { message?: string; step?: number; cwd?: string; terminal?: boolean; sdlc?: { kind?: string; env?: string; stage?: string } };
       const cwd = body.cwd ?? homedir();
       // A step is read from the database, so the button starts the step that the page shows.
       const step = body.step === undefined ? null : summaryDb.getStep(Number(body.step));
       if (body.step !== undefined && step?.ticket !== key) return json(404, { error: "no such next step on this ticket" });
-      const message = step ? stepMessage(key, step.body) : body.message;
+      // An SDLC verb's message is written here, because it names this server's script path.
+      const env = body.sdlc?.kind === "smoketest" ? parseEnvironment(body.sdlc.env ?? "") : null;
+      const stage = body.sdlc?.kind === "confirm_deploy" && (body.sdlc.stage === "beta" || body.sdlc.stage === "prod") ? body.sdlc.stage : null;
+      if (body.sdlc && !env && !stage) return json(400, { error: "unknown SDLC verb" });
+      const message = step
+        ? stepMessage(key, step.body)
+        : env
+          ? smoketestMessage(key, env, SDLC_SCRIPT)
+          : stage
+            ? confirmDeployMessage(key, stage, group.prs.filter((p) => deployStageOf(p) === stage && p.state === "merged").map((p) => p.url), SDLC_SCRIPT)
+            : body.message;
       if (!message?.trim()) return json(400, { error: "write the first message" });
       const dir = cwd.replace(/^~(?=\/|$)/, homedir());
       if (!dir.startsWith("/") || !existsSync(dir) || !statSync(dir).isDirectory()) return json(400, { error: `not a folder: ${cwd}` });

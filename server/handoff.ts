@@ -1,4 +1,5 @@
-import type { Note, PullRequest, Run, TicketGroup, TicketSummaryState } from "../shared/types.ts";
+import { progressLines, sdlcProgress } from "../shared/sdlc.ts";
+import type { Note, PullRequest, Run, SdlcEvent, TicketGroup, TicketSummaryState } from "../shared/types.ts";
 
 /**
  * The context a new agent starts with: what the ticket's page shows. It goes into the first
@@ -37,6 +38,8 @@ export interface HandoffInput {
   group: TicketGroup;
   notes: Note[];
   summary: TicketSummaryState | undefined;
+  /** The ticket's smoketests and confirmed deploys, newest first. */
+  events?: SdlcEvent[];
   now: Date;
 }
 
@@ -59,7 +62,7 @@ export function featuredRuns(group: TicketGroup): Run[] {
   return live.length ? live : relevant.slice(-1);
 }
 
-export function buildHandoff({ group, notes, summary, now }: HandoffInput): string {
+export function buildHandoff({ group, notes, summary, events = [], now }: HandoffInput): string {
   const t = group.ticket;
   const out: string[] = [
     HANDOFF_START(t.key),
@@ -81,6 +84,7 @@ export function buildHandoff({ group, notes, summary, now }: HandoffInput): stri
   else out.push("- none drafted yet");
   out.push("", "## Pull requests");
   out.push(...(group.prs.length ? group.prs.map(prLine) : ["- none"]));
+  out.push("", "## SDLC progress (stages can be skipped)", ...progressLines(sdlcProgress({ ticket: t, prs: group.prs, events })));
 
   const featured = featuredRuns(group);
   if (featured.length) {

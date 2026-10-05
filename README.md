@@ -26,7 +26,7 @@ The navbar at the top switches between the views: **Board** (`#/`, the queue and
 ### Board
 
 - **Left: the queue.** One entry per ticket (or per ticket-less run or PR), ranked by its most urgent signal (see [Queue ranking](#queue-ranking)). Under it: **Waiting on others** (only context left, such as a PR out for review), **Done in Jira** (closed tickets that still have agents open, tagged green **done**; never in the queue), **Agents at work**, **Done for now**, and **Quiet tickets** (your tickets with nothing going on). An entry with several signals shows the most urgent one, with the others as tags: for example "Agent is waiting on you" with **in review**.
-- **Right: a workspace for the selected entry.** In order: why the entry is in the queue (each PR signal with its [verb button](#pr-verbs)), the [Ticket](#the-ticket-section) section, the drafted [next steps](#next-steps-summaries), **Start a new agent**, your notes, each live agent's whole last message with a reply box (see [Live control](#live-control)), the PRs, and the run history. **Show the conversation** on an agent card shows the whole chat in the card (prompts and replies, no tool traffic), so you can read an agent on the board or on its page.
+- **Right: a workspace for the selected entry.** In order: the [SDLC progress bar](#sdlc-progress-and-smoketests), why the entry is in the queue (each PR signal with its [verb button](#pr-verbs)), the [Ticket](#the-ticket-section) section, the drafted [next steps](#next-steps-summaries), the [Smoketests](#sdlc-progress-and-smoketests), **Start a new agent**, your notes, each live agent's whole last message with a reply box (see [Live control](#live-control)), the PRs, and the run history. **Show the conversation** on an agent card shows the whole chat in the card (prompts and replies, no tool traffic), so you can read an agent on the board or on its page.
 - **Done for now** (`E`) hides an entry until one of its signals changes, so the queue works like an inbox. It is saved in the browser's localStorage.
 - **Notes**: each ticket's workspace has a private, timestamped notes list (`N`). Notes are saved in SQLite (`notes` table: `ticket`, `created_at`, `body`) and never leave your machine, except that a next-steps draft reads them first and trusts them over older sources. A note newer than the draft marks it **out of date**.
 - **Resolve a thread**: **Resolve** on an agent card or a history row says "this pi thread no longer matters to this ticket", with an optional reason. A resolved thread moves to **Resolved** under the ticket's history, with its reason, and **Mark relevant** undoes it. A resolved thread no longer puts the ticket in the queue or shows as its agent, and next-steps drafts see only its name and reason. If it still waits for you and is resolved for all its tickets, it shows in the queue on its own.
@@ -104,6 +104,40 @@ The section also has two **Jira verbs**. The page itself never writes to Jira: e
 
 An **Overdue** or **Due soon** line in the "why" list has a **New due date…** button that does the same as **Set due date**.
 
+### SDLC progress and smoketests
+
+A progress bar at the top of each ticket shows where its change is on the way to prod. The order is a recommendation, not a gate: when a later stage is done, the open stages before it show as **skipped**. The rules are in `shared/sdlc.ts`.
+
+| Stage | Done when | Source |
+|---|---|---|
+| 1. Ideation | Always | — |
+| 2. PR exists | An open or merged PR names the key | GitHub |
+| 3. Local smoketest | The newest smoketest tagged `localhost` did not fail | SQLite |
+| 4. In Beta | A deploy event tagged Postman Beta or Fern Dev | SQLite: an agent confirmed it in Argo, or you checked it off |
+| 5. Beta smoketest | The newest smoketest tagged Postman Beta or Fern Dev did not fail | SQLite |
+| 6. In Prod | A deploy event tagged Postman Prod or Fern Prod | SQLite, as In Beta |
+| 7. Prod smoketest | The newest smoketest tagged Postman Prod or Fern Prod did not fail | SQLite |
+| 8. Ticket done | The Jira status category is Done | Jira |
+
+- **The PRs** are the ticket's PRs on the board, plus `GET /api/ticket-prs?key=KEY` (with the `X-Agent-Dash` guard): a GitHub search for PRs by anyone, of any age, with the key in the title, cached for 2 minutes. A PR in `postman-eng/cloud9-parcels-deployments` is a Beta deploy PR, and one in `postman-eng/cloud9-parcels-production-deployments` is a Prod deploy PR. When a deploy PR merged and no deploy event exists, the stage shows **waiting** with **Confirm in Argo**.
+- **A click on a stage** shows its state and its actions. At first it shows the next stage, with the hint of what to do: for example, a local smoketest comes before a PR review, and a Beta smoketest comes before the prod chart version update PR.
+  - A smoketest stage: **Run smoketest on <environment>** starts an agent (`POST /api/agents?ticket=KEY` with `{sdlc: {kind: "smoketest", env}}`). The server writes the first message (`smoketestMessage` in `shared/sdlc.ts`), because it names the server's own script path. The agent runs the smoketest, then records it with `scripts/sdlc-event.ts`.
+  - In Beta and In Prod: **Confirm in Argo** (only when a deploy PR merged) starts an agent that checks the Argo app read-only and records a deploy event. **Check off by hand** records it at once, for a change with no Argo deploy. **Undo** removes the newest deploy event.
+- **The Smoketests card** lists the ticket's smoketests, newest first, with the time, how long each ran, the environment tags, the outcome, the test details, and the results (closed at first). Pick an environment, then **Run smoketest on …** starts the same agent as on the bar. **Record by hand** saves a smoketest that you ran yourself. **Delete** removes one.
+- **A tag is the environment under test**, not every system that the test touched. A local frontend against the Postman Beta backend tests Beta, so its tag is Postman Beta. Two tags are for the rare test where both sides are under test. The tags are `localhost`, `fern_dev`, `fern_prod`, `postman_beta` and `postman_prod` (or their labels: "Fern Dev" and so on).
+- **The next-steps summary and the context of a new agent** both get the progress, one line per stage. The summary prompt tells the run to follow the order, to name the environment when the next stage is a smoketest, and to plan no step for a skipped stage.
+
+`POST /api/sdlc-events` (body `{eventType, tickets, environments, startedAt, finishedAt, outcome, testDetails, testResults}`) and `DELETE /api/sdlc-events?id=N` write the events, with the `X-Agent-Dash` guard. An agent uses the script, which writes into the same database:
+
+```bash
+node scripts/sdlc-event.ts smoketest --ticket FSDK-1 --env localhost \
+  --started 2026-10-05T10:00:00Z --finished 2026-10-05T10:20:00Z --outcome passed \
+  --details-file details.md --results-file results.md
+node scripts/sdlc-event.ts deploy --ticket FSDK-1 --env postman_beta --details "<Argo app>: Synced, Healthy, 1.2.3"
+```
+
+`--ticket` and `--env` can repeat. With no `--started`, the time is now.
+
 ## Addresses
 
 Every object in agent-dash has an address in the URL hash. A link opens the object and flashes it. The rules are in `web/src/routes.ts`.
@@ -166,6 +200,9 @@ Everything you write lives in SQLite at `~/.agent-dash/agent-dash.db`:
 | `actions` | One per action on the Actions view: `key` (what it is about, such as `ci_failing pr:<url>`), `kind`, `ticket`, `created_at`, `cleared_at` (set when it goes away) |
 | `exits` | One per time you leave the dash for another tool: `at`, `kind`, `host`, `view`, `section`, `ticket`. Append-only. See [Exits](#exits). |
 | `diagrams` | One per diagram an agent made: `key` (session id and source hash), `session_id`, `ticket`, `kind`, `title`, `origin` (`reply`, or the file path as the agent wrote it), `hash`, `source`, `created_at` (when the agent wrote it) |
+| `SDLC_Event` | One per smoketest or confirmed deploy: `event_type` (`smoketest` or `deploy`), `started_at`, `finished_at`, `outcome` (`passed`, `failed`, or empty), `test_details`, `test_results`, `created_at` |
+| `SDLC_Event_Environment` | One per environment under test of an event: `sdlc_event_id`, `environment` |
+| `SDLC_Event_Ticket` | One per ticket of an event: `sdlc_event_id`, `ticket`, `created_at` (when the link was made) |
 | `PiConversationStatusChange` | One per change to a thread's relevance: `ticket`, `session_id`, `status` (`relevant` or `resolved`), `reason` (resolved only, optional), `created_at`. Append-only; the newest row per ticket and thread is the current state. |
 
 ## Reply to an agent

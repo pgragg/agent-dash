@@ -13,6 +13,7 @@ import { needStep } from "./needs.ts";
 import { href, humanAge, parseHash, resolveBoardRef, type Route } from "./routes.ts";
 import { FixLogin } from "./fixLogin.tsx";
 import { rowKey } from "./rowNav.ts";
+import { SdlcBar, Smoketests } from "./sdlc.tsx";
 import { SlackQuotes } from "./slackQuotes.tsx";
 import { DueDateVerb, TicketPanel } from "./ticketPanel.tsx";
 import { DiagramCards, DiagramsView, DiagramView } from "./diagrams.tsx";
@@ -828,6 +829,7 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
               </button>
             ))}
         </div>
+        {s.ticket && <SdlcBar group={s.ticket} events={data.sdlcEvents[s.ticket.ticket.key] ?? []} cwd={cwd} onError={setError} />}
         {s.items.length > 0 && (
           <ul className="why">
             {s.items.map((a, i) => (
@@ -855,6 +857,8 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
       )}
 
       {s.ticket && <NextSteps s={s} state={data.summaries[s.ticket.ticket.key]} notes={data.notes[s.ticket.ticket.key] ?? []} now={now} cwd={cwd} onError={setError} />}
+
+      {s.ticket && <Smoketests ticket={s.ticket.ticket.key} events={data.sdlcEvents[s.ticket.ticket.key] ?? []} now={now} cwd={cwd} onError={setError} />}
 
       {s.ticket && <StartAgent key={s.id} s={s} cwd={cwd} setCwd={setCwd} onError={setError} focusSignal={agentSignal} />}
 

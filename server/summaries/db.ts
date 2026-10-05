@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { splitSummary } from "../../shared/nextSteps.ts";
-import type { Diagram, DiagramKind, NextStep, Note, ThreadStatus, ThreadStatusChange, TicketSummary } from "../../shared/types.ts";
+import type { Diagram, DiagramKind, NextStep, Note, SdlcEnvironment, SdlcEvent, SdlcEventType, ThreadStatus, ThreadStatusChange, TicketSummary } from "../../shared/types.ts";
 
 export const DB_PATH = process.env.AGENT_DASH_DB ?? join(homedir(), ".agent-dash/agent-dash.db");
 
@@ -61,6 +61,35 @@ CREATE TABLE IF NOT EXISTS actions (
   cleared_at TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS actions_open_by_key ON actions (key) WHERE cleared_at IS NULL;
+
+-- One row per thing that happened to a change on its way to prod: a smoketest, or a deploy that
+-- Argo or Piper confirmed. The other SDLC stages read GitHub and Jira, so they have no rows.
+CREATE TABLE IF NOT EXISTS SDLC_Event (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_type   TEXT NOT NULL CHECK (event_type IN ('smoketest', 'deploy')),
+  started_at   TEXT NOT NULL,
+  finished_at  TEXT,
+  outcome      TEXT CHECK (outcome IN ('passed', 'failed')),
+  test_details TEXT,
+  test_results TEXT,
+  created_at   TEXT NOT NULL
+);
+
+-- The environments under test, usually one.
+CREATE TABLE IF NOT EXISTS SDLC_Event_Environment (
+  sdlc_event_id INTEGER NOT NULL REFERENCES SDLC_Event (id),
+  environment   TEXT NOT NULL CHECK (environment IN ('localhost', 'fern_dev', 'fern_prod', 'postman_beta', 'postman_prod')),
+  PRIMARY KEY (sdlc_event_id, environment)
+);
+
+CREATE TABLE IF NOT EXISTS SDLC_Event_Ticket (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  sdlc_event_id INTEGER NOT NULL REFERENCES SDLC_Event (id),
+  ticket        TEXT NOT NULL,
+  created_at    TEXT NOT NULL,
+  UNIQUE (sdlc_event_id, ticket)
+);
+CREATE INDEX IF NOT EXISTS sdlc_event_ticket_by_ticket ON SDLC_Event_Ticket (ticket);
 
 -- One row per diagram an agent made. It keeps the source, so the diagram outlives its log and its file.
 -- key is "<session_id> <hash>": the same diagram twice in one conversation is one row.
@@ -344,4 +373,72 @@ export function setDiagramTicket(sessionId: string, ticket: string): number {
 
 export function inProgress(): SummaryRecord[] {
   return (open().prepare("SELECT * FROM summaries WHERE status = 'in_progress'").all() as unknown as Row[]).map(toRecord);
+}
+
+// ---- SDLC events: smoketests and confirmed deploys, linked to tickets ------------------
+
+export interface NewSdlcEvent {
+  eventType: SdlcEventType;
+  startedAt: string;
+  finishedAt?: string | null;
+  outcome?: SdlcEvent["outcome"];
+  testDetails?: string | null;
+  testResults?: string | null;
+  environments: SdlcEnvironment[];
+  tickets: string[];
+}
+
+export function addSdlcEvent(e: NewSdlcEvent, now = new Date()): SdlcEvent {
+  const d = open();
+  const created = now.toISOString();
+  d.exec("BEGIN IMMEDIATE");
+  try {
+    const { id } = d
+      .prepare("INSERT INTO SDLC_Event (event_type, started_at, finished_at, outcome, test_details, test_results, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id")
+      .get(e.eventType, e.startedAt, e.finishedAt ?? null, e.outcome ?? null, e.testDetails ?? null, e.testResults ?? null, created) as { id: number };
+    const env = d.prepare("INSERT OR IGNORE INTO SDLC_Event_Environment (sdlc_event_id, environment) VALUES (?, ?)");
+    for (const x of e.environments) env.run(id, x);
+    const link = d.prepare("INSERT OR IGNORE INTO SDLC_Event_Ticket (sdlc_event_id, ticket, created_at) VALUES (?, ?, ?)");
+    for (const t of e.tickets) link.run(id, t, created);
+    d.exec("COMMIT");
+    return sdlcEvents("WHERE e.id = ?", id)[0];
+  } catch (err) {
+    d.exec("ROLLBACK");
+    throw err;
+  }
+}
+
+export function deleteSdlcEvent(id: number): boolean {
+  const d = open();
+  d.exec("BEGIN IMMEDIATE");
+  try {
+    d.prepare("DELETE FROM SDLC_Event_Environment WHERE sdlc_event_id = ?").run(id);
+    d.prepare("DELETE FROM SDLC_Event_Ticket WHERE sdlc_event_id = ?").run(id);
+    const gone = d.prepare("DELETE FROM SDLC_Event WHERE id = ?").run(id).changes > 0;
+    d.exec("COMMIT");
+    return gone;
+  } catch (err) {
+    d.exec("ROLLBACK");
+    throw err;
+  }
+}
+
+/** Newest first. `where` is a fixed clause from this file, never from a request. */
+function sdlcEvents(where = "", ...params: number[]): SdlcEvent[] {
+  const rows = open()
+    .prepare(
+      `SELECT e.id, e.event_type AS eventType, e.started_at AS startedAt, e.finished_at AS finishedAt, e.outcome, e.test_details AS testDetails, e.test_results AS testResults, e.created_at AS createdAt,
+        (SELECT group_concat(environment) FROM SDLC_Event_Environment WHERE sdlc_event_id = e.id) AS envs,
+        (SELECT group_concat(ticket) FROM SDLC_Event_Ticket WHERE sdlc_event_id = e.id) AS keys
+       FROM SDLC_Event e ${where} ORDER BY e.started_at DESC, e.id DESC`,
+    )
+    .all(...params) as unknown as (Omit<SdlcEvent, "environments" | "tickets"> & { envs: string | null; keys: string | null })[];
+  return rows.map(({ envs, keys, ...r }) => ({ ...r, environments: (envs?.split(",") ?? []) as SdlcEnvironment[], tickets: keys?.split(",") ?? [] }));
+}
+
+/** Every ticket's events, newest first. An event on two tickets shows under both. */
+export function sdlcEventsByTicket(): Record<string, SdlcEvent[]> {
+  const out: Record<string, SdlcEvent[]> = {};
+  for (const e of sdlcEvents()) for (const t of e.tickets) (out[t] ??= []).push(e);
+  return out;
 }
