@@ -20,6 +20,19 @@ export function stepMessage(key: string, step: string): string {
   return `Do this next step on ${key}. It comes from the drafted next steps in the context, which can be out of date: check it against the newer sources there before you act.\n\n${step}`;
 }
 
+/**
+ * The first message of a headless agent: the context, then your message. rpc mode takes no
+ * `@file`, so the context goes inline; the markers keep its keys out of the run's tickets.
+ */
+export function agentMessage(context: string, message: string): string {
+  return `${context}\n\n${message.trim()}`;
+}
+
+/** The session name carries the key, so the new run links to the ticket at once. */
+export function agentName(key: string, text: string): string {
+  return `${key}: ${text.replace(/[*`]/g, "").trim().split("\n")[0].slice(0, 60)}`;
+}
+
 export interface HandoffInput {
   group: TicketGroup;
   notes: Note[];
