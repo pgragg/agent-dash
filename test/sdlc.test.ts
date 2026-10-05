@@ -29,6 +29,10 @@ function ev(over: Partial<SdlcEvent> = {}): SdlcEvent {
     testResults: null,
     sessionId: null,
     skippedAt: null,
+    prUrl: null,
+    channel: null,
+    message: null,
+    messageUrl: null,
     environments: ["localhost"],
     tickets: ["FSDK-1"],
     createdAt: "2026-10-02T10:00:00.000Z",
@@ -40,7 +44,7 @@ const states = (p: ReturnType<typeof sdlcProgress>) => Object.fromEntries(p.stag
 
 test("a new ticket is at Ideation, and the next stage is a PR", () => {
   const p = sdlcProgress({ ticket: ticket(), prs: [], events: [] });
-  assert.equal(p.stages.length, 8);
+  assert.equal(p.stages.length, 9);
   assert.equal(p.stages[p.current].id, "ideation");
   assert.equal(p.next?.id, "pr");
   // A closed PR is not a PR that exists.
@@ -87,7 +91,7 @@ test("a blocked smoketest is not a failure and not progress: it shows grey and s
 
 test("a merged deploy PR with no confirmed deploy waits for Argo; Fern Dev counts for Beta", () => {
   const deploy = pr({ url: "https://github.com/postman-eng/cloud9-parcels-deployments/pull/7", repo: "postman-eng/cloud9-parcels-deployments", number: 7, state: "merged" });
-  const p = sdlcProgress({ ticket: ticket(), prs: [pr(), deploy], events: [ev()] });
+  const p = sdlcProgress({ ticket: ticket(), prs: [pr(), deploy], events: [ev(), ev({ eventType: "review_request", environments: [], prUrl: pr().url })] });
   assert.equal(states(p).in_beta, "waiting");
   assert.match(p.hint!, /Deploy PR #7 merged; confirm the deploy in Argo/);
   const smoked = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev({ environments: ["fern_dev"] })] });
@@ -100,9 +104,22 @@ test("a skipped smoketest passes its stage on purpose, and a later run decides a
   const p = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [skip] });
   assert.equal(states(p).local_smoketest, "skipped");
   assert.match(p.stages[p.current].detail, /skipped 2026-10-02/);
-  assert.equal(p.next?.id, "in_beta");
+  assert.equal(p.next?.id, "review_requested");
   const ran = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [skip, ev({ outcome: "failed", startedAt: "2026-10-02T11:00:00.000Z" })] });
   assert.equal(states(ran).local_smoketest, "failed");
+});
+
+test("after the local smoketest, the next stage is a review request; a posted one marks it done and names the PR", () => {
+  const p = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev()] });
+  assert.equal(p.next?.id, "review_requested");
+  assert.match(p.hint!, /#proj-fern-aws-migration-devs/);
+  const asked = ev({ eventType: "review_request", environments: [], outcome: null, prUrl: "https://github.com/postman-eng/cloud9-parcels-production-deployments/pull/13612", startedAt: "2026-10-05T15:10:00.000Z" });
+  const done = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev(), asked] });
+  assert.equal(states(done).review_requested, "done");
+  assert.match(done.stages[done.current].detail, /cloud9-parcels-production-deployments#13612 on 2026-10-05/);
+  assert.equal(done.next?.id, "in_beta");
+  // A review request is not a smoketest: the local stage still shows as skipped, not done.
+  assert.equal(states(sdlcProgress({ ticket: ticket(), prs: [pr()], events: [asked] })).local_smoketest, "skipped");
 });
 
 test("Done comes from Jira, and then there is no next stage", () => {
@@ -179,6 +196,20 @@ INSERT INTO SDLC_Event_Ticket (sdlc_event_id, ticket, created_at) VALUES (7, 'FS
   assert.equal((after.prepare("SELECT session_id AS s FROM SDLC_Event WHERE id = 7").get() as { s: string }).s, "s-7");
   // The copy drops the table's triggers, so open() must add the change trigger after it.
   assert.ok(after.prepare("SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = 'sdlc_event_changed'").get());
+  // The same copy allows review requests, with their own columns.
+  after.prepare("INSERT INTO SDLC_Event (event_type, started_at, created_at, pr_url, message) VALUES ('review_request', 't', 't', 'u', 'm')").run();
+});
+
+test("a review request has no environment, can have no ticket, and shows under its PR", () => {
+  const url = "https://github.com/o/r/pull/77";
+  const e = db.addSdlcEvent({ eventType: "review_request", startedAt: "2026-10-05T10:00:00.000Z", finishedAt: "2026-10-05T10:00:00.000Z", environments: [], tickets: ["FSDK-77"], prUrl: url, channel: "C1", message: `PR: fix it ${url}`, messageUrl: "https://x.slack.com/archives/C1/p1" });
+  assert.deepEqual([e.eventType, e.environments, e.tickets, e.prUrl, e.channel, e.messageUrl], ["review_request", [], ["FSDK-77"], url, "C1", "https://x.slack.com/archives/C1/p1"]);
+  assert.equal(e.message, `PR: fix it ${url}`);
+  const none = db.addSdlcEvent({ eventType: "review_request", startedAt: "2026-10-05T11:00:00.000Z", environments: [], tickets: [], prUrl: url, message: "again" });
+  assert.deepEqual(db.reviewRequestsByPr()[url].map((x) => x.id), [none.id, e.id]);
+  assert.deepEqual(db.sdlcEventsByTicket()["FSDK-77"].map((x) => x.id), [e.id]);
+  // Only the server posts and records review requests; the generic route cannot fake one.
+  assert.throws(() => validateSdlcEvent({ eventType: "review_request", tickets: ["FSDK-1"], environments: [] }, PATTERN), /eventType/);
 });
 
 test("a new event is checked: a known type, real keys, known environments, and times in order", () => {
