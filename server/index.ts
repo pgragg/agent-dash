@@ -21,8 +21,9 @@ import * as slackRoute from "./routes/slack.ts";
 import * as ticketRoute from "./routes/ticket.ts";
 import * as diagramRoute from "./routes/diagrams.ts";
 import * as sdlcRoute from "./routes/sdlc.ts";
+import * as smoketestPlanRoute from "./routes/smoketestPlan.ts";
 import * as reviewRoute from "./routes/reviewRequests.ts";
-import { confirmDeployMessage, deployStageOf, parseEnvironment, smoketestMessage } from "../shared/sdlc.ts";
+import { confirmDeployMessage, deployStageOf, parseEnvironment, planMessage } from "../shared/sdlc.ts";
 import { syncDiagrams } from "./diagramSync.ts";
 import { fetchMyPrs } from "./sources/github.ts";
 import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
@@ -151,6 +152,13 @@ function onDueDate(key: string, date: string): void {
   broadcast();
 }
 
+/** What a new agent on the ticket starts with, as the ticket page's Start agent gives it. */
+async function ticketContext(key: string): Promise<string | null> {
+  const d = await dashboard(false);
+  const group = [...d.myTickets, ...d.otherTickets].find((g) => g.ticket.key === key);
+  return group ? buildHandoff({ group, notes: d.notes[key] ?? [], summary: d.summaries[key], events: d.sdlcEvents[key] ?? [], now: new Date() }) : null;
+}
+
 // ---- live updates -------------------------------------------------------------------
 
 const clients = new Set<ServerResponse>();
@@ -219,6 +227,7 @@ const server = createServer(async (req, res) => {
     if (await prRoute.handle(req, res, url)) return;
     if (await ticketRoute.handle(req, res, url, onDueDate)) return;
     if (await diagramRoute.handle(req, res, url, sessions, broadcast)) return;
+    if (await smoketestPlanRoute.handle(req, res, url, { sessions, context: ticketContext, script: SDLC_SCRIPT, onChange: broadcast })) return;
     if (await sdlcRoute.handle(req, res, url, broadcast)) return;
     // The dashboard's PRs carry the tickets that cross-linking gave them.
     if (await reviewRoute.handle(req, res, url, { prs: async () => (await dashboard(false)).prs, onChange: broadcast })) return;
@@ -281,24 +290,24 @@ const server = createServer(async (req, res) => {
       const step = body.step === undefined ? null : summaryDb.getStep(Number(body.step));
       if (body.step !== undefined && step?.ticket !== key) return json(404, { error: "no such next step on this ticket" });
       // An SDLC verb's message is written here, because it names this server's script path.
-      const env = body.sdlc?.kind === "smoketest" ? parseEnvironment(body.sdlc.env ?? "") : null;
+      const env = body.sdlc?.kind === "smoketest_plan" ? parseEnvironment(body.sdlc.env ?? "") : null;
       const stage = body.sdlc?.kind === "confirm_deploy" && (body.sdlc.stage === "beta" || body.sdlc.stage === "prod") ? body.sdlc.stage : null;
       if (body.sdlc && !env && !stage) return json(400, { error: "unknown SDLC verb" });
       if (!step && !body.sdlc && !body.message?.trim()) return json(400, { error: "write the first message" });
       const dir = cwd.replace(/^~(?=\/|$)/, homedir());
       if (!dir.startsWith("/") || !existsSync(dir) || !statSync(dir).isDirectory()) return json(400, { error: `not a folder: ${cwd}` });
-      // Picked here, so a smoketest's running event can link to its agent before pi starts.
+      // Picked here, so a smoketest plan's event can link to its agent before pi starts.
       const sessionId = randomUUID();
       // Saved before pi starts, so the stage is yellow from the click.
-      const running = env && !step ? summaryDb.addSdlcEvent({ eventType: "smoketest", startedAt: new Date().toISOString(), environments: [env], tickets: [key], sessionId }) : null;
+      const running = env && !step ? summaryDb.addSdlcEvent({ eventType: "smoketest_plan", startedAt: new Date().toISOString(), environments: [env], tickets: [key], sessionId }) : null;
       const message = step
         ? stepMessage(key, step.body)
         : env && running
-          ? smoketestMessage(key, env, SDLC_SCRIPT, running.id)
+          ? planMessage(key, env, SDLC_SCRIPT, running.id)
           : stage
             ? confirmDeployMessage(key, stage, group.prs.filter((p) => deployStageOf(p) === stage && p.state === "merged").map((p) => p.url), SDLC_SCRIPT)
             : (body.message ?? "");
-      // A smoketest whose agent never started must not stay yellow.
+      // A plan whose agent never started must not stay yellow.
       const dropRunning = () => {
         if (running && summaryDb.deleteSdlcEvent(running.id)) broadcast();
       };

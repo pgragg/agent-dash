@@ -17,7 +17,7 @@ export interface LaunchBody {
   /** Open pi in a new iTerm tab instead of headless. */
   terminal?: boolean;
   /** An SDLC verb; the server writes its message, because the message names the server's script path. */
-  sdlc?: { kind: "smoketest"; env: string } | { kind: "confirm_deploy"; stage: "beta" | "prod" };
+  sdlc?: { kind: "smoketest_plan"; env: string } | { kind: "confirm_deploy"; stage: "beta" | "prod" };
 }
 
 /** Starts an agent on a ticket. Resolves to its session id (null in iTerm, which picks its own), or throws the reason. */

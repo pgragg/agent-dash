@@ -7,9 +7,15 @@
  *     --details-file details.md --results-file results.md
  *   node scripts/sdlc-event.ts deploy --ticket ABC-123 --env postman_beta --details "<app>: Synced, Healthy, 1.2.3"
  *
- * A smoketest that agent-dash started already has a running event; the agent finishes that one:
+ * `smoketest` records a smoketest_execution. A smoketest that agent-dash started has a plan first;
+ * the agent records the plan, then finishes the execution that the accepted plan starts:
  *
+ *   node scripts/sdlc-event.ts plan --id 11 --plan-file plan.md --state-changes none
+ *   node scripts/sdlc-event.ts plan --id 11 --plan-file plan.md --state-changes-file writes.md
  *   node scripts/sdlc-event.ts finish --id 12 --outcome passed --details-file details.md --results-file results.md
+ *
+ * A plan with `--state-changes none` changes no Beta or Prod state, so it is accepted at once, and
+ * the script prints how to run it. Any other plan waits for Piper's Confirm in agent-dash.
  *
  * --ticket and --env can repeat. An environment is an id (postman_beta) or a label ("Postman Beta").
  * Prints the new event as JSON.
@@ -17,10 +23,11 @@
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { config } from "../server/config.ts";
-import { validateSdlcEvent, validateSdlcFinish } from "../server/sdlc.ts";
+import { startExecution, validateSdlcEvent, validateSdlcFinish, validateSdlcPlan } from "../server/sdlc.ts";
 import * as db from "../server/summaries/db.ts";
 
 const USAGE = `usage: node scripts/sdlc-event.ts smoketest|deploy --ticket KEY [--ticket KEY] --env ENV [--env ENV] [--started ISO] [--finished ISO] [--outcome passed|failed|blocked] [--details TEXT | --details-file F] [--results TEXT | --results-file F]
+       node scripts/sdlc-event.ts plan --id N (--plan TEXT | --plan-file F) (--state-changes none|TEXT | --state-changes-file F)
        node scripts/sdlc-event.ts finish --id N --outcome passed|failed|blocked [--finished ISO] [--details TEXT | --details-file F] [--results TEXT | --results-file F]`;
 
 try {
@@ -37,13 +44,29 @@ try {
       "details-file": { type: "string" },
       results: { type: "string" },
       "results-file": { type: "string" },
+      plan: { type: "string" },
+      "plan-file": { type: "string" },
+      "state-changes": { type: "string" },
+      "state-changes-file": { type: "string" },
     },
   });
   const read = (f: string | undefined, v: string | undefined) => (f ? readFileSync(f, "utf8") : v);
+  if (positionals[0] === "plan") {
+    const id = Number(values.id);
+    const planned = db.recordPlan(id, validateSdlcPlan({ plan: read(values["plan-file"], values.plan), stateChanges: read(values["state-changes-file"], values["state-changes"]) }));
+    if (!planned) throw new Error(`no plan with --id ${values.id ?? ""} that is still open: a confirmed plan cannot change. Ask Piper to start a new plan.`);
+    if (!planned.confirmedAt) {
+      console.log(`Recorded the plan (SDLC event ${id}). It changes Beta or Prod state, so it waits for Piper's confirmation in agent-dash. Reply with a short summary of the plan, and stop.`);
+      process.exit(0);
+    }
+    const { message } = startExecution(planned, planned.sessionId, new URL(import.meta.url).pathname);
+    console.log(message);
+    process.exit(0);
+  }
   if (positionals[0] === "finish") {
     const id = Number(values.id);
     const running = Number.isInteger(id) ? db.getSdlcEvent(id) : null;
-    if (running?.eventType !== "smoketest") throw new Error(`no smoketest event with --id ${values.id ?? ""}`);
+    if (running?.eventType !== "smoketest_execution") throw new Error(`no smoketest execution with --id ${values.id ?? ""}`);
     const done = db.finishSdlcEvent(id, validateSdlcFinish({ finishedAt: values.finished, outcome: values.outcome, testDetails: read(values["details-file"], values.details), testResults: read(values["results-file"], values.results) }, running.startedAt));
     if (!done) throw new Error(`SDLC event ${id} already has a result`);
     console.log(JSON.stringify(done, null, 2));
@@ -51,7 +74,7 @@ try {
   }
   const event = validateSdlcEvent(
     {
-      eventType: positionals[0],
+      eventType: positionals[0] === "smoketest" ? "smoketest_execution" : positionals[0],
       tickets: values.ticket,
       environments: values.env,
       startedAt: values.started,

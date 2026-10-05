@@ -66,7 +66,7 @@ export async function buildContext({ ticket, runs: allRuns, prs, notes = [], thr
   ];
 
   out.push("", `## SDLC progress of ${ticket.key} (stages can be skipped)`, ...progressLines(sdlcProgress({ ticket, prs: mergePrs(prs, ticketPrs), events })));
-  const smoketests = events.filter((e) => e.eventType === "smoketest");
+  const smoketests = events.filter((e) => e.eventType === "smoketest_execution");
   if (smoketests.length) {
     out.push("", "## Smoketests (newest first)");
     for (const e of smoketests) out.push(`- ${e.startedAt} · ${e.environments.join(", ")} · ${e.outcome ?? "no outcome"}${e.testDetails ? ` · ${e.testDetails.split("\n")[0].slice(0, 160)}` : ""}`);
@@ -118,7 +118,7 @@ RULES
 - Read-only. Do not write to Jira, GitHub, Slack, or any repo: no comments, transitions, reviews, messages, reactions, commits, or pushes.
 - Spend at most 10 minutes. If a source fails, skip it and note it under "Gaps".
 - Piper's private notes (in the context file) are the most trusted source: when a newer note disagrees with an older source, follow the note. They are private, so never copy them anywhere outside the summary.
-- Follow the SDLC order in the context file's "SDLC progress": PR, local smoketest, review requested, in Beta, Beta smoketest, in Prod, Prod smoketest, Done. A local smoketest comes before a PR review request, and a Beta smoketest comes before the prod chart version update deploy PR. When the next stage is the review request, one step must say that Piper posts the drafted review request from agent-dash's PRs view. When the next stage is a smoketest, one step must say to run a smoketest and name the environment (localhost, Postman Beta, or Postman Prod). When the next stage is a blocked smoketest, one step must say what blocks it and how to remove the blocker. Piper can skip a stage: never plan a step for a stage that shows as skipped.
+- Follow the SDLC order in the context file's "SDLC progress": PR, local test plan, local smoketest, review requested, in Beta, Beta test plan, Beta smoketest, in Prod, Prod test plan, Prod smoketest, Done. A local smoketest comes before a PR review request, and a Beta smoketest comes before the prod chart version update deploy PR. Each smoketest starts with a plan: an agent that Piper starts from agent-dash writes it, and a plan that changes Beta or Prod state waits for Piper to confirm it in agent-dash. When the next stage is the review request, one step must say that Piper posts the drafted review request from agent-dash's PRs view. When the next stage is a test plan, one step must say to plan a smoketest from agent-dash and name the environment (localhost, Postman Beta, or Postman Prod). When the next stage is a test plan that waits, one step must say that Piper reads the plan and confirms it in agent-dash. When the next stage is a blocked smoketest, one step must say what blocks it and how to remove the blocker. Piper can skip a stage: never plan a step for a stage that shows as skipped.
 
 STEPS
 1. Read ${contextFile}. agent-dash already put Piper's private notes, the ticket fields, linked PRs, and digests of the pi sessions about ${key} in it.

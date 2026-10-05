@@ -1,6 +1,7 @@
-import { parseEnvironment } from "../shared/sdlc.ts";
-import type { SdlcEnvironment, SmoketestOutcome } from "../shared/types.ts";
-import type { NewSdlcEvent, SdlcFinish } from "./summaries/db.ts";
+import { executeMessage, parseEnvironment } from "../shared/sdlc.ts";
+import type { SdlcEnvironment, SdlcEvent, SmoketestOutcome } from "../shared/types.ts";
+import * as db from "./summaries/db.ts";
+import type { NewSdlcEvent, SdlcFinish, SdlcPlan } from "./summaries/db.ts";
 
 const OUTCOMES: SmoketestOutcome[] = ["passed", "failed", "blocked"];
 
@@ -34,7 +35,8 @@ function text(v: unknown, field: string): string | null {
 
 /** Checks a new event from the page or the script. Throws the first problem it finds. */
 export function validateSdlcEvent(input: SdlcEventInput, ticketPattern: RegExp, now = new Date()): NewSdlcEvent {
-  if (input.eventType !== "smoketest" && input.eventType !== "deploy") throw new Error("eventType must be smoketest or deploy");
+  // A plan is made only by the server, with the agent that writes it.
+  if (input.eventType !== "smoketest_execution" && input.eventType !== "deploy") throw new Error("eventType must be smoketest_execution or deploy");
   const tickets = Array.isArray(input.tickets) ? [...new Set(input.tickets.map(String))] : [];
   const keyRe = new RegExp(`^${ticketPattern.source}$`);
   if (!tickets.length) throw new Error("name at least one ticket");
@@ -47,7 +49,7 @@ export function validateSdlcEvent(input: SdlcEventInput, ticketPattern: RegExp, 
   const finishedAt = isoOrNull(input.finishedAt, "finishedAt");
   if (finishedAt && finishedAt < startedAt) throw new Error("finishedAt is before startedAt");
   const skippedAt = isoOrNull(input.skippedAt, "skippedAt");
-  if (skippedAt && (input.eventType !== "smoketest" || input.outcome)) throw new Error("only a smoketest with no outcome can be skipped");
+  if (skippedAt && (input.eventType !== "smoketest_execution" || input.outcome)) throw new Error("only a smoketest with no outcome can be skipped");
   return {
     eventType: input.eventType,
     startedAt,
@@ -67,4 +69,20 @@ export function validateSdlcFinish(input: { finishedAt?: unknown; outcome?: unkn
   const finishedAt = isoOrNull(input.finishedAt, "finishedAt") ?? now.toISOString();
   if (finishedAt < startedAt) throw new Error("finishedAt is before startedAt");
   return { finishedAt, outcome: input.outcome as SmoketestOutcome, testDetails: text(input.testDetails, "testDetails"), testResults: text(input.testResults, "testResults") };
+}
+
+/** "none" (any case) or an empty text: the test changes no Beta or Prod state. */
+export function validateSdlcPlan(input: { plan?: unknown; stateChanges?: unknown }, now = new Date()): SdlcPlan {
+  const plan = text(input.plan, "plan");
+  if (!plan) throw new Error("the plan is empty");
+  const changes = text(input.stateChanges, "stateChanges");
+  if (changes === null && input.stateChanges === undefined) throw new Error("say which Beta or Prod state the test changes, or none");
+  return { plan, stateChanges: changes && changes.toLowerCase() !== "none" ? changes : null, plannedAt: now.toISOString() };
+}
+
+/** Saves the running execution of an accepted plan, and returns it with the message that starts it. */
+export function startExecution(plan: SdlcEvent, sessionId: string | null, script: string): { execution: SdlcEvent; message: string } {
+  if (plan.eventType !== "smoketest_plan" || !plan.confirmedAt) throw new Error(`SDLC event ${plan.id} is not an accepted plan`);
+  const execution = db.addSdlcEvent({ eventType: "smoketest_execution", startedAt: new Date().toISOString(), environments: plan.environments, tickets: plan.tickets, sessionId, planId: plan.id });
+  return { execution, message: executeMessage(plan.tickets[0], plan.environments[0], script, execution.id, plan) };
 }
