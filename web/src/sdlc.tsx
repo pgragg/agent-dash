@@ -265,6 +265,7 @@ function RecordForm({ ticket, onError, onDone }: { ticket: string; onError: (m: 
   const [outcome, setOutcome] = useState<SmoketestOutcome>("passed");
   const [startedAt, setStartedAt] = useState(localNow);
   const [finishedAt, setFinishedAt] = useState(localNow);
+  const [summary, setSummary] = useState("");
   const [details, setDetails] = useState("");
   const [results, setResults] = useState("");
   const [saving, setSaving] = useState(false);
@@ -277,6 +278,7 @@ function RecordForm({ ticket, onError, onDone }: { ticket: string; onError: (m: 
       outcome,
       startedAt: new Date(startedAt).toISOString(),
       finishedAt: finishedAt ? new Date(finishedAt).toISOString() : null,
+      summary,
       testDetails: details,
       testResults: results,
     });
@@ -312,6 +314,9 @@ function RecordForm({ ticket, onError, onDone }: { ticket: string; onError: (m: 
         </label>
       </div>
       <div className="composer">
+        <input value={summary} maxLength={200} placeholder="Summary: one line that says what the test showed" onChange={(e) => setSummary(e.target.value)} />
+      </div>
+      <div className="composer">
         <textarea rows={2} value={details} placeholder="Test details: what you tested and how (stack, commands, URLs, versions)" onChange={(e) => setDetails(e.target.value)} />
       </div>
       <div className="composer">
@@ -330,11 +335,22 @@ function RecordForm({ ticket, onError, onDone }: { ticket: string; onError: (m: 
   );
 }
 
+/** The first prose line of a markdown text: no heading, no list or quote marker, no emphasis. */
+function firstLine(md: string | null): string | null {
+  const line = md?.split("\n").find((l) => l.trim() && !/^\s*(#|```|---|\|)/.test(l));
+  return line?.replace(/^[>*\-\s\d.]+/, "").replace(/[*_`]/g, "").slice(0, 160) || null;
+}
+
+/** The one line on a finished smoketest's collapsed row. Rows from before summaries show the first line of their results. */
+function summaryLine(e: SdlcEvent): string {
+  return e.summary ?? firstLine(e.testResults) ?? firstLine(e.testDetails) ?? "No summary";
+}
+
 function SmoketestRow({ e, now, runs, onError }: { e: SdlcEvent; now: number; runs: Run[]; onError: (m: string | null) => void }) {
   const running = isSmoketestRunning(e);
   const ran = e.finishedAt ? Math.round((Date.parse(e.finishedAt) - Date.parse(e.startedAt)) / 60_000) : null;
-  return (
-    <li id={`sdlc:${e.id}`}>
+  const full = (
+    <>
       <div className="note-meta">
         <span title={e.startedAt}>{stamp(e.startedAt)}</span>
         <span>· {age(e.startedAt, now)} ago</span>
@@ -365,6 +381,22 @@ function SmoketestRow({ e, now, runs, onError }: { e: SdlcEvent; now: number; ru
           <Markdown text={e.testResults} />
         </details>
       )}
+    </>
+  );
+  // A finished smoketest shows only its outcome and the agent's one-line summary until you click it.
+  if (!e.outcome || running) return <li id={`sdlc:${e.id}`}>{full}</li>;
+  return (
+    <li id={`sdlc:${e.id}`}>
+      <details className="smoke-item">
+        <summary title="Show the full results">
+          <span className={`tag ${OUTCOME_TONE[e.outcome]}`}>{e.outcome}</span>
+          <span className="smoke-summary">{summaryLine(e)}</span>
+          <span className="meta" title={e.startedAt}>
+            {e.environments.map((x) => ENV_LABEL[x]).join(", ")} · {age(e.startedAt, now)} ago
+          </span>
+        </summary>
+        <div className="smoke-full">{full}</div>
+      </details>
     </li>
   );
 }

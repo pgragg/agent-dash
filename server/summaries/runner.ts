@@ -69,7 +69,7 @@ export async function buildContext({ ticket, runs: allRuns, prs, notes = [], thr
   const smoketests = events.filter((e) => e.eventType === "smoketest");
   if (smoketests.length) {
     out.push("", "## Smoketests (newest first)");
-    for (const e of smoketests) out.push(`- ${e.startedAt} · ${e.environments.join(", ")} · ${e.outcome ?? "no outcome"}${e.testDetails ? ` · ${e.testDetails.split("\n")[0].slice(0, 160)}` : ""}`);
+    for (const e of smoketests) out.push(`- ${e.startedAt} · ${e.environments.join(", ")} · ${e.outcome ?? "no outcome"}${e.summary || e.testDetails ? ` · ${(e.summary ?? e.testDetails!.split("\n")[0]).slice(0, 160)}` : ""}`);
   }
 
   const known = new Set(prs.map((p) => p.url));

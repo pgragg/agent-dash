@@ -82,6 +82,8 @@ CREATE TABLE IF NOT EXISTS SDLC_Event (
   -- Set when Piper chose not to run the smoketest: the stage then counts as passed by on purpose.
   skipped_at   TEXT,
   created_at   TEXT NOT NULL,
+  -- One line that the agent writes when the smoketest is done, for the collapsed row on the page.
+  summary      TEXT,
   -- A review request: the PR, the Slack channel id, the text that was posted, and its permalink.
   pr_url       TEXT,
   channel      TEXT,
@@ -181,7 +183,7 @@ function toRecord(r: Row): SummaryRecord {
 
 let db: DatabaseSync | null = null;
 
-const SDLC_EVENT_COLUMNS = ["session_id", "skipped_at", "pr_url", "channel", "message", "message_url"];
+const SDLC_EVENT_COLUMNS = ["session_id", "skipped_at", "pr_url", "channel", "message", "message_url", "summary"];
 
 /** SQLite cannot change a CHECK, so an older SDLC_Event table is copied into a new one with the same ids. */
 function upgradeSdlcEventChecks(d: DatabaseSync): void {
@@ -515,6 +517,7 @@ export interface NewSdlcEvent {
   testResults?: string | null;
   sessionId?: string | null;
   skippedAt?: string | null;
+  summary?: string | null;
   prUrl?: string | null;
   channel?: string | null;
   message?: string | null;
@@ -529,8 +532,8 @@ export function addSdlcEvent(e: NewSdlcEvent, now = new Date()): SdlcEvent {
   d.exec("BEGIN IMMEDIATE");
   try {
     const { id } = d
-      .prepare("INSERT INTO SDLC_Event (event_type, started_at, finished_at, outcome, test_details, test_results, session_id, skipped_at, created_at, pr_url, channel, message, message_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
-      .get(e.eventType, e.startedAt, e.finishedAt ?? null, e.outcome ?? null, e.testDetails ?? null, e.testResults ?? null, e.sessionId ?? null, e.skippedAt ?? null, created, e.prUrl ?? null, e.channel ?? null, e.message ?? null, e.messageUrl ?? null) as { id: number };
+      .prepare("INSERT INTO SDLC_Event (event_type, started_at, finished_at, outcome, test_details, test_results, session_id, skipped_at, created_at, pr_url, channel, message, message_url, summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
+      .get(e.eventType, e.startedAt, e.finishedAt ?? null, e.outcome ?? null, e.testDetails ?? null, e.testResults ?? null, e.sessionId ?? null, e.skippedAt ?? null, created, e.prUrl ?? null, e.channel ?? null, e.message ?? null, e.messageUrl ?? null, e.summary ?? null) as { id: number };
     const env = d.prepare("INSERT OR IGNORE INTO SDLC_Event_Environment (sdlc_event_id, environment) VALUES (?, ?)");
     for (const x of e.environments) env.run(id, x);
     // A smoketest that only started moves no stage yet, so it gets its draft when it finishes.
@@ -550,13 +553,14 @@ export interface SdlcFinish {
   outcome: SmoketestOutcome;
   testDetails: string | null;
   testResults: string | null;
+  summary?: string | null;
 }
 
 /** Ends a running smoketest. Null when there is no such smoketest, or it already ended. */
 export function finishSdlcEvent(id: number, f: SdlcFinish): SdlcEvent | null {
   const changed = open()
-    .prepare("UPDATE SDLC_Event SET finished_at = ?, outcome = ?, test_details = coalesce(?, test_details), test_results = coalesce(?, test_results) WHERE id = ? AND event_type = 'smoketest' AND finished_at IS NULL AND outcome IS NULL AND skipped_at IS NULL")
-    .run(f.finishedAt, f.outcome, f.testDetails, f.testResults, id).changes;
+    .prepare("UPDATE SDLC_Event SET finished_at = ?, outcome = ?, test_details = coalesce(?, test_details), test_results = coalesce(?, test_results), summary = coalesce(?, summary) WHERE id = ? AND event_type = 'smoketest' AND finished_at IS NULL AND outcome IS NULL AND skipped_at IS NULL")
+    .run(f.finishedAt, f.outcome, f.testDetails, f.testResults, f.summary ?? null, id).changes;
   return changed ? getSdlcEvent(id) : null;
 }
 
@@ -584,7 +588,7 @@ function sdlcEvents(where = "", ...params: number[]): SdlcEvent[] {
   const rows = open()
     .prepare(
       `SELECT e.id, e.event_type AS eventType, e.started_at AS startedAt, e.finished_at AS finishedAt, e.outcome, e.test_details AS testDetails, e.test_results AS testResults, e.session_id AS sessionId, e.skipped_at AS skippedAt, e.created_at AS createdAt,
-        e.pr_url AS prUrl, e.channel, e.message, e.message_url AS messageUrl,
+        e.pr_url AS prUrl, e.channel, e.message, e.message_url AS messageUrl, e.summary,
         (SELECT group_concat(environment) FROM SDLC_Event_Environment WHERE sdlc_event_id = e.id) AS envs,
         (SELECT group_concat(ticket) FROM SDLC_Event_Ticket WHERE sdlc_event_id = e.id) AS keys
        FROM SDLC_Event e ${where} ORDER BY e.started_at DESC, e.id DESC`,
