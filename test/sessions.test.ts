@@ -68,6 +68,18 @@ test("heuristic: a finished turn waits for input for a few hours, then counts as
   assert.equal(heuristicStatus({ ...s, lastActivityAt: minutesAgo(5 * 60) }, NOW).status, "finished");
 });
 
+test("tickets named after a report skill starts do not link the session", () => {
+  const invoked = parse(jsonl(header(), user('<skill name="daily-progress-report" location="/x">…</skill>\nToday: FSDK-1, FSDK-2'), reply("FSDK-1 shipped")));
+  assert.deepEqual(invoked.tickets, []);
+  const read = { type: "message", message: { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "t1", name: "read", arguments: { path: "/h/.pi/agent/skills/standup-daily-summary/SKILL.md" } }] } };
+  assert.deepEqual(parse(jsonl(header(), user("standup please"), read, reply("Yesterday: FSDK-1"), user("add FSDK-2"), reply("ok"))).tickets, []);
+  // Only using the skill counts: a session that edits its SKILL.md still links.
+  assert.deepEqual(parse(jsonl(header(), user("FSDK-3: fix ~/.pi/agent/skills/daily-progress-report/SKILL.md"), reply("ok"))).tickets, ["FSDK-3"]);
+  // Work before the report keeps its link.
+  const late = parse(jsonl(header(), user("begin work on FSDK-4"), reply("done"), user('<skill name="daily-progress-report" location="/x">…</skill>'), reply("FSDK-5, FSDK-6, FSDK-7 shipped")));
+  assert.deepEqual(late.tickets, ["FSDK-4"]);
+});
+
 test("a ticket named only in passing in many replies does not link the run", () => {
   const replies = Array.from({ length: 10 }, (_, i) => reply(`Status ${i}: FSDK-60 is still overdue.`));
   const s = parse(jsonl(header(), user("build me a dashboard"), ...replies));
