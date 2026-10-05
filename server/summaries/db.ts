@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS SDLC_Event (
   event_type   TEXT NOT NULL CHECK (event_type IN ('smoketest', 'deploy')),
   started_at   TEXT NOT NULL,
   finished_at  TEXT,
-  outcome      TEXT CHECK (outcome IN ('passed', 'failed')),
+  outcome      TEXT CHECK (outcome IN ('passed', 'failed', 'blocked')),
   test_details TEXT,
   test_results TEXT,
   -- Set when Piper chose not to run the smoketest: the stage then counts as passed by on purpose.
@@ -156,6 +156,29 @@ function toRecord(r: Row): SummaryRecord {
 
 let db: DatabaseSync | null = null;
 
+/** SQLite cannot change a CHECK, so an older SDLC_Event table is copied into a new one with the same ids. */
+function allowBlockedOutcome(d: DatabaseSync): void {
+  const row = d.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'SDLC_Event'").get() as { sql: string } | undefined;
+  if (!row || row.sql.includes("'blocked'")) return;
+  const create = SCHEMA.slice(SCHEMA.indexOf("CREATE TABLE IF NOT EXISTS SDLC_Event ("), SCHEMA.indexOf("-- The environments under test"));
+  const cols = "id, event_type, started_at, finished_at, outcome, test_details, test_results, skipped_at, created_at";
+  // The other SDLC tables refer to SDLC_Event by name, so the checks must be off while it is gone.
+  d.exec("PRAGMA foreign_keys = OFF");
+  try {
+    d.exec(`BEGIN;
+${create.replace("SDLC_Event (", "SDLC_Event_new (")}
+INSERT INTO SDLC_Event_new (${cols}) SELECT ${cols} FROM SDLC_Event;
+DROP TABLE SDLC_Event;
+ALTER TABLE SDLC_Event_new RENAME TO SDLC_Event;
+COMMIT;`);
+  } catch (e) {
+    d.exec("ROLLBACK");
+    throw e;
+  } finally {
+    d.exec("PRAGMA foreign_keys = ON");
+  }
+}
+
 export function open(path = DB_PATH): DatabaseSync {
   if (db) return db;
   mkdirSync(dirname(path), { recursive: true });
@@ -167,6 +190,7 @@ export function open(path = DB_PATH): DatabaseSync {
   for (const c of ["edited_at", "deleted_at"]) if (!diagramColumns.has(c)) db.exec(`ALTER TABLE diagrams ADD COLUMN ${c} TEXT`);
   // CREATE TABLE IF NOT EXISTS does not add a column to a table that is already there.
   if (!(db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = 'skipped_at'").get())) db.exec("ALTER TABLE SDLC_Event ADD COLUMN skipped_at TEXT");
+  allowBlockedOutcome(db);
   // Summaries saved before steps were stored get their rows once.
   for (const r of db.prepare("SELECT id, ticket, summary FROM summaries WHERE status = 'done' AND id NOT IN (SELECT summary_id FROM next_steps)").all() as unknown as Row[]) {
     insertSteps(r.id, r.ticket, r.summary ?? "");

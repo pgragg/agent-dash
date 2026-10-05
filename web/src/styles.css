@@ -537,6 +537,8 @@ a.btn.verb { text-decoration: none; }
 .sdlc-stage.st-done .sdlc-label { color: var(--ink-2); }
 .sdlc-stage.st-failed button { border-top-color: var(--bad); }
 .sdlc-stage.st-failed .sdlc-dot { background: var(--bad); border-color: var(--bad); color: #fff; }
+.sdlc-stage.st-blocked button { border-top-color: var(--muted); }
+.sdlc-stage.st-blocked .sdlc-dot { background: var(--muted); border-color: var(--muted); color: #fff; }
 .sdlc-stage.st-waiting button { border-top-color: var(--warn); }
 .sdlc-stage.st-waiting .sdlc-dot { border-color: var(--warn); color: var(--warn); }
 .sdlc-stage.st-skipped button { border-top-style: dashed; }
@@ -546,7 +548,7 @@ a.btn.verb { text-decoration: none; }
 .st-tag-done { background: var(--good-bg); color: var(--good); }
 .st-tag-failed { background: var(--bad-bg); color: var(--bad); }
 .st-tag-waiting { background: var(--warn-bg); color: var(--warn); }
-.st-tag-skipped, .st-tag-todo { background: var(--hover); color: var(--muted); }
+.st-tag-blocked, .st-tag-skipped, .st-tag-todo { background: var(--hover); color: var(--muted); }
 
 .smoke-form { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; padding: 12px; border-radius: 12px; background: var(--hover); }
 .smoke-form .composer { margin-top: 0; }

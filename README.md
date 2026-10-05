@@ -113,13 +113,14 @@ A progress bar at the top of each ticket shows where its change is on the way to
 |---|---|---|
 | 1. Ideation | Always | — |
 | 2. PR exists | An open or merged PR names the key | GitHub |
-| 3. Local smoketest | The newest smoketest tagged `localhost` did not fail (skipped if it is a skip) | SQLite |
+| 3. Local smoketest | The newest smoketest tagged `localhost` passed (skipped if it is a skip) | SQLite |
 | 4. In Beta | A deploy event tagged Postman Beta or Fern Dev | SQLite: an agent confirmed it in Argo, or you checked it off |
-| 5. Beta smoketest | The newest smoketest tagged Postman Beta or Fern Dev did not fail | SQLite |
+| 5. Beta smoketest | The newest smoketest tagged Postman Beta or Fern Dev passed | SQLite |
 | 6. In Prod | A deploy event tagged Postman Prod or Fern Prod | SQLite, as In Beta |
-| 7. Prod smoketest | The newest smoketest tagged Postman Prod or Fern Prod did not fail | SQLite |
+| 7. Prod smoketest | The newest smoketest tagged Postman Prod or Fern Prod passed | SQLite |
 | 8. Ticket done | The Jira status category is Done | Jira |
 
+- **A smoketest has one of three outcomes.** **passed** (green): the change works. **failed** (red): the change does not work. **blocked** (grey): the test could not run, or could not see the result, for example with no access or no test data on that environment. A blocked smoketest is not a failure and not progress: the stage shows grey with a `?`, it stays the next stage, and the hint says to remove the blocker, then run it again or skip it. The newest smoketest decides, so a later pass makes the stage done. An event with no outcome counts as passed.
 - **The PRs** are the ticket's PRs on the board, plus `GET /api/ticket-prs?key=KEY` (with the `X-Agent-Dash` guard): a GitHub search for PRs by anyone, of any age, with the key in the title, cached for 2 minutes. A PR in `postman-eng/cloud9-parcels-deployments` is a Beta deploy PR, and one in `postman-eng/cloud9-parcels-production-deployments` is a Prod deploy PR. When a deploy PR merged and no deploy event exists, the stage shows **waiting** with **Confirm in Argo**.
 - **A click on a stage** shows its state and its actions. At first it shows the next stage, with the hint of what to do: for example, a local smoketest comes before a PR review, and a Beta smoketest comes before the prod chart version update PR.
   - A smoketest stage: **Run smoketest on <environment>** starts an agent (`POST /api/agents?ticket=KEY` with `{sdlc: {kind: "smoketest", env}}`). The server writes the first message (`smoketestMessage` in `shared/sdlc.ts`), because it names the server's own script path. The agent runs the smoketest, then records it with `scripts/sdlc-event.ts`. **Skip smoketest** (until the stage is done or skipped) records a smoketest event with `skippedAt` set to now and no outcome. The stage then shows **skipped**, and the next stage comes after it. Delete the event on the Smoketests card to undo the skip.
@@ -128,7 +129,7 @@ A progress bar at the top of each ticket shows where its change is on the way to
 - **A tag is the environment under test**, not every system that the test touched. A local frontend against the Postman Beta backend tests Beta, so its tag is Postman Beta. Two tags are for the rare test where both sides are under test. The tags are `localhost`, `fern_dev`, `fern_prod`, `postman_beta` and `postman_prod` (or their labels: "Fern Dev" and so on).
 - **The next-steps summary and the context of a new agent** both get the progress, one line per stage. The summary prompt tells the run to follow the order, to name the environment when the next stage is a smoketest, and to plan no step for a skipped stage.
 
-`POST /api/sdlc-events` (body `{eventType, tickets, environments, startedAt, finishedAt, outcome, testDetails, testResults, skippedAt}`; only a smoketest with no outcome can have `skippedAt`) and `DELETE /api/sdlc-events?id=N` write the events, with the `X-Agent-Dash` guard. An agent uses the script, which writes into the same database:
+`POST /api/sdlc-events` (body `{eventType, tickets, environments, startedAt, finishedAt, outcome, testDetails, testResults, skippedAt}`, where `outcome` is `passed`, `failed` or `blocked`; only a smoketest with no outcome can have `skippedAt`) and `DELETE /api/sdlc-events?id=N` write the events, with the `X-Agent-Dash` guard. An agent uses the script, which writes into the same database:
 
 ```bash
 node scripts/sdlc-event.ts smoketest --ticket FSDK-1 --env localhost \
@@ -203,7 +204,7 @@ Everything you write lives in SQLite at `~/.agent-dash/agent-dash.db`:
 | `actions` | One per action on the Actions view: `key` (what it is about, such as `ci_failing pr:<url>`), `kind`, `ticket`, `created_at`, `cleared_at` (set when it goes away) |
 | `exits` | One per time you leave the dash for another tool: `at`, `kind`, `host`, `view`, `section`, `ticket`. Append-only. See [Exits](#exits). |
 | `diagrams` | One per diagram an agent made: `key` (session id and source hash), `session_id`, `ticket`, `kind`, `title`, `origin` (`reply`, or the file path as the agent wrote it), `hash`, `source`, `created_at` (when the agent wrote it) |
-| `SDLC_Event` | One per smoketest or confirmed deploy: `event_type` (`smoketest` or `deploy`), `started_at`, `finished_at`, `outcome` (`passed`, `failed`, or empty), `test_details`, `test_results`, `skipped_at` (set on a smoketest that you skipped), `created_at` |
+| `SDLC_Event` | One per smoketest or confirmed deploy: `event_type` (`smoketest` or `deploy`), `started_at`, `finished_at`, `outcome` (`passed`, `failed`, `blocked`, or empty), `test_details`, `test_results`, `skipped_at` (set on a smoketest that you skipped), `created_at` |
 | `SDLC_Event_Environment` | One per environment under test of an event: `sdlc_event_id`, `environment` |
 | `SDLC_Event_Ticket` | One per ticket of an event: `sdlc_event_id`, `ticket`, `created_at` (when the link was made) |
 | `PiConversationStatusChange` | One per change to a thread's relevance: `ticket`, `session_id`, `status` (`relevant` or `resolved`), `reason` (resolved only, optional), `created_at`. Append-only; the newest row per ticket and thread is the current state. |

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { prRef } from "../../shared/refs.ts";
 import { ENV_LABEL, ENVIRONMENTS, mergePrs, SMOKETEST_ENV, sdlcProgress, type Stage, type StageState } from "../../shared/sdlc.ts";
-import type { PullRequest, SdlcEnvironment, SdlcEvent, TicketGroup } from "../../shared/types.ts";
+import type { PullRequest, SdlcEnvironment, SdlcEvent, SmoketestOutcome, TicketGroup } from "../../shared/types.ts";
 import { conversationHash, launchAgent, type LaunchBody } from "./agents.tsx";
 import { age, Markdown, post, stamp } from "./lib.tsx";
 import { href } from "./routes.ts";
@@ -99,7 +99,9 @@ function SkipSmoketest({ ticket, env, onError }: { ticket: string; env: SdlcEnvi
   );
 }
 
-const STATE_TEXT: Record<StageState, string> = { done: "done", failed: "failed", waiting: "waiting", skipped: "skipped", todo: "to do" };
+const OUTCOME_TONE: Record<SmoketestOutcome, string> = { passed: "tone-good", failed: "tone-bad", blocked: "tone-muted" };
+
+const STATE_TEXT: Record<StageState, string> = { done: "done", failed: "failed", blocked: "blocked", waiting: "waiting", skipped: "skipped", todo: "to do" };
 
 function StageActions({ stage, group, cwd, onError }: { stage: Stage; group: TicketGroup; cwd: string; onError: (m: string | null) => void }) {
   const key = group.ticket.key;
@@ -182,7 +184,7 @@ export function SdlcBar({ group, events, cwd, onError }: { group: TicketGroup; e
         {progress.stages.map((s, i) => (
           <li key={s.id} className={`sdlc-stage st-${s.state} ${i === progress.current ? "current" : ""} ${s === shown ? "picked" : ""}`}>
             <button type="button" onClick={() => setPicked(i)} title={`${s.label}: ${STATE_TEXT[s.state]}${s.detail ? ` · ${s.detail}` : ""}`}>
-              <span className="sdlc-dot">{s.state === "done" ? "✓" : s.state === "failed" ? "!" : i + 1}</span>
+              <span className="sdlc-dot">{s.state === "done" ? "✓" : s.state === "failed" ? "!" : s.state === "blocked" ? "?" : i + 1}</span>
               <span className="sdlc-label">{s.label}</span>
             </button>
           </li>
@@ -216,7 +218,7 @@ function localNow(): string {
 
 function RecordForm({ ticket, onError, onDone }: { ticket: string; onError: (m: string | null) => void; onDone: () => void }) {
   const [envs, setEnvs] = useState<SdlcEnvironment[]>(["localhost"]);
-  const [outcome, setOutcome] = useState<"passed" | "failed">("passed");
+  const [outcome, setOutcome] = useState<SmoketestOutcome>("passed");
   const [startedAt, setStartedAt] = useState(localNow);
   const [finishedAt, setFinishedAt] = useState(localNow);
   const [details, setDetails] = useState("");
@@ -252,9 +254,10 @@ function RecordForm({ ticket, onError, onDone }: { ticket: string; onError: (m: 
       <div className="smoke-row">
         <label className="check">
           Outcome{" "}
-          <select value={outcome} onChange={(e) => setOutcome(e.target.value as "passed" | "failed")}>
+          <select value={outcome} onChange={(e) => setOutcome(e.target.value as SmoketestOutcome)}>
             <option value="passed">passed</option>
             <option value="failed">failed</option>
+            <option value="blocked">blocked</option>
           </select>
         </label>
         <label className="check">
@@ -297,7 +300,7 @@ function SmoketestRow({ e, now, onError }: { e: SdlcEvent; now: number; onError:
           </span>
         ))}
         {e.skippedAt && <span className="tag">skipped</span>}
-        {e.outcome && <span className={`tag ${e.outcome === "passed" ? "tone-good" : "tone-bad"}`}>{e.outcome}</span>}
+        {e.outcome && <span className={`tag ${OUTCOME_TONE[e.outcome]}`}>{e.outcome}</span>}
         {e.tickets.length > 1 && <span>· also on {e.tickets.slice(1).join(", ")}</span>}
         <button
           className="btn ghost small note-delete"

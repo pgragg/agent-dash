@@ -16,7 +16,7 @@ import { config } from "../server/config.ts";
 import { validateSdlcEvent } from "../server/sdlc.ts";
 import * as db from "../server/summaries/db.ts";
 
-const USAGE = "usage: node scripts/sdlc-event.ts smoketest|deploy --ticket KEY [--ticket KEY] --env ENV [--env ENV] [--started ISO] [--finished ISO] [--outcome passed|failed] [--details TEXT | --details-file F] [--results TEXT | --results-file F]";
+const USAGE = "usage: node scripts/sdlc-event.ts smoketest|deploy --ticket KEY [--ticket KEY] --env ENV [--env ENV] [--started ISO] [--finished ISO] [--outcome passed|failed|blocked] [--details TEXT | --details-file F] [--results TEXT | --results-file F]";
 
 try {
   const { values, positionals } = parseArgs({
