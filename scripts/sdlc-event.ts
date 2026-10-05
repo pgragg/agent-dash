@@ -2,10 +2,10 @@
  * Record an SDLC event on one or more tickets. Agents call this after a smoketest, or after
  * they confirm a deploy in Argo:
  *
- *   node scripts/sdlc-event.ts smoketest --ticket FSDK-1 --env localhost \
+ *   node scripts/sdlc-event.ts smoketest --ticket ABC-123 --env localhost \
  *     --started 2026-10-05T10:00:00Z --finished 2026-10-05T10:20:00Z --outcome passed \
  *     --details-file details.md --results-file results.md
- *   node scripts/sdlc-event.ts deploy --ticket FSDK-1 --env postman_beta --details "<app>: Synced, Healthy, 1.2.3"
+ *   node scripts/sdlc-event.ts deploy --ticket ABC-123 --env postman_beta --details "<app>: Synced, Healthy, 1.2.3"
  *
  * A smoketest that agent-dash started already has a running event; the agent finishes that one:
  *

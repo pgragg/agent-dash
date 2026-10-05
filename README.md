@@ -38,7 +38,7 @@ The navbar at the top switches between the views: **Board** (`#/`, the queue and
 - **New conversation** (`C`), at the top of the queue, opens a new page (`#/c`). Type the first message and pick the folder (default `~`), and **Start** runs a plain pi with no ticket and no context file. That pi has no terminal: the page goes to `#/c:<sessionId>`, and you talk to the agent there (see [Conversations on the page](#conversations-on-the-page)).
 - **Keyboard**: `J`/`K` move, `E` done for now, `Z` snooze, `R` reply, `N` note, `A` new agent, `C` new conversation, `O` open the iTerm tab (or the page of a conversation), `S` draft next steps, `T` show or hide the ticket section, `V` queue or kanban, `⌘↵` send, `?` help. On the PRs and History views, `J`/`K` select a row and `↵` opens it (the PR, or the chat).
 - **Fix login**: when Jira or GitHub is down, the top bar shows **Fix Jira login** or **Fix GitHub login**. It runs `~/pi/auth/pi-auth ensure <target>` on the server (`POST /api/login?source=jira|github`, with the `X-Agent-Dash` guard), then refreshes. The target comes from a fixed list, never from the request. pi-auth can open your Chrome; it changes nothing remote. If pi-auth has no target for the source, the button tells you how to log in by hand.
-- `#/t:FSDK-123` or `#/r:<sessionId>` in the URL selects an entry. See [Addresses](#addresses) for the other objects.
+- `#/t:ABC-123` or `#/r:<sessionId>` in the URL selects an entry. See [Addresses](#addresses) for the other objects.
 
 ### Needs you
 
@@ -141,10 +141,10 @@ A progress bar at the top of each ticket shows where its change is on the way to
 `POST /api/sdlc-events` (body `{eventType, tickets, environments, startedAt, finishedAt, outcome, testDetails, testResults, skippedAt}`, where `outcome` is `passed`, `failed` or `blocked`; only a smoketest with no outcome can have `skippedAt`) and `DELETE /api/sdlc-events?id=N` write the events, with the `X-Agent-Dash` guard. An agent uses the script, which writes into the same database:
 
 ```bash
-node scripts/sdlc-event.ts smoketest --ticket FSDK-1 --env localhost \
+node scripts/sdlc-event.ts smoketest --ticket ABC-123 --env localhost \
   --started 2026-10-05T10:00:00Z --finished 2026-10-05T10:20:00Z --outcome passed \
   --details-file details.md --results-file results.md
-node scripts/sdlc-event.ts deploy --ticket FSDK-1 --env postman_beta --details "<Argo app>: Synced, Healthy, 1.2.3"
+node scripts/sdlc-event.ts deploy --ticket ABC-123 --env postman_beta --details "<Argo app>: Synced, Healthy, 1.2.3"
 # A smoketest that agent-dash started: record the result on its running event.
 node scripts/sdlc-event.ts finish --id 12 --outcome passed --details-file details.md --results-file results.md
 ```
@@ -157,7 +157,7 @@ Every object in agent-dash has an address in the URL hash. A link opens the obje
 
 | Hash | Opens |
 |---|---|
-| `#/t:FSDK-123` | The ticket on the board |
+| `#/t:ABC-123` | The ticket on the board |
 | `#/r:<sessionId>` | The run: its agent card or history row, under its ticket. A run with no ticket is its own entry. |
 | `#/step:<id>` | A drafted next step, in its ticket's Next steps card |
 | `#/note:<id>` | A note, in its ticket's Notes card |
@@ -259,11 +259,13 @@ A ticket key (`FSDK-123`, `EFSUP-45`, any case) is scored by where it appears in
 |---|---|
 | Session name | 5 |
 | Your prompts | 3 |
-| Tool-call arguments (branch names, `gh pr create --title`) | 1 |
+| Tool-call arguments (branch names, `gh pr create --title`) | 1, but not file content: only the path of a write or edit, and a bash command without its heredocs |
 | Assistant text | 1, at most once per session |
 | Tool results | ignored: one `board` call prints every open ticket |
 
 A run links to its strongest keys: at most 3, each with a score of at least 3 and at least a third of the top score.
+
+A key in `AGENT_DASH_IGNORE_TICKETS` (comma-separated, default `FSDK-1`) never links. Use it for a real key that code uses as sample data. Examples in this repo use `ABC-123`, which no project pattern matches.
 
 PRs link to tickets by the key in their title or branch. Then two rules cross the gap:
 - A run that opened a PR (`gh pr create` in the log) takes the PR's tickets.
@@ -364,7 +366,7 @@ Optional: `AGENT_DASH_SUMMARY_MODEL` and `AGENT_DASH_SUMMARY_THINKING` choose th
 
 ## Configuration
 
-Environment variables, all optional: `AGENT_DASH_PORT`, `AGENT_DASH_SESSIONS_DIR`, `AGENT_DASH_STATUS_DIR`, `AGENT_DASH_INBOX_DIR`, `AGENT_DASH_CONVERSATIONS_DIR`, `AGENT_DASH_PROJECTS` (default `FSDK|EFSUP`), `AGENT_DASH_EXCLUDE_PROJECTS` (default `FSM`), `AGENT_DASH_RECENT_DAYS` (default 14), `JIRA_SERVER`, `JIRA_LOGIN`, `JIRA_API_TOKEN`, `AGENT_DASH_PI_AUTH` (default `~/pi/auth/pi-auth`).
+Environment variables, all optional: `AGENT_DASH_PORT`, `AGENT_DASH_SESSIONS_DIR`, `AGENT_DASH_STATUS_DIR`, `AGENT_DASH_INBOX_DIR`, `AGENT_DASH_CONVERSATIONS_DIR`, `AGENT_DASH_PROJECTS` (default `FSDK|EFSUP`), `AGENT_DASH_EXCLUDE_PROJECTS` (default `FSM`), `AGENT_DASH_IGNORE_TICKETS` (default `FSDK-1`), `AGENT_DASH_RECENT_DAYS` (default 14), `JIRA_SERVER`, `JIRA_LOGIN`, `JIRA_API_TOKEN`, `AGENT_DASH_PI_AUTH` (default `~/pi/auth/pi-auth`).
 
 ## Develop
 

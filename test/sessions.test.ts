@@ -23,6 +23,28 @@ test("the session name links a ticket, and lowercase branch names count", () => 
   assert.deepEqual(s.tickets, ["FSDK-12"]);
 });
 
+test("a key in file content does not link the run, but a key in a command does", () => {
+  const edit = (id: string, tool: string, args: Record<string, unknown>) => ({
+    type: "message",
+    message: { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id, name: tool, arguments: args }] },
+  });
+  const fixture = 'tickets: ["FSDK-1"]';
+  const s = parse(
+    jsonl(
+      header(),
+      user("add a skip button"),
+      edit("t1", "write", { path: "/repo/test/a.test.ts", content: fixture }),
+      edit("t2", "edit", { path: "/repo/test/a.test.ts", edits: [{ oldText: fixture, newText: fixture }] }),
+      toolCall("t3", `python3 - <<'EOF'\ns = s.replace('${fixture}', '')\nEOF`),
+      toolCall("t4", `cat > /tmp/x <<EOF\n${fixture}\nEOF\ngit checkout -b fsdk-84-skip`),
+      toolCall("t5", "jira issue view FSDK-84"),
+      toolCall("t6", 'gh pr create --title "FSDK-84: skip"'),
+      reply("ok"),
+    ),
+  );
+  assert.deepEqual(s.tickets, ["FSDK-84"]);
+});
+
 test("records the PR that gh pr create returned, and ignores a failed create", () => {
   const s = parse(
     jsonl(
@@ -84,4 +106,10 @@ test("a ticket named only in passing in many replies does not link the run", () 
   const replies = Array.from({ length: 10 }, (_, i) => reply(`Status ${i}: FSDK-60 is still overdue.`));
   const s = parse(jsonl(header(), user("build me a dashboard"), ...replies));
   assert.deepEqual(s.tickets, []);
+});
+
+test("a key in AGENT_DASH_IGNORE_TICKETS (default FSDK-1) never links, in any case", async () => {
+  const { config } = await import("../server/config.ts");
+  const raw = jsonl(header(), name("FSDK-1 and FSDK-12"), user("fsdk-1, FSDK-12, FSDK-10"));
+  assert.deepEqual(parseSession(raw, "/f.jsonl", new Date(NOW), config.ticketPattern)!.tickets.sort(), ["FSDK-10", "FSDK-12"]);
 });
