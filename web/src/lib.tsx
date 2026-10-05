@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import type { Dashboard, HistoryRun, PrDetail, Transcript } from "../../shared/types.ts";
+import type { Dashboard, DiagramWithSource, HistoryRun, PrDetail, Transcript } from "../../shared/types.ts";
 import { internalHref, JIRA_BROWSE, splitTrailing } from "./links.ts";
+import { EmbeddedImage, MermaidFence, setKnownDiagrams } from "./mermaid.tsx";
 import { boardHash, newlyWaiting, runsOf, type Seen, snapshot } from "./notify.ts";
 
 // ---- time ---------------------------------------------------------------------------
@@ -118,6 +119,7 @@ export function useDashboard() {
       if (seq < applied.current) return;
       applied.current = seq;
       knownTickets = new Set([...body.myTickets, ...body.otherTickets].map((g) => g.ticket.key));
+      setKnownDiagrams(body.diagrams);
       setData(body);
       setError(null);
     } catch (err) {
@@ -238,6 +240,12 @@ export const api = {
     if (!res.ok) throw new Error(json.error ?? `could not load the PR (${res.status})`);
     return json;
   },
+  diagram: async (id: number): Promise<DiagramWithSource> => {
+    const res = await fetch(`/api/diagram?id=${id}`);
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error ?? `could not load the diagram (${res.status})`);
+    return json;
+  },
   transcript: async (sessionId: string): Promise<Transcript> => {
     const res = await fetch(`/api/transcript?session=${encodeURIComponent(sessionId)}`);
     if (!res.ok) throw new Error(`could not load the chat (${res.status})`);
@@ -249,7 +257,8 @@ export const api = {
 
 // ---- markdown -----------------------------------------------------------------------
 
-const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\(https?:\/\/[^)\s]+\))|(https?:\/\/[^\s)<>\]]+)/g;
+// The last group is a local image, `![alt](path)`; a web image stays a link.
+const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\(https?:\/\/[^)\s]+\))|(https?:\/\/[^\s)<>\]]+)|(!\[[^\]\n]*\]\((?![a-z]+:)<?[^)\s>]+>?\))/g;
 
 function linkLabel(url: string): string {
   if (/github\.com\/.+\/pull\/\d+/.test(url)) return prName(url);
@@ -287,6 +296,10 @@ export function inline(text: string): ReactNode[] {
     const [tok] = m;
     if (m[1]) out.push(<code key={m.index}>{tok.slice(1, -1)}</code>);
     else if (m[2]) out.push(<strong key={m.index}>{inline(tok.slice(2, -2))}</strong>);
+    else if (m[5]) {
+      const [, alt, path] = tok.match(/^!\[([^\]]*)\]\(<?([^)\s>]+)>?\)$/)!;
+      out.push(<EmbeddedImage key={m.index} alt={alt} path={path} />);
+    }
     else if (m[3]) {
       const [, label, url] = tok.match(/^\[([^\]]+)\]\((.+)\)$/)!;
       out.push(<Link key={m.index} url={url} label={label} />);
@@ -315,10 +328,11 @@ export function Markdown({ text }: { text: string }) {
     if (!line.trim()) {
       i++;
     } else if (line.startsWith("```")) {
+      const lang = line.slice(3).trim().toLowerCase();
       const body: string[] = [];
       for (i++; i < lines.length && !lines[i].startsWith("```"); i++) body.push(lines[i]);
       i++;
-      blocks.push(<pre key={i}>{body.join("\n")}</pre>);
+      blocks.push(lang === "mermaid" ? <MermaidFence key={i} code={body.join("\n")} /> : <pre key={i}>{body.join("\n")}</pre>);
     } else if (line.trim().startsWith("|")) {
       const rows: string[][] = [];
       for (; i < lines.length && lines[i].trim().startsWith("|"); i++) {

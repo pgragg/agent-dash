@@ -267,6 +267,32 @@ export interface Action {
   target: string;
 }
 
+export type DiagramKind = "mermaid" | "svg" | "png" | "jpeg" | "gif" | "webp";
+
+/** A stored copy, so a diagram opens after its conversation, file, or ticket is gone. */
+export interface Diagram {
+  id: number;
+  kind: DiagramKind;
+  title: string;
+  /** The conversation that made it. */
+  sessionId: string;
+  /** The conversation's main ticket. Null when the conversation has no ticket. */
+  ticket: string | null;
+  /** "reply" for a fence in a reply, else the file path as written. */
+  origin: string;
+  /** SHA-1 of the source, so a fence on the page can find its diagram. */
+  hash: string;
+  /** When the agent wrote it. */
+  createdAt: string;
+}
+
+/** A diagram with its text. Null for a raster image, which `/api/diagram/raw` serves. */
+export interface DiagramWithSource extends Diagram {
+  source: string | null;
+  /** The conversation, from the log. Null when its log is gone. */
+  conversation: { title: string; cwd: string; startedAt: string; lastActivityAt: string } | null;
+}
+
 export interface TicketGroup {
   ticket: Ticket;
   /** Oldest first. Resolved threads stay here; `threads` says which ones they are. */
@@ -300,6 +326,8 @@ export interface Dashboard {
   notes: Record<string, Note[]>;
   /** Open actions, first to do first. */
   actions: Action[];
+  /** Every diagram an agent made, newest first, without its source. */
+  diagrams: Diagram[];
   sources: { jira: SourceHealth; github: SourceHealth; sessions: SourceHealth };
   extensionInstalled: boolean;
 }

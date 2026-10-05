@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { splitSummary } from "../../shared/nextSteps.ts";
-import type { NextStep, Note, ThreadStatus, ThreadStatusChange, TicketSummary } from "../../shared/types.ts";
+import type { Diagram, DiagramKind, NextStep, Note, ThreadStatus, ThreadStatusChange, TicketSummary } from "../../shared/types.ts";
 
 export const DB_PATH = process.env.AGENT_DASH_DB ?? join(homedir(), ".agent-dash/agent-dash.db");
 
@@ -61,6 +61,23 @@ CREATE TABLE IF NOT EXISTS actions (
   cleared_at TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS actions_open_by_key ON actions (key) WHERE cleared_at IS NULL;
+
+-- One row per diagram an agent made. It keeps the source, so the diagram outlives its log and its file.
+-- key is "<session_id> <hash>": the same diagram twice in one conversation is one row.
+CREATE TABLE IF NOT EXISTS diagrams (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  key        TEXT NOT NULL UNIQUE,
+  session_id TEXT NOT NULL,
+  ticket     TEXT,
+  kind       TEXT NOT NULL CHECK (kind IN ('mermaid', 'svg', 'png', 'jpeg', 'gif', 'webp')),
+  title      TEXT NOT NULL,
+  origin     TEXT NOT NULL,
+  hash       TEXT NOT NULL,
+  source     TEXT NOT NULL, -- mermaid or SVG text, or base64 for a raster image
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS diagrams_by_ticket ON diagrams (ticket, id);
+CREATE INDEX IF NOT EXISTS diagrams_by_session ON diagrams (session_id, id);
 `;
 
 interface Row {
@@ -271,6 +288,56 @@ export function syncActions(current: ActionKey[], keepMissing: (key: string) => 
     throw err;
   }
   return byKey;
+}
+
+// ---- diagrams: the diagrams and charts that agents made ------------------------------
+
+const DIAGRAM_COLUMNS = "id, kind, title, session_id AS sessionId, ticket, origin, hash, created_at AS createdAt";
+
+export interface NewDiagram {
+  key: string;
+  sessionId: string;
+  ticket: string | null;
+  kind: DiagramKind;
+  title: string;
+  origin: string;
+  hash: string;
+  source: string;
+  createdAt: string;
+}
+
+export function diagramKeys(): Set<string> {
+  return new Set((open().prepare("SELECT key FROM diagrams").all() as { key: string }[]).map((r) => r.key));
+}
+
+/** One transaction, so the first scan of every old log reloads the page once. */
+export function addDiagrams(rows: NewDiagram[]): void {
+  if (!rows.length) return;
+  const d = open();
+  const insert = d.prepare("INSERT OR IGNORE INTO diagrams (key, session_id, ticket, kind, title, origin, hash, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+  d.exec("BEGIN IMMEDIATE");
+  try {
+    for (const r of rows) insert.run(r.key, r.sessionId, r.ticket, r.kind, r.title, r.origin, r.hash, r.source, r.createdAt);
+    d.exec("COMMIT");
+  } catch (err) {
+    d.exec("ROLLBACK");
+    throw err;
+  }
+}
+
+/** Newest first, without the source. */
+export function listDiagrams(): Diagram[] {
+  return (open().prepare(`SELECT ${DIAGRAM_COLUMNS} FROM diagrams ORDER BY created_at DESC, id DESC`).all() as unknown as Diagram[]).map((r) => ({ ...r }));
+}
+
+export function getDiagram(id: number): (Diagram & { source: string }) | null {
+  const row = open().prepare(`SELECT ${DIAGRAM_COLUMNS}, source FROM diagrams WHERE id = ?`).get(id) as unknown as (Diagram & { source: string }) | undefined;
+  return row ? { ...row } : null;
+}
+
+/** A conversation can get its ticket later, from a PR that names one. */
+export function setDiagramTicket(sessionId: string, ticket: string): number {
+  return Number(open().prepare("UPDATE diagrams SET ticket = ? WHERE session_id = ? AND ticket IS NOT ?").run(ticket, sessionId, ticket).changes);
 }
 
 export function inProgress(): SummaryRecord[] {
