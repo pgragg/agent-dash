@@ -258,7 +258,7 @@ export const api = {
 // ---- markdown -----------------------------------------------------------------------
 
 // The last group is a local image, `![alt](path)`; a web image stays a link.
-const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\(https?:\/\/[^)\s]+\))|(https?:\/\/[^\s)<>\]]+)|(!\[[^\]\n]*\]\((?![a-z]+:)<?[^)\s>]+>?\))/g;
+const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\(https?:\/\/[^)\s]+\))|(https?:\/\/[^\s)<>\]]+)|(!\[[^\]\n]*\]\((?![a-z]+:)<?[^)\s>]+\.(?:png|svg|jpe?g|gif|webp)>?\))/gi;
 
 function linkLabel(url: string): string {
   if (/github\.com\/.+\/pull\/\d+/.test(url)) return prName(url);

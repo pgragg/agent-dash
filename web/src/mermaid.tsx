@@ -67,9 +67,9 @@ async function sha1(text: string): Promise<string> {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** The conversation's own diagram first: the same code in two conversations is two diagrams. */
-function pick(sessionId: string | null, match: (d: Diagram) => boolean): Diagram | undefined {
-  return known.find((d) => match(d) && d.sessionId === sessionId) ?? known.find(match);
+/** The conversation's own diagram first; another's only with `anySession`, for an identical hash. */
+function pick(sessionId: string | null, match: (d: Diagram) => boolean, anySession = false): Diagram | undefined {
+  return known.find((d) => match(d) && d.sessionId === sessionId) ?? (anySession ? known.find(match) : undefined);
 }
 
 /** A ```mermaid fence in a message: the chart, and a link to its diagram page. */
@@ -80,7 +80,7 @@ export function MermaidFence({ code }: { code: string }) {
     // The server hashes the code without its trailing newlines.
     sha1(code.trimEnd()).then(setHash, () => setHash(null));
   }, [code]);
-  const d = hash ? pick(sessionId, (x) => x.hash === hash) : undefined;
+  const d = hash ? pick(sessionId, (x) => x.hash === hash, true) : undefined;
   return (
     <figure className="md-diagram">
       <Mermaid code={code} />

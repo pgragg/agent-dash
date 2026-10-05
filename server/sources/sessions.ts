@@ -274,6 +274,12 @@ export class SessionIndex {
     return [...this.cache.values()].flatMap((v) => (v.parsed ? [v.parsed] : []));
   }
 
+  /** A session from the last scan, without a new scan: the dashboard scans often enough. */
+  peek(sessionId: string): ParsedSession | null {
+    for (const v of this.cache.values()) if (v.parsed?.sessionId === sessionId) return v.parsed;
+    return null;
+  }
+
   /** The log file of a session seen by the last scan. The page names a session by id, never by path. */
   fileFor(sessionId: string): string | null {
     for (const [file, v] of this.cache) if (v.parsed?.sessionId === sessionId) return file;
