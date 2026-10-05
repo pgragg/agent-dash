@@ -78,7 +78,7 @@ const HINTS: Record<StageId, string> = {
   done: "Move the ticket to Done in Jira.",
 };
 
-const LABELS: Record<StageId, string> = {
+export const STAGE_LABELS: Record<StageId, string> = {
   ideation: "Ideation",
   pr: "PR exists",
   local_smoketest: "Local smoketest",
@@ -144,7 +144,7 @@ export function sdlcProgress({ ticket, prs, events }: { ticket: Ticket; prs: Pul
     smoketestStage("prod_smoketest", events, STAGE_ENVS.prod),
     { id: "done", state: ticket.statusCategory === "done" ? "done" : "todo", detail: `Jira status: ${ticket.status}`, events: [] },
   ];
-  const stages: Stage[] = raw.map((s) => ({ ...s, label: LABELS[s.id] }));
+  const stages: Stage[] = raw.map((s) => ({ ...s, label: STAGE_LABELS[s.id] }));
   // A stage skipped on purpose is passed, so the order goes on after it.
   const current = stages.reduce((at, s, i) => (s.state === "done" || s.state === "skipped" ? i : at), 0);
   for (const s of stages.slice(0, current)) if (s.state === "todo") s.state = "skipped";

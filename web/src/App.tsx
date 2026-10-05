@@ -18,6 +18,7 @@ import { SlackQuotes } from "./slackQuotes.tsx";
 import { DueDateVerb, TicketPanel } from "./ticketPanel.tsx";
 import { DiagramCards, DiagramsView, DiagramView } from "./diagrams.tsx";
 import { SessionScope } from "./mermaid.tsx";
+import { type BoardMode, kanbanColumns, stageOf, useBoardMode } from "./kanban.ts";
 import { DEFAULT_SNOOZE, isSnoozed, SNOOZE_OPTIONS, type SnoozeOption, snoozeUntil, untilLabel } from "./snooze.ts";
 
 /**
@@ -217,7 +218,7 @@ function runTone(run: HistoryRun): string {
 
 // ---- queue (left rail) --------------------------------------------------------------
 
-function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snoozedUntil }: { s: Subject; selected: boolean; onSelect: () => void; now: number; summary?: TicketSummaryState; rank?: number; notes?: number; snoozedUntil?: string }) {
+function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snoozedUntil, card = false, dim = false }: { s: Subject; selected: boolean; onSelect: () => void; now: number; summary?: TicketSummaryState; rank?: number; notes?: number; snoozedUntil?: string; card?: boolean; dim?: boolean }) {
   const top = lead(s);
   const run = primaryRun(s);
   const ref = useRef<HTMLButtonElement>(null);
@@ -231,7 +232,7 @@ function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snooz
   const when = top?.kind === "awaiting_input" && run ? age(run.statusSince, now) : age(top?.updatedAt ?? run?.lastActivityAt ?? s.ticket?.ticket.updatedAt, now);
   const extra = otherKinds(s);
   return (
-    <button ref={ref} className={`q-item ${selected ? "selected" : ""}`} onClick={onSelect} aria-current={selected}>
+    <button ref={ref} className={`q-item ${card ? "k-card" : ""} ${dim ? "dim" : ""} ${selected ? "selected" : ""}`} onClick={onSelect} aria-current={selected}>
       <span className="q-rank">{rank ?? ""}</span>
       <span className="q-body">
         <span className="q-head">
@@ -269,6 +270,59 @@ function RailSection({ title, count, children, defaultOpen = true, hint }: { tit
       </button>
       {open && <div className="rail-list">{children}</div>}
     </section>
+  );
+}
+
+function BoardModeToggle({ mode, setMode }: { mode: BoardMode; setMode: (m: BoardMode) => void }) {
+  const option = (m: BoardMode, label: string, title: string) => (
+    <button role="radio" aria-checked={mode === m} className={`btn small ${mode === m ? "" : "ghost"}`} onClick={() => setMode(m)} title={`${title} (V)`}>
+      {label}
+    </button>
+  );
+  return (
+    <span className="seg" role="radiogroup" aria-label="Board layout">
+      {option("queue", "Queue", "The queue, with a workspace for the selected entry")}
+      {option("kanban", "Kanban", "One column per SDLC stage")}
+    </span>
+  );
+}
+
+/** The board's entries as cards, in the column of the SDLC stage that each ticket reached. */
+function KanbanBoard({ order, dim, ranks, selected, onSelect, data, now, until }: { order: Subject[]; dim: Set<Subject>; ranks: Map<Subject, number>; selected: Subject | null; onSelect: (s: Subject) => void; data: Dashboard; now: number; until: (s: Subject) => string | undefined }) {
+  const ref = useRef<HTMLDivElement>(null);
+  // The selected card scrolls into view at load, which would hide the first stages. This runs after the cards' effects.
+  useEffect(() => {
+    if (ref.current) ref.current.scrollLeft = 0;
+  }, []);
+  const columns = kanbanColumns(order, (s) => (s.ticket ? stageOf(s.ticket, data.sdlcEvents[s.ticket.ticket.key] ?? []) : null));
+  return (
+    <div className="kanban" ref={ref}>
+      {columns.map((c) => (
+        <section key={c.id} className={`k-col ${c.items.length ? "" : "empty"}`} aria-label={c.label}>
+          <h2 className="rail-title k-col-head">
+            {c.label}
+            <span className="count">{c.items.length}</span>
+          </h2>
+          <div className="k-col-list">
+            {c.items.map((s) => (
+              <QueueItem
+                key={s.id}
+                s={s}
+                card
+                dim={dim.has(s)}
+                rank={ranks.get(s)}
+                selected={s.id === selected?.id}
+                onSelect={() => onSelect(s)}
+                now={now}
+                summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined}
+                notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0}
+                snoozedUntil={isSnoozed(until(s), now) ? until(s) : undefined}
+              />
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
   );
 }
 
@@ -1459,6 +1513,8 @@ const KEYS: [string, string][] = [
   ["N", "Add a note"],
   ["A", "Start a new agent with this ticket's context"],
   ["C", "Start a new conversation with pi on its own page, with no context"],
+  ["V", "Switch the board between the queue and the kanban"],
+  ["↵", "On the kanban: open the selected card's workspace"],
   ["⌘↵", "Send the reply"],
   ["Esc", "Leave the reply box"],
   ["?", "Show or hide this help"],
@@ -1500,6 +1556,9 @@ export function App() {
   const [noteSignal, setNoteSignal] = useState(0);
   const [agentSignal, setAgentSignal] = useState(0);
   const [snoozeSignal, setSnoozeSignal] = useState(0);
+  const [boardMode, setBoardMode] = useBoardMode();
+  // On the kanban, the workspace opens in a drawer over the columns when you pick a card.
+  const [drawer, setDrawer] = useState(() => route.view === "board" && !!route.ref);
 
   const subjects = useMemo(() => (data ? buildSubjects(data) : new Map<string, Subject>()), [data]);
   const until = (s: Subject) => (s.ticket ? data?.snoozedUntil[s.ticket.ticket.key] : undefined);
@@ -1525,7 +1584,10 @@ export function App() {
     const onHash = () => {
       const next = parseHash(location.hash);
       setRoute(next);
-      if (next.view === "board") setBoardRef(next.ref);
+      if (next.view === "board") {
+        setBoardRef(next.ref);
+        if (next.ref) setDrawer(true);
+      }
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
@@ -1575,7 +1637,11 @@ export function App() {
       else if (e.key === "e") doneAndAdvance();
       else if (e.key === "z" && selected?.ticket) setSnoozeSignal((n) => n + 1);
       else if (e.key === "?") setHelp((h) => !h);
-      else if (e.key === "Escape") setHelp(false);
+      else if (e.key === "Escape") {
+        if (help) setHelp(false);
+        else setDrawer(false);
+      } else if (e.key === "v") setBoardMode(boardMode === "queue" ? "kanban" : "queue");
+      else if (e.key === "Enter" && boardMode === "kanban" && !drawer && selected) setDrawer(true);
       else if (e.key === "r") setFocusSignal((n) => n + 1);
       else if (e.key === "n" && selected?.ticket) setNoteSignal((n) => n + 1);
       else if (e.key === "a" && selected?.ticket) setAgentSignal((n) => n + 1);
@@ -1592,7 +1658,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [move, doneAndAdvance, selected, data, view]);
+  }, [move, doneAndAdvance, selected, data, view, help, boardMode, setBoardMode, drawer]);
 
   useEffect(() => {
     const waiting = data?.counts.awaiting_input ?? 0;
@@ -1607,6 +1673,45 @@ export function App() {
   const sources = Object.entries(data.sources);
   const down = sources.filter(([, h]) => !h.ok);
   const openPrs = data.prs.filter((p) => p.state === "open").length;
+
+  const workspace = (
+    <>
+      {!data.extensionInstalled && (
+        <p className="banner">
+          Run <code>pnpm install-extension</code> to get exact statuses and replies from here.
+        </p>
+      )}
+      {boardRef && !target && (
+        <p className="banner">
+          <code>{boardRef}</code> is not on the board. It may be older than 14 days, or closed: look for it in <a href="#/history">History</a>.
+        </p>
+      )}
+      {selected ? (
+        <Workspace
+          s={selected}
+          data={data}
+          now={now}
+          position={position}
+          doneForNow={doneForNow.isDone(selected)}
+          onDoneForNow={doneAndAdvance}
+          onWake={() => doneForNow.wake(selected)}
+          onSnoozed={() => advanceFrom(selected.id)}
+          snoozeSignal={snoozeSignal}
+          focusSignal={focusSignal}
+          noteSignal={noteSignal}
+          agentSignal={agentSignal}
+          anchor={target?.anchor ?? null}
+        />
+      ) : (
+        <div className="zero big">Nothing to show.</div>
+      )}
+    </>
+  );
+  const newConversation = (
+    <a className="btn" href="#/c" title="Start a plain pi with no ticket context, and talk to it on its own page">
+      + New conversation <Kbd>C</Kbd>
+    </a>
+  );
 
   return (
     <div className="app">
@@ -1693,13 +1798,41 @@ export function App() {
         <main className="main">
           {route.id ? <ConversationView key={route.id} sessionId={route.id} data={data} now={now} /> : <NewConversationForm />}
         </main>
+      ) : boardMode === "kanban" ? (
+        <div className="kanban-view">
+          <div className="kanban-bar">
+            {newConversation}
+            <BoardModeToggle mode={boardMode} setMode={setBoardMode} />
+            <span className="meta">Each card sits in the column of the furthest SDLC stage that its ticket reached.</span>
+          </div>
+          <KanbanBoard
+            order={order}
+            dim={new Set([...done, ...quiet, ...snoozedList])}
+            ranks={new Map(queue.map((s, i) => [s, i + 1]))}
+            selected={selected}
+            onSelect={(s) => {
+              select(s.id);
+              setDrawer(true);
+            }}
+            data={data}
+            now={now}
+            until={until}
+          />
+          {drawer && selected && (
+            <aside className="kanban-drawer" aria-label="Workspace">
+              <button className="btn ghost small drawer-close" onClick={() => setDrawer(false)} title="Close the workspace (Esc)">
+                Close <Kbd>Esc</Kbd>
+              </button>
+              {workspace}
+            </aside>
+          )}
+        </div>
       ) : (
         <div className="columns">
           <nav className="rail">
             <div className="new-conversation">
-              <a className="btn" href="#/c" title="Start a plain pi with no ticket context, and talk to it on its own page">
-                + New conversation <Kbd>C</Kbd>
-              </a>
+              {newConversation}
+              <BoardModeToggle mode={boardMode} setMode={setBoardMode} />
             </div>
             <RailSection title="Up next" count={queue.length}>
               {queue.map((s, i) => (
@@ -1752,35 +1885,7 @@ export function App() {
           </nav>
 
           <main className="main">
-            {!data.extensionInstalled && (
-              <p className="banner">
-                Run <code>pnpm install-extension</code> to get exact statuses and replies from here.
-              </p>
-            )}
-            {boardRef && !target && (
-              <p className="banner">
-                <code>{boardRef}</code> is not on the board. It may be older than 14 days, or closed: look for it in <a href="#/history">History</a>.
-              </p>
-            )}
-            {selected ? (
-              <Workspace
-                s={selected}
-                data={data}
-                now={now}
-                position={position}
-                doneForNow={doneForNow.isDone(selected)}
-                onDoneForNow={doneAndAdvance}
-                onWake={() => doneForNow.wake(selected)}
-                onSnoozed={() => advanceFrom(selected.id)}
-                snoozeSignal={snoozeSignal}
-                focusSignal={focusSignal}
-                noteSignal={noteSignal}
-                agentSignal={agentSignal}
-                anchor={target?.anchor ?? null}
-              />
-            ) : (
-              <div className="zero big">Nothing to show.</div>
-            )}
+            {workspace}
           </main>
         </div>
       )}
