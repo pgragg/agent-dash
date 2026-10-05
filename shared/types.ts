@@ -372,6 +372,22 @@ export interface ReviewDraft {
   requestedAt: string;
 }
 
+/** The short summary on an agent conversation, from a cheap model. */
+export interface ConversationSummary {
+  sessionId: string;
+  status: "in_progress" | "done" | "failed";
+  /** What the conversation is about. Null until the first draft is done. */
+  about: string | null;
+  /** What the agent's latest message says. */
+  latest: string | null;
+  /** What the agent needs from Piper, or "Nothing". */
+  needs: string | null;
+  generatedAt: string | null;
+  error: string | null;
+  /** The texts are from an older state of the run: a newer message came after them. */
+  stale: boolean;
+}
+
 export interface SourceHealth {
   ok: boolean;
   error?: string;
@@ -406,6 +422,8 @@ export interface Dashboard {
   sdlcEvents: Record<string, SdlcEvent[]>;
   /** Drafted Slack review requests by PR URL. */
   reviewDrafts: Record<string, ReviewDraft>;
+  /** The short summary of each run on the board, by session id. */
+  conversationSummaries: Record<string, ConversationSummary>;
   /** Review requests sent from agent-dash by PR URL, newest first. Also for PRs with no ticket. */
   reviewRequests: Record<string, SdlcEvent[]>;
   sources: { jira: SourceHealth; github: SourceHealth; sessions: SourceHealth };
