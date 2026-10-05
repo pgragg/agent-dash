@@ -136,15 +136,14 @@ function StageActions({ stage, group, cwd, onError }: { stage: Stage; group: Tic
     }
     return (
       <>
-        {stage.state === "waiting" && (
-          <AgentVerb
-            ticket={key}
-            body={{ cwd, sdlc: { kind: "confirm_deploy", stage: where } }}
-            label="Confirm in Argo"
-            title={`Start an agent that checks the ${ENV_LABEL[envId]} deploy in Argo, read-only, and records it here.`}
-            onError={onError}
-          />
-        )}
+        {/* Always offered: the deploy can be live before the board sees its PR or earlier stages. */}
+        <AgentVerb
+          ticket={key}
+          body={{ cwd, sdlc: { kind: "confirm_deploy", stage: where } }}
+          label="Confirm in Argo"
+          title={`Start an agent that checks the ${ENV_LABEL[envId]} deploy in Argo, read-only, and records it here.`}
+          onError={onError}
+        />
         <button
           className="btn ghost small"
           title="For a change with no Argo deploy, or one you checked yourself"
