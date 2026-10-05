@@ -127,7 +127,7 @@ A progress bar at the top of each ticket shows where its change is on the way to
 - **The Smoketests card** lists the ticket's smoketests, newest first, with the time, how long each ran, the environment tags, the outcome, the test details, and the results (closed at first). Pick an environment, then **Run smoketest on …** starts the same agent as on the bar, and **Skip smoketest** records a skip for that environment. **Record by hand** saves a smoketest that you ran yourself. **Delete** removes one.
 - **A tag is the environment under test**, not every system that the test touched. A local frontend against the Postman Beta backend tests Beta, so its tag is Postman Beta. Two tags are for the rare test where both sides are under test. The tags are `localhost`, `fern_dev`, `fern_prod`, `postman_beta` and `postman_prod` (or their labels: "Fern Dev" and so on).
 - **The next-steps summary and the context of a new agent** both get the progress, one line per stage. The summary prompt tells the run to follow the order, to name the environment when the next stage is a smoketest, and to plan no step for a skipped stage.
-- **A new event redrafts the next steps.** When a smoketest, a skip, or a deploy is recorded (on the page or with the script), the server starts a new [next-steps](#next-steps-summaries) draft for each ticket of the event, because the old steps can name a stage that is now done. A draft that is in progress and started before the event is stopped and replaced. A ticket that is not on the board gets no draft. A delete does not start a draft.
+- **A new or changed event redrafts the next steps.** When a smoketest, a skip, or a deploy is recorded or changed (on the page or with the script), the server starts a new [next-steps](#next-steps-summaries) draft for each ticket of the event, because the old steps can name a stage that is now done. A change is any `UPDATE` of its `SDLC_Event` row: a SQLite trigger marks the event's tickets for a new draft, so it works for every writer. A draft that is in progress and started before the event was made or changed is stopped and replaced. A ticket that is not on the board gets no draft. A delete does not start a draft.
 
 `POST /api/sdlc-events` (body `{eventType, tickets, environments, startedAt, finishedAt, outcome, testDetails, testResults, skippedAt}`; only a smoketest with no outcome can have `skippedAt`) and `DELETE /api/sdlc-events?id=N` write the events, with the `X-Agent-Dash` guard. An agent uses the script, which writes into the same database:
 
@@ -206,7 +206,7 @@ Everything you write lives in SQLite at `~/.agent-dash/agent-dash.db`:
 | `diagrams` | One per diagram an agent made: `key` (session id and source hash), `session_id`, `ticket`, `kind`, `title`, `origin` (`reply`, or the file path as the agent wrote it), `hash`, `source`, `created_at` (when the agent wrote it) |
 | `SDLC_Event` | One per smoketest or confirmed deploy: `event_type` (`smoketest` or `deploy`), `started_at`, `finished_at`, `outcome` (`passed`, `failed`, or empty), `test_details`, `test_results`, `skipped_at` (set on a smoketest that you skipped), `created_at` |
 | `SDLC_Event_Environment` | One per environment under test of an event: `sdlc_event_id`, `environment` |
-| `SDLC_Event_Ticket` | One per ticket of an event: `sdlc_event_id`, `ticket`, `created_at` (when the link was made), `summary_requested_at` (when the server started the next-steps draft for it; empty until then) |
+| `SDLC_Event_Ticket` | One per ticket of an event: `sdlc_event_id`, `ticket`, `created_at` (when the link was made), `summary_requested_at` (when the server started the next-steps draft for it; empty until then, and empty again when the event changes), `changed_at` (when the event last changed; set by the `sdlc_event_changed` trigger) |
 | `PiConversationStatusChange` | One per change to a thread's relevance: `ticket`, `session_id`, `status` (`relevant` or `resolved`), `reason` (resolved only, optional), `created_at`. Append-only; the newest row per ticket and thread is the current state. |
 
 ## Reply to an agent
@@ -336,7 +336,7 @@ The **Next steps** card on a ticket's workspace starts a headless pi run (**Draf
 |---|---|
 | Draft next steps | No summary yet |
 | Reading Jira, PRs, Slack… 1m 12s | A run is in progress. The last finished summary stays readable meanwhile. |
-| drafted 12m ago · Redraft | The summary. **out of date** shows when a run or PR changed after it was written. A new [SDLC event](#sdlc-progress-and-smoketests) starts a new draft by itself. |
+| drafted 12m ago · Redraft | The summary. **out of date** shows when a run or PR changed after it was written. A new or changed [SDLC event](#sdlc-progress-and-smoketests) starts a new draft by itself. |
 | probably stuck · Start again | In progress for more than 30 minutes. Start again stops the old run and starts a new one. |
 | The last draft failed · Retry | The run ended without a summary. |
 

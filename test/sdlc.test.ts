@@ -205,3 +205,19 @@ test("an upgrade counts the event links that are already there as drafted", () =
   const rows = o.prepare("SELECT ticket, summary_requested_at AS at FROM SDLC_Event_Ticket ORDER BY id").all() as { ticket: string; at: string | null }[];
   assert.deepEqual(rows.map((r) => ({ ...r })), [{ ticket: "FSDK-50", at: "2026-10-01T00:00:00.000Z" }, { ticket: "FSDK-51", at: null }]);
 });
+
+test("a changed event starts a new draft for each of its tickets, from any writer, and replaces a draft that started before the change", () => {
+  const e = db.addSdlcEvent({ eventType: "smoketest", startedAt: "2026-10-02T10:00:00.000Z", environments: ["localhost"], tickets: ["FSDK-60", "FSDK-61"] });
+  db.addSdlcEvent({ eventType: "smoketest", startedAt: "2026-10-02T10:00:00.000Z", environments: ["localhost"], tickets: ["FSDK-62"] });
+  db.claimNewEventTickets();
+  db.createRequest("FSDK-60", new Date(Date.now() - 60_000));
+  // Another connection, as the script's own process would write.
+  new DatabaseSync(dbPath).prepare("UPDATE SDLC_Event SET outcome = 'passed', finished_at = ? WHERE id = ?").run(new Date().toISOString(), e.id);
+  assert.equal(db.hasNewEventTickets(), true);
+  const calls: { key: string; force?: boolean }[] = [];
+  const start = async (g: { ticket: { key: string } }, opts?: { force?: boolean }) => (calls.push({ key: g.ticket.key, force: opts?.force }), {} as db.SummaryRecord);
+  const groups = ["FSDK-60", "FSDK-61", "FSDK-62"].map((key) => ({ ticket: ticket({ key }), runs: [], prs: [] }));
+  assert.deepEqual(redraftAfterNewEvents(groups, undefined, start), ["FSDK-60", "FSDK-61"]);
+  assert.deepEqual(calls, [{ key: "FSDK-60", force: true }, { key: "FSDK-61", force: false }]);
+  assert.equal(db.hasNewEventTickets(), false);
+});

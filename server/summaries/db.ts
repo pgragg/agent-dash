@@ -95,6 +95,8 @@ CREATE TABLE IF NOT EXISTS SDLC_Event_Ticket (
   created_at    TEXT NOT NULL,
   -- Set when the server started a next-steps draft for this link; empty means not yet.
   summary_requested_at TEXT,
+  -- When the event last changed after it was made; empty if it never did.
+  changed_at    TEXT,
   UNIQUE (sdlc_event_id, ticket)
 );
 CREATE INDEX IF NOT EXISTS sdlc_event_ticket_by_ticket ON SDLC_Event_Ticket (ticket);
@@ -189,6 +191,11 @@ export function open(path = DB_PATH): DatabaseSync {
   if (!(db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event_Ticket') WHERE name = 'summary_requested_at'").get())) {
     db.exec("ALTER TABLE SDLC_Event_Ticket ADD COLUMN summary_requested_at TEXT; UPDATE SDLC_Event_Ticket SET summary_requested_at = created_at");
   }
+  if (!(db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event_Ticket') WHERE name = 'changed_at'").get())) db.exec("ALTER TABLE SDLC_Event_Ticket ADD COLUMN changed_at TEXT");
+  // A changed event needs a new draft too. A trigger catches every writer, also the script's own process.
+  db.exec(`CREATE TRIGGER IF NOT EXISTS sdlc_event_changed AFTER UPDATE ON SDLC_Event BEGIN
+    UPDATE SDLC_Event_Ticket SET summary_requested_at = NULL, changed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE sdlc_event_id = NEW.id;
+  END`);
   // Summaries saved before steps were stored get their rows once.
   for (const r of db.prepare("SELECT id, ticket, summary FROM summaries WHERE status = 'done' AND id NOT IN (SELECT summary_id FROM next_steps)").all() as unknown as Row[]) {
     insertSteps(r.id, r.ticket, r.summary ?? "");
@@ -517,16 +524,17 @@ function sdlcEvents(where = "", ...params: number[]): SdlcEvent[] {
 
 /**
  * Marks every event link that has no next-steps draft yet as drafted, and returns its tickets,
- * with the newest link time of each. Read and mark are one step, so two callers never both draft.
+ * with the newest time that an event was made or changed. Read and mark are one step, so two
+ * callers never both draft.
  */
 export function claimNewEventTickets(now = new Date()): Map<string, string> {
   const rows = open()
-    .prepare("UPDATE SDLC_Event_Ticket SET summary_requested_at = ? WHERE summary_requested_at IS NULL RETURNING ticket, created_at AS createdAt")
-    .all(now.toISOString()) as { ticket: string; createdAt: string }[];
+    .prepare("UPDATE SDLC_Event_Ticket SET summary_requested_at = ? WHERE summary_requested_at IS NULL RETURNING ticket, coalesce(changed_at, created_at) AS at")
+    .all(now.toISOString()) as { ticket: string; at: string }[];
   const out = new Map<string, string>();
   for (const r of rows) {
     const prev = out.get(r.ticket);
-    if (!prev || r.createdAt > prev) out.set(r.ticket, r.createdAt);
+    if (!prev || r.at > prev) out.set(r.ticket, r.at);
   }
   return out;
 }
