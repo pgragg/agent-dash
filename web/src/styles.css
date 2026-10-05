@@ -575,6 +575,11 @@ a.btn.verb { text-decoration: none; }
 .smoke-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; }
 .check { display: inline-flex; align-items: center; gap: 5px; }
 .smoke-results summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
+/* A plan that waits for Piper: its approval is the point, so the row stands out. */
+.plan-row.open { padding: 10px 12px; border-radius: 12px; border-left: 3px solid var(--warn); background: var(--hover); }
+.plan-changes { margin: 6px 0; padding: 8px 10px; border-radius: 8px; background: var(--warn-bg); font-size: 13px; }
+.plan-confirm { margin: 8px 0; }
+.plan-chat { margin-top: 8px; }
 .smoke-item > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; font-size: 13px; }
 .smoke-item > summary::-webkit-details-marker { display: none; }
 .smoke-item > summary::before { content: "▸"; color: var(--muted); font-size: 11px; }

@@ -310,8 +310,11 @@ export interface TicketGroup {
 /** An environment under test. A tag names what the event tested, not every system it touched. */
 export type SdlcEnvironment = "localhost" | "fern_dev" | "fern_prod" | "postman_beta" | "postman_prod";
 
-/** "deploy" is a deploy that Argo or Piper confirmed: the In Beta and In Prod stages. "review_request": a Slack message that asked for a PR review. */
-export type SdlcEventType = "smoketest" | "deploy" | "review_request";
+/**
+ * A smoketest has two phases: an agent writes a plan ("smoketest_plan"), then runs it ("smoketest_execution").
+ * "deploy" is a deploy that Argo or Piper confirmed: the In Beta and In Prod stages. "review_request": a Slack message that asked for a PR review.
+ */
+export type SdlcEventType = "smoketest_plan" | "smoketest_execution" | "deploy" | "review_request";
 
 export type SmoketestOutcome = "passed" | "failed" | "blocked";
 
@@ -323,12 +326,22 @@ export interface SdlcEvent {
   finishedAt: string | null;
   /** No outcome counts as passed, except on a dash-started smoketest: that one is still running. "blocked": the test could not run or could not see the result. */
   outcome: SmoketestOutcome | null;
+  /** On a plan: the plan itself. */
   testDetails: string | null;
   testResults: string | null;
   /** The pi session that runs it, when agent-dash started that session. */
   sessionId: string | null;
   /** Set on a smoketest that Piper chose to skip. It has no outcome. */
   skippedAt: string | null;
+  /** On a plan: when the agent last recorded it. Null while the agent still writes it. */
+  plannedAt: string | null;
+  /** On a plan: the Beta or Prod writes that the test needs, one per line. Null: it changes no Beta or Prod state. */
+  stateChanges: string | null;
+  /** On a plan: when it was accepted, and by whom. "auto": it changes no Beta or Prod state. */
+  confirmedAt: string | null;
+  confirmedBy: "piper" | "auto" | null;
+  /** On an execution: the plan that it runs. */
+  planId: number | null;
   /** One short line from the agent that ran the smoketest: what it showed. The collapsed row shows it. */
   summary: string | null;
   /** A review request's PR, Slack channel id, message text and message permalink. Null on other events. */

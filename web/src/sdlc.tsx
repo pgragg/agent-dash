@@ -1,14 +1,18 @@
 import { useEffect, useState } from "react";
 import { prRef } from "../../shared/refs.ts";
-import { ENV_LABEL, ENVIRONMENTS, isSmoketestRunning, mergePrs, SMOKETEST_ENV, sdlcProgress, type Stage, type StageState } from "../../shared/sdlc.ts";
+import { ENV_LABEL, ENVIRONMENTS, isPlanRunning, isPlanStage, isPlanWaiting, isSmoketestRunning, mergePrs, newestPlan, SMOKETEST_ENV, sdlcProgress, type Stage, type StageState } from "../../shared/sdlc.ts";
 import type { PullRequest, Run, SdlcEnvironment, SdlcEvent, SmoketestOutcome, TicketGroup } from "../../shared/types.ts";
-import { conversationHash, launchAgent, type LaunchBody } from "./agents.tsx";
+import { conversationHash, launchAgent, type LaunchBody, ResumeHere } from "./agents.tsx";
+import { Chat } from "./chat.tsx";
 import { age, Markdown, post, stamp } from "./lib.tsx";
+import { Composer, LivePanel } from "./liveControl.tsx";
 import { href } from "./routes.ts";
 
 /**
- * The SDLC progress bar at the top of a ticket, and the ticket's Smoketests card. Smoketests and
- * confirmed deploys are rows in SQLite; the PR stage reads GitHub and the Done stage reads Jira.
+ * The SDLC progress bar at the top of a ticket, and the ticket's Smoketests card. Smoketest plans,
+ * smoketest executions and confirmed deploys are rows in SQLite; the PR stage reads GitHub and
+ * the Done stage reads Jira. An agent plans each smoketest first. A plan that changes Beta or
+ * Prod state runs only after Piper confirms it here.
  */
 
 const TTL_MS = 2 * 60_000;
@@ -71,16 +75,46 @@ function AgentVerb({ ticket, body, label, title, onError }: { ticket: string; bo
   );
 }
 
-function SmoketestVerb({ ticket, env, cwd, onError }: { ticket: string; env: SdlcEnvironment; cwd: string; onError: (m: string | null) => void }) {
+function PlanVerb({ ticket, env, cwd, onError, again = false }: { ticket: string; env: SdlcEnvironment; cwd: string; onError: (m: string | null) => void; again?: boolean }) {
   return (
     <AgentVerb
       ticket={ticket}
-      body={{ cwd, sdlc: { kind: "smoketest", env } }}
-      label={`Run smoketest on ${ENV_LABEL[env]}`}
-      title={`Start an agent in ${cwd} that smoketests ${ticket} on ${ENV_LABEL[env]} and records the result here.`}
+      body={{ cwd, sdlc: { kind: "smoketest_plan", env } }}
+      label={again ? "Plan again" : `Plan smoketest on ${ENV_LABEL[env]}`}
+      title={`Start an agent in ${cwd} that plans a smoketest of ${ticket} on ${ENV_LABEL[env]}. A plan that changes no Beta or Prod state runs at once; any other plan waits for your Confirm.`}
       onError={onError}
     />
   );
+}
+
+/**
+ * Confirm approves the state changes of the plan version on the page, and starts its run. On an
+ * accepted plan, it runs the plan again.
+ */
+function RunPlan({ plan, cwd, onError, primary = true }: { plan: SdlcEvent; cwd: string; onError: (m: string | null) => void; primary?: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const waiting = isPlanWaiting(plan);
+  return (
+    <button
+      className={`btn small ${primary ? "primary" : "ghost"}`}
+      disabled={busy || !plan.plannedAt}
+      title={waiting ? "Approve the state changes that this plan lists, and let the agent run it" : "Run this accepted plan again"}
+      onClick={async () => {
+        setBusy(true);
+        onError(await post(`/api/sdlc-events/run?id=${plan.id}`, { plannedAt: plan.plannedAt, cwd }));
+        setBusy(false);
+      }}
+    >
+      {busy ? "Starting…" : waiting ? "Confirm" : "Run the plan again"}
+    </button>
+  );
+}
+
+function scrollTo(id: string) {
+  return (e: { preventDefault: () => void }) => {
+    e.preventDefault();
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+  };
 }
 
 /** Records a smoketest that Piper chose not to run, so its stage counts as passed. */
@@ -91,7 +125,7 @@ function SkipSmoketest({ ticket, env, onError }: { ticket: string; env: SdlcEnvi
       title={`Record that you skip the ${ENV_LABEL[env]} smoketest of ${ticket}. Delete it on the Smoketests card to undo.`}
       onClick={async () => {
         const now = new Date().toISOString();
-        onError(await post("/api/sdlc-events", { eventType: "smoketest", tickets: [ticket], environments: [env], startedAt: now, skippedAt: now }));
+        onError(await post("/api/sdlc-events", { eventType: "smoketest_execution", tickets: [ticket], environments: [env], startedAt: now, skippedAt: now }));
       }}
     >
       Skip smoketest
@@ -108,35 +142,61 @@ function agentHref(sessionId: string, runs: Run[]): string {
   return runs.some((r) => r.sessionId === sessionId) ? href(`r:${sessionId}`) : conversationHash(sessionId);
 }
 
-/** The agent link of a stage whose newest smoketest is running, if agent-dash started it. */
+/** The agent link of a stage whose newest plan or smoketest is running, if agent-dash started it. */
 function runningAgent(stage: Stage, runs: Run[]): string | null {
   const id = stage.state === "running" ? stage.events[0]?.sessionId : null;
   return id ? agentHref(id, runs) : null;
 }
 
-function StageActions({ stage, group, cwd, onError }: { stage: Stage; group: TicketGroup; cwd: string; onError: (m: string | null) => void }) {
+/** A smoketest stage, plan or execution: what to do with the newest plan of its environment. */
+function SmoketestActions({ stage, group, env, events, cwd, onError }: { stage: Stage; group: TicketGroup; env: SdlcEnvironment; events: SdlcEvent[]; cwd: string; onError: (m: string | null) => void }) {
+  const key = group.ticket.key;
+  const agent = runningAgent(stage, group.runs);
+  const plan = newestPlan(events, env);
+  const planAgent = plan && isPlanRunning(plan) && plan.sessionId ? agentHref(plan.sessionId, group.runs) : null;
+  const passed = stage.state === "done" || stage.state === "skipped";
+  let verb;
+  if (agent) {
+    verb = (
+      <a className="btn small" href={agent}>
+        {isPlanStage(stage.id) ? "Open the planning agent" : "Open the smoketest"}
+      </a>
+    );
+  } else if (planAgent) {
+    verb = (
+      <a className="btn small" href={planAgent}>
+        Open the planning agent
+      </a>
+    );
+  } else if (plan && isPlanWaiting(plan)) {
+    verb = <RunPlan plan={plan} cwd={cwd} onError={onError} />;
+  } else if (plan?.confirmedAt && !isPlanStage(stage.id) && !passed) {
+    verb = <RunPlan plan={plan} cwd={cwd} onError={onError} />;
+  } else {
+    verb = <PlanVerb ticket={key} env={env} cwd={cwd} onError={onError} again={!!plan} />;
+  }
+  return (
+    <>
+      {verb}
+      {!passed && !agent && <SkipSmoketest ticket={key} env={env} onError={onError} />}
+      {plan && (
+        <a className="btn ghost small" href={`#sdlc:${plan.id}`} onClick={scrollTo(`sdlc:${plan.id}`)}>
+          See the plan
+        </a>
+      )}
+      {!isPlanStage(stage.id) && stage.events.length > 0 && (
+        <a className="btn ghost small" href="#smoketests" onClick={scrollTo("smoketests")}>
+          See smoketests
+        </a>
+      )}
+    </>
+  );
+}
+
+function StageActions({ stage, group, events, cwd, onError }: { stage: Stage; group: TicketGroup; events: SdlcEvent[]; cwd: string; onError: (m: string | null) => void }) {
   const key = group.ticket.key;
   const env = SMOKETEST_ENV[stage.id];
-  if (env) {
-    const agent = runningAgent(stage, group.runs);
-    return (
-      <>
-        {agent ? (
-          <a className="btn small" href={agent}>
-            Open the smoketest
-          </a>
-        ) : (
-          <SmoketestVerb ticket={key} env={env} cwd={cwd} onError={onError} />
-        )}
-        {stage.state !== "done" && stage.state !== "skipped" && !agent && <SkipSmoketest ticket={key} env={env} onError={onError} />}
-        {stage.events.length > 0 && (
-          <a className="btn ghost small" href="#smoketests" onClick={(e) => (e.preventDefault(), document.getElementById("smoketests")?.scrollIntoView({ behavior: "smooth" }))}>
-            See smoketests
-          </a>
-        )}
-      </>
-    );
-  }
+  if (env) return <SmoketestActions stage={stage} group={group} env={env} events={events} cwd={cwd} onError={onError} />;
   if (stage.id === "in_beta" || stage.id === "in_prod") {
     const where = stage.id === "in_beta" ? "beta" : "prod";
     const envId: SdlcEnvironment = where === "beta" ? "postman_beta" : "postman_prod";
@@ -214,7 +274,7 @@ export function SdlcBar({ group, events, cwd, onError }: { group: TicketGroup; e
           const title = `${s.label}: ${STATE_TEXT[s.state]}${s.detail ? ` · ${s.detail}` : ""}`;
           const inner = (
             <>
-              <span className="sdlc-dot">{s.state === "done" ? "✓" : s.state === "failed" ? "!" : s.state === "blocked" ? "?" : s.state === "running" ? "…" : i + 1}</span>
+              <span className="sdlc-dot">{s.state === "done" ? "✓" : s.state === "failed" ? "!" : s.state === "blocked" ? "?" : s.state === "running" ? "…" : s.state === "waiting" && isPlanStage(s.id) ? "↵" : i + 1}</span>
               <span className="sdlc-label">{s.label}</span>
             </>
           );
@@ -242,7 +302,7 @@ export function SdlcBar({ group, events, cwd, onError }: { group: TicketGroup; e
             {shown === progress.next ? progress.hint : shown.detail}
           </span>
           <span className="grow" />
-          <StageActions stage={shown} group={group} cwd={cwd} onError={onError} />
+          <StageActions stage={shown} group={group} events={events} cwd={cwd} onError={onError} />
         </div>
       ) : (
         <div className="sdlc-detail meta">Every stage is done.</div>
@@ -272,7 +332,7 @@ function RecordForm({ ticket, onError, onDone }: { ticket: string; onError: (m: 
   const save = async () => {
     setSaving(true);
     const err = await post("/api/sdlc-events", {
-      eventType: "smoketest",
+      eventType: "smoketest_execution",
       tickets: [ticket],
       environments: envs,
       outcome,
@@ -364,6 +424,11 @@ function SmoketestRow({ e, now, runs, onError }: { e: SdlcEvent; now: number; ru
         {running && e.sessionId && <a href={agentHref(e.sessionId, runs)}>Open the agent</a>}
         {e.skippedAt && <span className="tag">skipped</span>}
         {e.outcome && <span className={`tag ${OUTCOME_TONE[e.outcome]}`}>{e.outcome}</span>}
+        {e.planId && (
+          <a href={`#sdlc:${e.planId}`} onClick={scrollTo(`sdlc:${e.planId}`)}>
+            · its plan
+          </a>
+        )}
         {e.tickets.length > 1 && <span>· also on {e.tickets.slice(1).join(", ")}</span>}
         <button
           className="btn ghost small note-delete"
@@ -401,8 +466,99 @@ function SmoketestRow({ e, now, runs, onError }: { e: SdlcEvent; now: number; ru
   );
 }
 
+function planStatus(e: SdlcEvent): { text: string; tone: string } {
+  if (isPlanRunning(e)) return { text: "planning", tone: "tone-running" };
+  if (isPlanWaiting(e)) return { text: "waits for your confirmation", tone: "st-tag-waiting" };
+  return e.confirmedBy === "auto" ? { text: "accepted: no Beta or Prod state changes", tone: "tone-good" } : { text: "confirmed by you", tone: "tone-good" };
+}
+
+/** The planning agent's chat, with a reply box while it lives, so Piper can refine the plan here. */
+function PlanConversation({ sessionId, runs, now, onError }: { sessionId: string; runs: Run[]; now: number; onError: (m: string | null) => void }) {
+  const run = runs.find((r) => r.sessionId === sessionId);
+  if (!run) return <p className="meta">Starting the planning agent…</p>;
+  return (
+    <div className="plan-chat">
+      <Chat sessionId={sessionId} refreshKey={run.status === "working" ? run.userMessageCount : run.lastActivityAt + run.status} />
+      <LivePanel run={run} now={now} onError={onError} working="The agent is working on the plan…" />
+      {run.status !== "finished" ? (
+        <Composer run={run} onError={onError} focusSignal={0} />
+      ) : (
+        <div className="smoke-row">
+          <span className="meta">The planning agent ended.</span>
+          <ResumeHere run={run} onError={onError} small />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlanRow({ e, now, runs, cwd, onError }: { e: SdlcEvent; now: number; runs: Run[]; cwd: string; onError: (m: string | null) => void }) {
+  const open = isPlanRunning(e) || isPlanWaiting(e);
+  const [chat, setChat] = useState(open);
+  const status = planStatus(e);
+  const body = (
+    <>
+      {e.stateChanges && (
+        <div className="plan-changes">
+          <b>State changes that Confirm approves</b>
+          <Markdown text={e.stateChanges} />
+        </div>
+      )}
+      <Markdown text={e.testDetails ?? ""} />
+    </>
+  );
+  return (
+    <li id={`sdlc:${e.id}`} className={`plan-row ${open ? "open" : ""}`}>
+      <div className="note-meta">
+        <span title={e.startedAt}>{stamp(e.startedAt)}</span>
+        <span>· {age(e.startedAt, now)} ago</span>
+        <span className="tag">plan</span>
+        {e.environments.map((x) => (
+          <span key={x} className="tag tone-working">
+            {ENV_LABEL[x]}
+          </span>
+        ))}
+        <span className={`tag ${status.tone}`}>{status.text}</span>
+        {e.plannedAt && <span title={e.plannedAt}>· version of {stamp(e.plannedAt)}</span>}
+        <button
+          className="btn ghost small note-delete"
+          onClick={async () => {
+            if (confirm("Delete this plan? Its smoketests stay.")) onError(await post(`/api/sdlc-events?id=${e.id}`, undefined, "DELETE"));
+          }}
+        >
+          Delete
+        </button>
+      </div>
+      {e.plannedAt &&
+        (open ? (
+          body
+        ) : (
+          <details className="smoke-results">
+            <summary>The plan</summary>
+            {body}
+          </details>
+        ))}
+      {isPlanWaiting(e) && (
+        <div className="smoke-row plan-confirm">
+          <span className="meta">Confirm counts as your approval for the state changes above. To change the plan, write to the agent below.</span>
+          <span className="grow" />
+          <RunPlan plan={e} cwd={cwd} onError={onError} />
+        </div>
+      )}
+      {e.sessionId &&
+        (chat ? (
+          <PlanConversation sessionId={e.sessionId} runs={runs} now={now} onError={onError} />
+        ) : (
+          <button className="btn ghost small chat-toggle" onClick={() => setChat(true)}>
+            Show the planning conversation
+          </button>
+        ))}
+    </li>
+  );
+}
+
 export function Smoketests({ ticket, events, runs, now, cwd, onError }: { ticket: string; events: SdlcEvent[]; runs: Run[]; now: number; cwd: string; onError: (m: string | null) => void }) {
-  const smoketests = events.filter((e) => e.eventType === "smoketest");
+  const smoketests = events.filter((e) => e.eventType === "smoketest_plan" || e.eventType === "smoketest_execution");
   const [recording, setRecording] = useState(false);
   const [env, setEnv] = useState<SdlcEnvironment>("localhost");
   return (
@@ -418,7 +574,7 @@ export function Smoketests({ ticket, events, runs, now, cwd, onError }: { ticket
             </option>
           ))}
         </select>
-        <SmoketestVerb key={env} ticket={ticket} env={env} cwd={cwd} onError={onError} />
+        <PlanVerb key={env} ticket={ticket} env={env} cwd={cwd} onError={onError} />
         <SkipSmoketest ticket={ticket} env={env} onError={onError} />
         {!recording && (
           <button className="btn ghost small" onClick={() => setRecording(true)} title="Record a smoketest you ran yourself">
@@ -429,12 +585,10 @@ export function Smoketests({ ticket, events, runs, now, cwd, onError }: { ticket
       {recording && <RecordForm ticket={ticket} onError={onError} onDone={() => setRecording(false)} />}
       {smoketests.length ? (
         <ol className="note-list">
-          {smoketests.map((e) => (
-            <SmoketestRow key={e.id} e={e} now={now} runs={runs} onError={onError} />
-          ))}
+          {smoketests.map((e) => (e.eventType === "smoketest_plan" ? <PlanRow key={e.id} e={e} now={now} runs={runs} cwd={cwd} onError={onError} /> : <SmoketestRow key={e.id} e={e} now={now} runs={runs} onError={onError} />))}
         </ol>
       ) : (
-        <p className="meta">No smoketest yet. An agent records one with scripts/sdlc-event.ts.</p>
+        <p className="meta">No smoketest yet. Plan one: an agent writes the plan, and runs it at once when it changes no Beta or Prod state.</p>
       )}
     </section>
   );

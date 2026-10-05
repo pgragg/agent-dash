@@ -66,12 +66,12 @@ CREATE TABLE IF NOT EXISTS actions (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS actions_open_by_key ON actions (key) WHERE cleared_at IS NULL;
 
--- One row per thing that happened to a change on its way to prod: a smoketest, a deploy that
--- Argo or Piper confirmed, or a Slack message that asked for a PR review. The other SDLC stages
--- read GitHub and Jira, so they have no rows.
+-- One row per thing that happened to a change on its way to prod: a smoketest plan, a smoketest
+-- execution, a deploy that Argo or Piper confirmed, or a Slack message that asked for a PR review.
+-- The other SDLC stages read GitHub and Jira, so they have no rows.
 CREATE TABLE IF NOT EXISTS SDLC_Event (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  event_type   TEXT NOT NULL CHECK (event_type IN ('smoketest', 'deploy', 'review_request')),
+  event_type   TEXT NOT NULL CHECK (event_type IN ('smoketest_plan', 'smoketest_execution', 'deploy', 'review_request')),
   started_at   TEXT NOT NULL,
   finished_at  TEXT,
   outcome      TEXT CHECK (outcome IN ('passed', 'failed', 'blocked')),
@@ -88,7 +88,15 @@ CREATE TABLE IF NOT EXISTS SDLC_Event (
   pr_url       TEXT,
   channel      TEXT,
   message      TEXT,
-  message_url  TEXT
+  message_url  TEXT,
+  -- A plan: when the agent last recorded it (test_details holds the plan), and the Beta or Prod
+  -- writes it needs (NULL: none). A confirmed plan is Piper's approval for those writes.
+  planned_at    TEXT,
+  state_changes TEXT,
+  confirmed_at  TEXT,
+  confirmed_by  TEXT CHECK (confirmed_by IN ('piper', 'auto')),
+  -- An execution: the plan that it runs.
+  plan_id       INTEGER REFERENCES SDLC_Event (id)
 );
 
 -- The environments under test, usually one.
@@ -184,20 +192,24 @@ function toRecord(r: Row): SummaryRecord {
 
 let db: DatabaseSync | null = null;
 
-const SDLC_EVENT_COLUMNS = ["session_id", "skipped_at", "pr_url", "channel", "message", "message_url", "summary"];
+const SDLC_EVENT_COLUMNS = ["session_id", "skipped_at", "pr_url", "channel", "message", "message_url", "summary", "planned_at", "state_changes", "confirmed_at", "confirmed_by", "plan_id"];
 
-/** SQLite cannot change a CHECK, so an older SDLC_Event table is copied into a new one with the same ids. */
+/**
+ * SQLite cannot change a CHECK, so an older SDLC_Event table is copied into a new one with the same ids.
+ * A smoketest from before plans existed becomes a smoketest_execution in the copy.
+ */
 function upgradeSdlcEventChecks(d: DatabaseSync): void {
   const row = d.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'SDLC_Event'").get() as { sql: string } | undefined;
-  if (!row || (row.sql.includes("'blocked'") && row.sql.includes("'review_request'"))) return;
+  if (!row || (row.sql.includes("'blocked'") && row.sql.includes("'smoketest_plan'") && row.sql.includes("'piper'"))) return;
   const create = SCHEMA.slice(SCHEMA.indexOf("CREATE TABLE IF NOT EXISTS SDLC_Event ("), SCHEMA.indexOf("-- The environments under test"));
   const cols = ["id, event_type, started_at, finished_at, outcome, test_details, test_results, created_at", ...SDLC_EVENT_COLUMNS].join(", ");
+  const select = cols.replace("event_type", "CASE event_type WHEN 'smoketest' THEN 'smoketest_execution' ELSE event_type END");
   // The other SDLC tables refer to SDLC_Event by name, so the checks must be off while it is gone.
   d.exec("PRAGMA foreign_keys = OFF");
   try {
     d.exec(`BEGIN;
 ${create.replace("SDLC_Event (", "SDLC_Event_new (")}
-INSERT INTO SDLC_Event_new (${cols}) SELECT ${cols} FROM SDLC_Event;
+INSERT INTO SDLC_Event_new (${cols}) SELECT ${select} FROM SDLC_Event;
 DROP TABLE SDLC_Event;
 ALTER TABLE SDLC_Event_new RENAME TO SDLC_Event;
 COMMIT;`);
@@ -220,7 +232,8 @@ export function open(path = DB_PATH): DatabaseSync {
   const diagramColumns = new Set((db.prepare("PRAGMA table_info(diagrams)").all() as { name: string }[]).map((c) => c.name));
   for (const c of ["edited_at", "deleted_at"]) if (!diagramColumns.has(c)) db.exec(`ALTER TABLE diagrams ADD COLUMN ${c} TEXT`);
   // CREATE TABLE IF NOT EXISTS does not add a column to a table that is already there.
-  for (const c of SDLC_EVENT_COLUMNS) if (!db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = ?").get(c)) db.exec(`ALTER TABLE SDLC_Event ADD COLUMN ${c} TEXT`);
+  // The copy below adds the CHECK on confirmed_by and the reference of plan_id.
+  for (const c of SDLC_EVENT_COLUMNS) if (!db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = ?").get(c)) db.exec(`ALTER TABLE SDLC_Event ADD COLUMN ${c} ${c === "plan_id" ? "INTEGER" : "TEXT"}`);
   if (!db.prepare("SELECT 1 FROM pragma_table_info('tickets') WHERE name = 'starred_at'").get()) db.exec("ALTER TABLE tickets ADD COLUMN starred_at TEXT");
   // Before the trigger below: copying the table drops the triggers on it.
   upgradeSdlcEventChecks(db);
@@ -241,7 +254,8 @@ export function open(path = DB_PATH): DatabaseSync {
   }
   if (!(db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event_Ticket') WHERE name = 'changed_at'").get())) db.exec("ALTER TABLE SDLC_Event_Ticket ADD COLUMN changed_at TEXT");
   // A changed event needs a new draft too. A trigger catches every writer, also the script's own process.
-  db.exec(`CREATE TRIGGER IF NOT EXISTS sdlc_event_changed AFTER UPDATE ON SDLC_Event BEGIN
+  // A plan is not: it changes several times in minutes, and its execution's result gets a draft.
+  db.exec(`CREATE TRIGGER IF NOT EXISTS sdlc_event_changed AFTER UPDATE ON SDLC_Event WHEN NEW.event_type != 'smoketest_plan' BEGIN
     UPDATE SDLC_Event_Ticket SET summary_requested_at = NULL, changed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE sdlc_event_id = NEW.id;
   END`);
   // Summaries saved before steps were stored get their rows once.
@@ -532,6 +546,7 @@ export interface NewSdlcEvent {
   testResults?: string | null;
   sessionId?: string | null;
   skippedAt?: string | null;
+  planId?: number | null;
   summary?: string | null;
   prUrl?: string | null;
   channel?: string | null;
@@ -547,12 +562,12 @@ export function addSdlcEvent(e: NewSdlcEvent, now = new Date()): SdlcEvent {
   d.exec("BEGIN IMMEDIATE");
   try {
     const { id } = d
-      .prepare("INSERT INTO SDLC_Event (event_type, started_at, finished_at, outcome, test_details, test_results, session_id, skipped_at, created_at, pr_url, channel, message, message_url, summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
-      .get(e.eventType, e.startedAt, e.finishedAt ?? null, e.outcome ?? null, e.testDetails ?? null, e.testResults ?? null, e.sessionId ?? null, e.skippedAt ?? null, created, e.prUrl ?? null, e.channel ?? null, e.message ?? null, e.messageUrl ?? null, e.summary ?? null) as { id: number };
+      .prepare("INSERT INTO SDLC_Event (event_type, started_at, finished_at, outcome, test_details, test_results, session_id, skipped_at, plan_id, created_at, pr_url, channel, message, message_url, summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
+      .get(e.eventType, e.startedAt, e.finishedAt ?? null, e.outcome ?? null, e.testDetails ?? null, e.testResults ?? null, e.sessionId ?? null, e.skippedAt ?? null, e.planId ?? null, created, e.prUrl ?? null, e.channel ?? null, e.message ?? null, e.messageUrl ?? null, e.summary ?? null) as { id: number };
     const env = d.prepare("INSERT OR IGNORE INTO SDLC_Event_Environment (sdlc_event_id, environment) VALUES (?, ?)");
     for (const x of e.environments) env.run(id, x);
-    // A smoketest that only started moves no stage yet, so it gets its draft when it finishes.
-    const drafted = e.sessionId && !e.finishedAt && !e.outcome && !e.skippedAt ? created : null;
+    // A smoketest that only started moves no stage yet, so it gets its draft when it finishes. A plan never gets one.
+    const drafted = e.eventType === "smoketest_plan" || (e.sessionId && !e.finishedAt && !e.outcome && !e.skippedAt) ? created : null;
     const link = d.prepare("INSERT OR IGNORE INTO SDLC_Event_Ticket (sdlc_event_id, ticket, created_at, summary_requested_at) VALUES (?, ?, ?, ?)");
     for (const t of e.tickets) link.run(id, t, created, drafted);
     d.exec("COMMIT");
@@ -574,9 +589,47 @@ export interface SdlcFinish {
 /** Ends a running smoketest. Null when there is no such smoketest, or it already ended. */
 export function finishSdlcEvent(id: number, f: SdlcFinish): SdlcEvent | null {
   const changed = open()
-    .prepare("UPDATE SDLC_Event SET finished_at = ?, outcome = ?, test_details = coalesce(?, test_details), test_results = coalesce(?, test_results), summary = coalesce(?, summary) WHERE id = ? AND event_type = 'smoketest' AND finished_at IS NULL AND outcome IS NULL AND skipped_at IS NULL")
+    .prepare("UPDATE SDLC_Event SET finished_at = ?, outcome = ?, test_details = coalesce(?, test_details), test_results = coalesce(?, test_results), summary = coalesce(?, summary) WHERE id = ? AND event_type = 'smoketest_execution' AND finished_at IS NULL AND outcome IS NULL AND skipped_at IS NULL")
     .run(f.finishedAt, f.outcome, f.testDetails, f.testResults, f.summary ?? null, id).changes;
   return changed ? getSdlcEvent(id) : null;
+}
+
+export interface SdlcPlan {
+  plan: string;
+  /** The Beta or Prod writes that the test needs. Null: none, so the plan is accepted at once. */
+  stateChanges: string | null;
+  plannedAt: string;
+}
+
+/**
+ * Records a new version of a plan that is not confirmed yet. A plan with no state changes is
+ * confirmed in the same step. Null when there is no such plan, or it is confirmed or skipped.
+ */
+export function recordPlan(id: number, p: SdlcPlan): SdlcEvent | null {
+  const changed = open()
+    .prepare(
+      `UPDATE SDLC_Event SET test_details = ?, state_changes = ?, planned_at = ?,
+        confirmed_at = CASE WHEN ? IS NULL THEN ? END, confirmed_by = CASE WHEN ? IS NULL THEN 'auto' END
+       WHERE id = ? AND event_type = 'smoketest_plan' AND confirmed_at IS NULL AND skipped_at IS NULL`,
+    )
+    .run(p.plan, p.stateChanges, p.plannedAt, p.stateChanges, p.plannedAt, p.stateChanges, id).changes;
+  return changed ? getSdlcEvent(id) : null;
+}
+
+/**
+ * Piper's confirmation of the plan version that the page showed. Null when the plan changed since
+ * `plannedAt`, or is already confirmed: a confirmation is an approval of one exact text.
+ */
+export function confirmPlan(id: number, plannedAt: string, now = new Date()): SdlcEvent | null {
+  const changed = open()
+    .prepare("UPDATE SDLC_Event SET confirmed_at = ?, confirmed_by = 'piper' WHERE id = ? AND event_type = 'smoketest_plan' AND planned_at = ? AND confirmed_at IS NULL AND skipped_at IS NULL")
+    .run(now.toISOString(), id, plannedAt).changes;
+  return changed ? getSdlcEvent(id) : null;
+}
+
+/** Takes back a confirmation whose execution could not start, so the page offers Confirm again. */
+export function unconfirmPlan(id: number): void {
+  open().prepare("UPDATE SDLC_Event SET confirmed_at = NULL, confirmed_by = NULL WHERE id = ? AND event_type = 'smoketest_plan'").run(id);
 }
 
 export function getSdlcEvent(id: number): SdlcEvent | null {
@@ -589,6 +642,8 @@ export function deleteSdlcEvent(id: number): boolean {
   try {
     d.prepare("DELETE FROM SDLC_Event_Environment WHERE sdlc_event_id = ?").run(id);
     d.prepare("DELETE FROM SDLC_Event_Ticket WHERE sdlc_event_id = ?").run(id);
+    // An execution keeps its result when its plan goes.
+    d.prepare("UPDATE SDLC_Event SET plan_id = NULL WHERE plan_id = ?").run(id);
     const gone = d.prepare("DELETE FROM SDLC_Event WHERE id = ?").run(id).changes > 0;
     d.exec("COMMIT");
     return gone;
@@ -603,6 +658,7 @@ function sdlcEvents(where = "", ...params: number[]): SdlcEvent[] {
   const rows = open()
     .prepare(
       `SELECT e.id, e.event_type AS eventType, e.started_at AS startedAt, e.finished_at AS finishedAt, e.outcome, e.test_details AS testDetails, e.test_results AS testResults, e.session_id AS sessionId, e.skipped_at AS skippedAt, e.created_at AS createdAt,
+        e.planned_at AS plannedAt, e.state_changes AS stateChanges, e.confirmed_at AS confirmedAt, e.confirmed_by AS confirmedBy, e.plan_id AS planId,
         e.pr_url AS prUrl, e.channel, e.message, e.message_url AS messageUrl, e.summary,
         (SELECT group_concat(environment) FROM SDLC_Event_Environment WHERE sdlc_event_id = e.id) AS envs,
         (SELECT group_concat(ticket) FROM SDLC_Event_Ticket WHERE sdlc_event_id = e.id) AS keys

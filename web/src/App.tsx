@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { splitSummary } from "../../shared/nextSteps.ts";
 import { prRef } from "../../shared/refs.ts";
-import type { Action, ActionKind, AttentionItem, AttentionKind, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState, Turn } from "../../shared/types.ts";
+import type { Action, ActionKind, AttentionItem, AttentionKind, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState } from "../../shared/types.ts";
 import { conversationHash, launchAgent, ResumeHere, resuming } from "./agents.tsx";
 import { filterHistory, groupByDay } from "./history.ts";
 import { PrPanel, PrVerbButton } from "./prPanel.tsx";
@@ -15,6 +15,7 @@ import { FixLogin } from "./fixLogin.tsx";
 import { rowKey } from "./rowNav.ts";
 import { ReviewRequest, useReviewDrafts } from "./reviewRequest.tsx";
 import { SdlcBar, Smoketests } from "./sdlc.tsx";
+import { Chat, useLoad } from "./chat.tsx";
 import { SlackQuotes } from "./slackQuotes.tsx";
 import { DueDateVerb, TicketPanel } from "./ticketPanel.tsx";
 import { DiagramCards, DiagramsView, DiagramView } from "./diagrams.tsx";
@@ -1254,59 +1255,6 @@ function NeedsView({ queue, hidden, data, now }: { queue: Subject[]; hidden: num
 
 /** Rows rendered at first. A year of chats is about a thousand rows, which is slow to render at once. */
 const HISTORY_PAGE = 150;
-/** Turns shown when a chat opens. The newest are kept, because that is where the chat stopped. */
-const TURNS_SHOWN = 40;
-
-/** Loads again whenever the key changes, which the page passes as the dashboard's last update. */
-function useLoad<T>(load: () => Promise<T>, key: unknown): { value: T | null; error: string | null } {
-  const [value, setValue] = useState<T | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let current = true;
-    load()
-      .then((v) => {
-        if (!current) return;
-        setValue(v);
-        setError(null);
-      })
-      .catch((err: Error) => current && setError(err.message));
-    return () => {
-      current = false;
-    };
-  }, [key]);
-  return { value, error };
-}
-
-function Chat({ sessionId, refreshKey }: { sessionId: string; refreshKey: unknown }) {
-  const { value, error } = useLoad(() => api.transcript(sessionId), `${sessionId} ${refreshKey}`);
-  const [all, setAll] = useState(false);
-  if (error && !value) return <p className="meta chat-note">{error}</p>;
-  if (!value) return <p className="meta chat-note">Loading the chat…</p>;
-  const turns: Turn[] = value.turns;
-  const shown = all ? turns : turns.slice(-TURNS_SHOWN);
-  return (
-    <SessionScope sessionId={sessionId}>
-      <div className="chat">
-        {turns.length > shown.length && (
-          <button className="btn ghost small" onClick={() => setAll(true)}>
-            Show {plural(turns.length - shown.length, "earlier message")}
-          </button>
-        )}
-        {shown.length === 0 && <p className="meta">This chat has no text yet.</p>}
-        {shown.map((t, i) => (
-          <div key={turns.length - shown.length + i} className={`turn ${t.role}`}>
-            <div className="turn-head">
-              <b>{t.role === "user" ? "You" : "Agent"}</b>
-              {t.at && <span className="meta">{stamp(t.at)}</span>}
-            </div>
-            <Markdown text={t.text} />
-          </div>
-        ))}
-      </div>
-    </SessionScope>
-  );
-}
-
 function HistoryView({ data, now }: { data: Dashboard; now: number }) {
   const { value: runs, error } = useLoad(api.history, data.generatedAt);
   const [query, setQuery] = useState("");
