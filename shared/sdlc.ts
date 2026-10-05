@@ -25,10 +25,7 @@ export function parseEnvironment(s: string): SdlcEnvironment | null {
 
 export type StageId = "ideation" | "pr" | "local_smoketest" | "in_beta" | "beta_smoketest" | "in_prod" | "prod_smoketest" | "done";
 
-/**
- * "waiting": the deploy PR merged, but no one confirmed the deploy in Argo yet.
- * "running": the newest smoketest has started and has no result yet.
- */
+/** "waiting": a deploy PR merged, unconfirmed in Argo. "running": a smoketest has no result yet. */
 export type StageState = "done" | "failed" | "running" | "waiting" | "skipped" | "todo";
 
 export interface Stage {
@@ -100,16 +97,16 @@ function tagged(events: SdlcEvent[], type: SdlcEvent["eventType"], envs: SdlcEnv
   return newestFirst(events.filter((e) => e.eventType === type && e.environments.some((x) => envs.includes(x))));
 }
 
-/** A smoketest that started and has no result. Its agent finishes it with `sdlc-event.ts finish`. */
-export function isRunning(e: SdlcEvent): boolean {
-  return e.eventType === "smoketest" && !e.finishedAt && !e.outcome;
+/** A smoketest that agent-dash started, with no result yet. A hand record with no outcome still counts as passed. */
+export function isSmoketestRunning(e: SdlcEvent): boolean {
+  return e.eventType === "smoketest" && !!e.sessionId && !e.finishedAt && !e.outcome;
 }
 
 function smoketestStage(id: StageId, events: SdlcEvent[], envs: SdlcEnvironment[]): Omit<Stage, "label"> {
   const found = tagged(events, "smoketest", envs);
   const last = found[0];
   if (!last) return { id, state: "todo", detail: `No smoketest tagged ${envs.map((e) => ENV_LABEL[e]).join(" or ")} yet`, events: [] };
-  if (isRunning(last)) return { id, state: "running", detail: `Smoketest running since ${last.startedAt.slice(0, 16).replace("T", " ")} UTC`, events: found };
+  if (isSmoketestRunning(last)) return { id, state: "running", detail: `Smoketest running since ${last.startedAt.slice(0, 16).replace("T", " ")} UTC`, events: found };
   const when = (last.finishedAt ?? last.startedAt).slice(0, 10);
   // The newest run decides: a fix after a failed run shows as done again.
   if (last.outcome === "failed") return { id, state: "failed", detail: `The newest smoketest failed (${when})`, events: found };
@@ -192,7 +189,6 @@ function recordCommand(script: string, key: string, type: "smoketest" | "deploy"
 /**
  * The first message of an agent that runs one smoketest and records it. `script` is the
  * absolute path of scripts/sdlc-event.ts, so the agent writes into this dash's database.
- * `eventId` is the running event that the agent finishes.
  */
 export function smoketestMessage(key: string, env: SdlcEnvironment, script: string, eventId: number): string {
   const label = ENV_LABEL[env];

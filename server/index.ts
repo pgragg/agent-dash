@@ -273,8 +273,8 @@ const server = createServer(async (req, res) => {
       if (!dir.startsWith("/") || !existsSync(dir) || !statSync(dir).isDirectory()) return json(400, { error: `not a folder: ${cwd}` });
       // Picked here, so a smoketest's running event can link to its agent before pi starts.
       const sessionId = randomUUID();
-      // The stage shows as running from the click; the agent finishes this event with its result.
-      const running = env ? summaryDb.addSdlcEvent({ eventType: "smoketest", startedAt: new Date().toISOString(), environments: [env], tickets: [key], sessionId }) : null;
+      // Saved before pi starts, so the stage is yellow from the click.
+      const running = env && !step ? summaryDb.addSdlcEvent({ eventType: "smoketest", startedAt: new Date().toISOString(), environments: [env], tickets: [key], sessionId }) : null;
       const message = step
         ? stepMessage(key, step.body)
         : env && running
@@ -282,33 +282,36 @@ const server = createServer(async (req, res) => {
           : stage
             ? confirmDeployMessage(key, stage, group.prs.filter((p) => deployStageOf(p) === stage && p.state === "merged").map((p) => p.url), SDLC_SCRIPT)
             : (body.message ?? "");
-      const failed = (code: number, error: string) => {
-        if (running) summaryDb.deleteSdlcEvent(running.id);
-        json(code, { error });
+      // A smoketest whose agent never started must not stay yellow.
+      const dropRunning = () => {
+        if (running && summaryDb.deleteSdlcEvent(running.id)) broadcast();
       };
-
-      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const base = join(config.handoffDir, `${key}-${stamp}`);
-      mkdirSync(config.handoffDir, { recursive: true });
-      writeFileSync(`${base}.md`, context);
-      const name = agentName(key, step?.body ?? message);
-      // Headless by default, so the page is where you talk to the agent.
-      if (!body.terminal) {
-        try {
-          startConversation({ cwd: dir, message: agentMessage(context, message), name, sessionId });
-        } catch (err) {
-          return failed(500, (err as Error).message);
+      try {
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const base = join(config.handoffDir, `${key}-${stamp}`);
+        mkdirSync(config.handoffDir, { recursive: true });
+        writeFileSync(`${base}.md`, context);
+        const name = agentName(key, step?.body ?? message);
+        // Headless by default, so the page is where you talk to the agent.
+        if (!body.terminal) {
+          startConversation({ cwd: dir, message: agentMessage(context, message), name, sessionId, onSpawnError: dropRunning });
+          if (running) broadcast();
+          return json(201, { ok: true, contextFile: `${base}.md`, sessionId });
+        }
+        // A leading "-" would read as a pi option; the space keeps it a message.
+        writeFileSync(`${base}.txt`, message.trim().startsWith("-") ? ` ${message.trim()}` : message.trim());
+        const command = piCommand(dir, name, `${base}.md`, `${base}.txt`, sessionId);
+        const out = await runInNewItermTab(command);
+        if (out.result !== "ok") {
+          dropRunning();
+          return json(500, { error: out.result === "not_authorized" ? "Allow it in System Settings → Privacy & Security → Automation → iTerm2." : (out.detail ?? "could not open iTerm") });
         }
         if (running) broadcast();
-        return json(201, { ok: true, contextFile: `${base}.md`, sessionId });
+        json(201, { ok: true, contextFile: `${base}.md` });
+      } catch (err) {
+        dropRunning();
+        json(500, { error: (err as Error).message });
       }
-      // A leading "-" would read as a pi option; the space keeps it a message.
-      writeFileSync(`${base}.txt`, message.trim().startsWith("-") ? ` ${message.trim()}` : message.trim());
-      const command = piCommand(dir, name, `${base}.md`, `${base}.txt`, sessionId);
-      const out = await runInNewItermTab(command);
-      if (out.result !== "ok") return failed(500, out.result === "not_authorized" ? "Allow it in System Settings → Privacy & Security → Automation → iTerm2." : (out.detail ?? "could not open iTerm"));
-      if (running) broadcast();
-      json(201, { ok: true, contextFile: `${base}.md` });
     } else if (url.pathname === "/api/conversations" && req.method === "POST") {
       // A plain pi with no ticket and no context file, run headless so the page is its UI.
       if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();

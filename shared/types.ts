@@ -314,7 +314,7 @@ export interface SdlcEvent {
   eventType: SdlcEventType;
   startedAt: string;
   finishedAt: string | null;
-  /** No outcome counts as passed: the event exists. A smoketest with no outcome and no finishedAt is still running. */
+  /** No outcome counts as passed, except on a dash-started smoketest: that one is still running. */
   outcome: "passed" | "failed" | null;
   testDetails: string | null;
   testResults: string | null;

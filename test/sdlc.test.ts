@@ -98,8 +98,9 @@ test("a smoketest with a start and no end is running: the stage is yellow until 
   assert.match(p.hint!, /Smoketest running since 2026-10-02 11:00 UTC/);
   // A running smoketest is not progress yet.
   assert.equal(sdlcProgress({ ticket: ticket(), prs: [], events: [running] }).current, 0);
-  // A hand-recorded result with no end time is not running.
+  // Only a smoketest that agent-dash started can be running; a hand record with no outcome counts as passed.
   assert.equal(states(sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev({ finishedAt: null })] })).local_smoketest, "done");
+  assert.equal(states(sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev({ outcome: null, finishedAt: null })] })).local_smoketest, "done");
 });
 
 test("an environment is an id or a label", () => {
@@ -163,6 +164,9 @@ test("the agent finishes its running event once, with the script", () => {
   const other = db.addSdlcEvent({ eventType: "smoketest", startedAt: "2026-10-02T10:00:00.000Z", environments: ["localhost"], tickets: ["FSDK-31"] });
   assert.throws(() => execFileSync("node", [script, "finish", "--id", String(other.id)], { env, stdio: "pipe" }));
   assert.throws(() => execFileSync("node", [script, "finish", "--id", "999999", "--outcome", "passed"], { env, stdio: "pipe" }));
+  assert.throws(() => execFileSync("node", [script, "finish", "--outcome", "passed"], { env, stdio: "pipe" }));
+  const deploy = db.addSdlcEvent({ eventType: "deploy", startedAt: "2026-10-02T10:00:00.000Z", environments: ["postman_beta"], tickets: ["FSDK-31"] });
+  assert.throws(() => execFileSync("node", [script, "finish", "--id", String(deploy.id), "--outcome", "passed"], { env, stdio: "pipe" }));
 });
 
 test("verb messages name the environment and the record command; the summary prompt carries the order", async () => {

@@ -159,7 +159,7 @@ export function open(path = DB_PATH): DatabaseSync {
   // WAL lets the server read while a summary run writes from its own process.
   db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
   db.exec(SCHEMA);
-  // CREATE TABLE IF NOT EXISTS does not add a column to a table that is already there.
+  // CREATE TABLE IF NOT EXISTS skips a table that exists, so add new columns here.
   if (!db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = 'session_id'").get()) db.exec("ALTER TABLE SDLC_Event ADD COLUMN session_id TEXT");
   // Summaries saved before steps were stored get their rows once.
   for (const r of db.prepare("SELECT id, ticket, summary FROM summaries WHERE status = 'done' AND id NOT IN (SELECT summary_id FROM next_steps)").all() as unknown as Row[]) {
@@ -452,10 +452,10 @@ export interface SdlcFinish {
   testResults: string | null;
 }
 
-/** Ends a running event. Null when there is no such event, or it already ended. */
+/** Ends a running smoketest. Null when there is no such smoketest, or it already ended. */
 export function finishSdlcEvent(id: number, f: SdlcFinish): SdlcEvent | null {
   const changed = open()
-    .prepare("UPDATE SDLC_Event SET finished_at = ?, outcome = ?, test_details = coalesce(?, test_details), test_results = coalesce(?, test_results) WHERE id = ? AND finished_at IS NULL AND outcome IS NULL")
+    .prepare("UPDATE SDLC_Event SET finished_at = ?, outcome = ?, test_details = coalesce(?, test_details), test_results = coalesce(?, test_results) WHERE id = ? AND event_type = 'smoketest' AND finished_at IS NULL AND outcome IS NULL")
     .run(f.finishedAt, f.outcome, f.testDetails, f.testResults, id).changes;
   return changed ? getSdlcEvent(id) : null;
 }

@@ -12,6 +12,8 @@ export interface ConversationOptions {
   name?: string;
   /** The id of a new run, when the caller needs it first. */
   sessionId?: string;
+  /** Called when pi cannot start, for example when it is not on PATH. */
+  onSpawnError?: () => void;
   /** Continue this session file. pi keeps the id that the file holds. */
   resume?: { sessionId: string; sessionFile: string };
 }
@@ -76,7 +78,10 @@ export function startConversation(opts: ConversationOptions): string {
   };
   child.on("exit", cleanup);
   // Without a listener, a failed spawn (no `pi` on PATH) would crash the server.
-  child.on("error", cleanup);
+  child.on("error", () => {
+    cleanup();
+    opts.onSpawnError?.();
+  });
   child.unref();
   return sessionId;
 }

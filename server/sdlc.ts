@@ -55,7 +55,7 @@ export function validateSdlcEvent(input: SdlcEventInput, ticketPattern: RegExp, 
   };
 }
 
-/** Checks the result that a smoketest agent records on the event that agent-dash started for it. */
+/** An agent result must not end a smoketest before it started. */
 export function validateSdlcFinish(input: { finishedAt?: unknown; outcome?: unknown; testDetails?: unknown; testResults?: unknown }, startedAt: string, now = new Date()): SdlcFinish {
   if (input.outcome !== "passed" && input.outcome !== "failed") throw new Error("outcome must be passed or failed");
   const finishedAt = isoOrNull(input.finishedAt, "finishedAt") ?? now.toISOString();

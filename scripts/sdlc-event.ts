@@ -42,8 +42,8 @@ try {
   const read = (f: string | undefined, v: string | undefined) => (f ? readFileSync(f, "utf8") : v);
   if (positionals[0] === "finish") {
     const id = Number(values.id);
-    const running = db.getSdlcEvent(id);
-    if (!running) throw new Error(`no SDLC event ${values.id}`);
+    const running = Number.isInteger(id) ? db.getSdlcEvent(id) : null;
+    if (running?.eventType !== "smoketest") throw new Error(`no smoketest event with --id ${values.id ?? ""}`);
     const done = db.finishSdlcEvent(id, validateSdlcFinish({ finishedAt: values.finished, outcome: values.outcome, testDetails: read(values["details-file"], values.details), testResults: read(values["results-file"], values.results) }, running.startedAt));
     if (!done) throw new Error(`SDLC event ${id} already has a result`);
     console.log(JSON.stringify(done, null, 2));

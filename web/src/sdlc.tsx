@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { prRef } from "../../shared/refs.ts";
-import { ENV_LABEL, ENVIRONMENTS, isRunning, mergePrs, SMOKETEST_ENV, sdlcProgress, type Stage, type StageState } from "../../shared/sdlc.ts";
+import { ENV_LABEL, ENVIRONMENTS, isSmoketestRunning, mergePrs, SMOKETEST_ENV, sdlcProgress, type Stage, type StageState } from "../../shared/sdlc.ts";
 import type { PullRequest, Run, SdlcEnvironment, SdlcEvent, TicketGroup } from "../../shared/types.ts";
 import { conversationHash, launchAgent, type LaunchBody } from "./agents.tsx";
 import { age, Markdown, post, stamp } from "./lib.tsx";
@@ -85,7 +85,7 @@ function SmoketestVerb({ ticket, env, cwd, onError }: { ticket: string; env: Sdl
 
 const STATE_TEXT: Record<StageState, string> = { done: "done", failed: "failed", running: "running", waiting: "waiting", skipped: "skipped", todo: "to do" };
 
-/** The agent of a running smoketest: its card in the ticket view, or its page until pi has written the log. */
+/** Its card in the ticket view; its page until pi writes the log. */
 function agentHref(sessionId: string, runs: Run[]): string {
   return runs.some((r) => r.sessionId === sessionId) ? href(`r:${sessionId}`) : conversationHash(sessionId);
 }
@@ -300,6 +300,7 @@ function RecordForm({ ticket, onError, onDone }: { ticket: string; onError: (m: 
 }
 
 function SmoketestRow({ e, now, runs, onError }: { e: SdlcEvent; now: number; runs: Run[]; onError: (m: string | null) => void }) {
+  const running = isSmoketestRunning(e);
   const ran = e.finishedAt ? Math.round((Date.parse(e.finishedAt) - Date.parse(e.startedAt)) / 60_000) : null;
   return (
     <li id={`sdlc:${e.id}`}>
@@ -312,8 +313,8 @@ function SmoketestRow({ e, now, runs, onError }: { e: SdlcEvent; now: number; ru
             {ENV_LABEL[x]}
           </span>
         ))}
-        {isRunning(e) && <span className="tag tone-running">running</span>}
-        {isRunning(e) && e.sessionId && <a href={agentHref(e.sessionId, runs)}>Open the agent</a>}
+        {running && <span className="tag tone-running">running</span>}
+        {running && e.sessionId && <a href={agentHref(e.sessionId, runs)}>Open the agent</a>}
         {e.outcome && <span className={`tag ${e.outcome === "passed" ? "tone-good" : "tone-bad"}`}>{e.outcome}</span>}
         {e.tickets.length > 1 && <span>· also on {e.tickets.slice(1).join(", ")}</span>}
         <button
