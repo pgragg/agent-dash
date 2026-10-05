@@ -3,7 +3,10 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Note, PullRequest, Run, ThreadStatusChange, Ticket } from "../../shared/types.ts";
+import { mergePrs, progressLines, sdlcProgress } from "../../shared/sdlc.ts";
+import type { Note, PullRequest, Run, SdlcEvent, ThreadStatusChange, Ticket } from "../../shared/types.ts";
+import { config } from "../config.ts";
+import { fetchTicketPrs } from "../sources/github.ts";
 import { digestSession } from "../sources/sessions.ts";
 import { isAlive } from "../sources/status.ts";
 import * as db from "./db.ts";
@@ -31,6 +34,10 @@ export interface SummaryInput {
   notes?: Note[];
   /** Newest status change per session; a "resolved" thread is listed but not digested. */
   threads?: Record<string, ThreadStatusChange>;
+  /** Smoketests and confirmed deploys, newest first. */
+  events?: SdlcEvent[];
+  /** PRs with the key in the title, from any author and any time. Only for the SDLC progress. */
+  ticketPrs?: PullRequest[];
 }
 
 function prLine(p: PullRequest): string {
@@ -39,7 +46,7 @@ function prLine(p: PullRequest): string {
 }
 
 /** What agent-dash already knows, so the agent spends its time on Jira, PR comments and Slack. */
-export async function buildContext({ ticket, runs: allRuns, prs, notes = [], threads = {} }: SummaryInput): Promise<string> {
+export async function buildContext({ ticket, runs: allRuns, prs, notes = [], threads = {}, events = [], ticketPrs = [] }: SummaryInput): Promise<string> {
   // Piper marked these threads as no longer relevant to the ticket; their history would mislead.
   const resolved = allRuns.filter((r) => threads[r.sessionId]?.status === "resolved");
   const runs = allRuns.filter((r) => threads[r.sessionId]?.status !== "resolved");
@@ -57,6 +64,13 @@ export async function buildContext({ ticket, runs: allRuns, prs, notes = [], thr
     `## PRs linked to ${ticket.key} (GitHub, updated in the last 14 days)`,
     ...(prs.length ? prs.map(prLine) : ["- none found"]),
   ];
+
+  out.push("", `## SDLC progress of ${ticket.key} (stages can be skipped)`, ...progressLines(sdlcProgress({ ticket, prs: mergePrs(prs, ticketPrs), events })));
+  const smoketests = events.filter((e) => e.eventType === "smoketest");
+  if (smoketests.length) {
+    out.push("", "## Smoketests (newest first)");
+    for (const e of smoketests) out.push(`- ${e.startedAt} · ${e.environments.join(", ")} · ${e.outcome ?? "no outcome"}${e.testDetails ? ` · ${e.testDetails.split("\n")[0].slice(0, 160)}` : ""}`);
+  }
 
   const known = new Set(prs.map((p) => p.url));
   const older = [...new Set(runs.flatMap((r) => r.createdPrs))].filter((u) => !known.has(u));
@@ -104,6 +118,7 @@ RULES
 - Read-only. Do not write to Jira, GitHub, Slack, or any repo: no comments, transitions, reviews, messages, reactions, commits, or pushes.
 - Spend at most 10 minutes. If a source fails, skip it and note it under "Gaps".
 - Piper's private notes (in the context file) are the most trusted source: when a newer note disagrees with an older source, follow the note. They are private, so never copy them anywhere outside the summary.
+- Follow the SDLC order in the context file's "SDLC progress": PR, local smoketest, in Beta, Beta smoketest, in Prod, Prod smoketest, Done. A local smoketest comes before a PR review request, and a Beta smoketest comes before the prod chart version update deploy PR. When the next stage is a smoketest, one step must say to run a smoketest and name the environment (localhost, Postman Beta, or Postman Prod). Piper can skip a stage: never plan a step for a stage that shows as skipped.
 
 STEPS
 1. Read ${contextFile}. agent-dash already put Piper's private notes, the ticket fields, linked PRs, and digests of the pi sessions about ${key} in it.
@@ -187,7 +202,9 @@ export async function requestSummary(input: SummaryInput, opts: { force?: boolea
   const workDir = join(WORK_ROOT, String(rec.id));
   mkdirSync(workDir, { recursive: true });
   mkdirSync(SESSION_DIR, { recursive: true });
-  writeFileSync(join(workDir, "context.md"), await buildContext({ ...input, notes: input.notes ?? db.notesForTicket(key) }));
+  // A failed search only makes the progress less complete; the run still reads gh itself.
+  const ticketPrs = input.ticketPrs ?? (await fetchTicketPrs(key, config.ticketPattern).catch(() => []));
+  writeFileSync(join(workDir, "context.md"), await buildContext({ ...input, notes: input.notes ?? db.notesForTicket(key), events: input.events ?? db.sdlcEventsByTicket()[key] ?? [], ticketPrs }));
   const prompt = buildPrompt(key, rec.id, workDir);
   writeFileSync(join(workDir, "prompt.md"), prompt);
 

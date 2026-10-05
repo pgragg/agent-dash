@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { splitSummary } from "../../shared/nextSteps.ts";
-import type { Diagram, DiagramKind, NextStep, Note, ThreadStatus, ThreadStatusChange, TicketSummary } from "../../shared/types.ts";
+import type { Diagram, DiagramKind, NextStep, Note, SdlcEnvironment, SdlcEvent, SdlcEventType, ThreadStatus, ThreadStatusChange, TicketSummary } from "../../shared/types.ts";
 
 export const DB_PATH = process.env.AGENT_DASH_DB ?? join(homedir(), ".agent-dash/agent-dash.db");
 
@@ -62,6 +62,37 @@ CREATE TABLE IF NOT EXISTS actions (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS actions_open_by_key ON actions (key) WHERE cleared_at IS NULL;
 
+-- One row per thing that happened to a change on its way to prod: a smoketest, or a deploy that
+-- Argo or Piper confirmed. The other SDLC stages read GitHub and Jira, so they have no rows.
+CREATE TABLE IF NOT EXISTS SDLC_Event (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_type   TEXT NOT NULL CHECK (event_type IN ('smoketest', 'deploy')),
+  started_at   TEXT NOT NULL,
+  finished_at  TEXT,
+  outcome      TEXT CHECK (outcome IN ('passed', 'failed')),
+  test_details TEXT,
+  test_results TEXT,
+  -- Set when Piper chose not to run the smoketest: the stage then counts as passed by on purpose.
+  skipped_at   TEXT,
+  created_at   TEXT NOT NULL
+);
+
+-- The environments under test, usually one.
+CREATE TABLE IF NOT EXISTS SDLC_Event_Environment (
+  sdlc_event_id INTEGER NOT NULL REFERENCES SDLC_Event (id),
+  environment   TEXT NOT NULL CHECK (environment IN ('localhost', 'fern_dev', 'fern_prod', 'postman_beta', 'postman_prod')),
+  PRIMARY KEY (sdlc_event_id, environment)
+);
+
+CREATE TABLE IF NOT EXISTS SDLC_Event_Ticket (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  sdlc_event_id INTEGER NOT NULL REFERENCES SDLC_Event (id),
+  ticket        TEXT NOT NULL,
+  created_at    TEXT NOT NULL,
+  UNIQUE (sdlc_event_id, ticket)
+);
+CREATE INDEX IF NOT EXISTS sdlc_event_ticket_by_ticket ON SDLC_Event_Ticket (ticket);
+
 -- One row per diagram an agent made. It keeps the source, so the diagram outlives its log and its file.
 -- key is "<session_id> <hash>": the same diagram twice in one conversation is one row.
 -- hash stays the agent's own, so its fence in a message still finds an edited row.
@@ -82,6 +113,13 @@ CREATE TABLE IF NOT EXISTS diagrams (
 );
 CREATE INDEX IF NOT EXISTS diagrams_by_ticket ON diagrams (ticket, id);
 CREATE INDEX IF NOT EXISTS diagrams_by_session ON diagrams (session_id, id);
+
+-- Local state per ticket. Jira stays the source of truth for everything else about it.
+-- snoozed_until hides the ticket from the board until that time.
+CREATE TABLE IF NOT EXISTS tickets (
+  key           TEXT PRIMARY KEY,
+  snoozed_until TEXT
+);
 `;
 
 interface Row {
@@ -127,6 +165,8 @@ export function open(path = DB_PATH): DatabaseSync {
   db.exec(SCHEMA);
   const diagramColumns = new Set((db.prepare("PRAGMA table_info(diagrams)").all() as { name: string }[]).map((c) => c.name));
   for (const c of ["edited_at", "deleted_at"]) if (!diagramColumns.has(c)) db.exec(`ALTER TABLE diagrams ADD COLUMN ${c} TEXT`);
+  // CREATE TABLE IF NOT EXISTS does not add a column to a table that is already there.
+  if (!(db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = 'skipped_at'").get())) db.exec("ALTER TABLE SDLC_Event ADD COLUMN skipped_at TEXT");
   // Summaries saved before steps were stored get their rows once.
   for (const r of db.prepare("SELECT id, ticket, summary FROM summaries WHERE status = 'done' AND id NOT IN (SELECT summary_id FROM next_steps)").all() as unknown as Row[]) {
     insertSteps(r.id, r.ticket, r.summary ?? "");
@@ -223,6 +263,22 @@ export function notesByTicket(): Record<string, Note[]> {
   for (const n of open().prepare("SELECT id, ticket, created_at AS createdAt, body FROM notes ORDER BY id").all() as unknown as Note[]) {
     (out[n.ticket] ??= []).push({ ...n });
   }
+  return out;
+}
+
+// ---- snooze: hide a ticket from the board until a time ---------------------------------
+
+/** `until` null wakes the ticket. */
+export function setSnoozedUntil(ticket: string, until: Date | null): void {
+  open()
+    .prepare("INSERT INTO tickets (key, snoozed_until) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET snoozed_until = excluded.snoozed_until")
+    .run(ticket, until?.toISOString() ?? null);
+}
+
+/** Every ticket's snooze, past ones too: the page compares them with its own clock. */
+export function snoozedUntilByTicket(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const r of open().prepare("SELECT key, snoozed_until AS until FROM tickets WHERE snoozed_until IS NOT NULL").all() as { key: string; until: string }[]) out[r.key] = r.until;
   return out;
 }
 
@@ -357,6 +413,15 @@ export function updateDiagram(id: number, change: { title?: string; source?: str
   return Number(open().prepare(`UPDATE diagrams SET ${sets.map(([c]) => `${c} = ?`).join(", ")} WHERE id = ?`).run(...sets.map(([, v]) => v), id).changes) > 0;
 }
 
+/** Drops a conversation's diagrams from file writes that a newer write of the same file replaced. */
+export function dropReplacedDiagrams(sessionId: string, keep: Set<string>): number {
+  const rows = open().prepare("SELECT key FROM diagrams WHERE session_id = ? AND origin != 'reply' AND kind IN ('mermaid', 'svg')").all(sessionId) as { key: string }[];
+  const del = open().prepare("DELETE FROM diagrams WHERE key = ?");
+  let n = 0;
+  for (const r of rows) if (!keep.has(r.key)) n += Number(del.run(r.key).changes);
+  return n;
+}
+
 /** A conversation can get its ticket later, from a PR that names one. */
 export function setDiagramTicket(sessionId: string, ticket: string): number {
   return Number(open().prepare("UPDATE diagrams SET ticket = ? WHERE session_id = ? AND ticket IS NOT ?").run(ticket, sessionId, ticket).changes);
@@ -364,4 +429,73 @@ export function setDiagramTicket(sessionId: string, ticket: string): number {
 
 export function inProgress(): SummaryRecord[] {
   return (open().prepare("SELECT * FROM summaries WHERE status = 'in_progress'").all() as unknown as Row[]).map(toRecord);
+}
+
+// ---- SDLC events: smoketests and confirmed deploys, linked to tickets ------------------
+
+export interface NewSdlcEvent {
+  eventType: SdlcEventType;
+  startedAt: string;
+  finishedAt?: string | null;
+  outcome?: SdlcEvent["outcome"];
+  testDetails?: string | null;
+  testResults?: string | null;
+  skippedAt?: string | null;
+  environments: SdlcEnvironment[];
+  tickets: string[];
+}
+
+export function addSdlcEvent(e: NewSdlcEvent, now = new Date()): SdlcEvent {
+  const d = open();
+  const created = now.toISOString();
+  d.exec("BEGIN IMMEDIATE");
+  try {
+    const { id } = d
+      .prepare("INSERT INTO SDLC_Event (event_type, started_at, finished_at, outcome, test_details, test_results, skipped_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
+      .get(e.eventType, e.startedAt, e.finishedAt ?? null, e.outcome ?? null, e.testDetails ?? null, e.testResults ?? null, e.skippedAt ?? null, created) as { id: number };
+    const env = d.prepare("INSERT OR IGNORE INTO SDLC_Event_Environment (sdlc_event_id, environment) VALUES (?, ?)");
+    for (const x of e.environments) env.run(id, x);
+    const link = d.prepare("INSERT OR IGNORE INTO SDLC_Event_Ticket (sdlc_event_id, ticket, created_at) VALUES (?, ?, ?)");
+    for (const t of e.tickets) link.run(id, t, created);
+    d.exec("COMMIT");
+    return sdlcEvents("WHERE e.id = ?", id)[0];
+  } catch (err) {
+    d.exec("ROLLBACK");
+    throw err;
+  }
+}
+
+export function deleteSdlcEvent(id: number): boolean {
+  const d = open();
+  d.exec("BEGIN IMMEDIATE");
+  try {
+    d.prepare("DELETE FROM SDLC_Event_Environment WHERE sdlc_event_id = ?").run(id);
+    d.prepare("DELETE FROM SDLC_Event_Ticket WHERE sdlc_event_id = ?").run(id);
+    const gone = d.prepare("DELETE FROM SDLC_Event WHERE id = ?").run(id).changes > 0;
+    d.exec("COMMIT");
+    return gone;
+  } catch (err) {
+    d.exec("ROLLBACK");
+    throw err;
+  }
+}
+
+/** Newest first. `where` is a fixed clause from this file, never from a request. */
+function sdlcEvents(where = "", ...params: number[]): SdlcEvent[] {
+  const rows = open()
+    .prepare(
+      `SELECT e.id, e.event_type AS eventType, e.started_at AS startedAt, e.finished_at AS finishedAt, e.outcome, e.test_details AS testDetails, e.test_results AS testResults, e.skipped_at AS skippedAt, e.created_at AS createdAt,
+        (SELECT group_concat(environment) FROM SDLC_Event_Environment WHERE sdlc_event_id = e.id) AS envs,
+        (SELECT group_concat(ticket) FROM SDLC_Event_Ticket WHERE sdlc_event_id = e.id) AS keys
+       FROM SDLC_Event e ${where} ORDER BY e.started_at DESC, e.id DESC`,
+    )
+    .all(...params) as unknown as (Omit<SdlcEvent, "environments" | "tickets"> & { envs: string | null; keys: string | null })[];
+  return rows.map(({ envs, keys, ...r }) => ({ ...r, environments: (envs?.split(",") ?? []) as SdlcEnvironment[], tickets: keys?.split(",") ?? [] }));
+}
+
+/** Every ticket's events, newest first. An event on two tickets shows under both. */
+export function sdlcEventsByTicket(): Record<string, SdlcEvent[]> {
+  const out: Record<string, SdlcEvent[]> = {};
+  for (const e of sdlcEvents()) for (const t of e.tickets) (out[t] ??= []).push(e);
+  return out;
 }

@@ -13,10 +13,12 @@ import { needStep } from "./needs.ts";
 import { href, humanAge, parseHash, resolveBoardRef, type Route } from "./routes.ts";
 import { FixLogin } from "./fixLogin.tsx";
 import { rowKey } from "./rowNav.ts";
+import { SdlcBar, Smoketests } from "./sdlc.tsx";
 import { SlackQuotes } from "./slackQuotes.tsx";
 import { DueDateVerb, TicketPanel } from "./ticketPanel.tsx";
 import { DiagramCards, DiagramsView, DiagramView } from "./diagrams.tsx";
 import { SessionScope } from "./mermaid.tsx";
+import { DEFAULT_SNOOZE, isSnoozed, SNOOZE_OPTIONS, type SnoozeOption, snoozeUntil, untilLabel } from "./snooze.ts";
 
 /**
  * agent-dash answers one question: "what do I work on next?".
@@ -137,17 +139,17 @@ function primaryRun(s: Subject): Run | undefined {
 
 // ---- "done for now" -----------------------------------------------------------------
 
-const SNOOZE_KEY = "agent-dash:done-for-now";
+const DONE_FOR_NOW_KEY = "agent-dash:done-for-now";
 
-function useSnoozed() {
-  const [map, setMap] = useState<Record<string, string>>(() => JSON.parse(localStorage.getItem(SNOOZE_KEY) ?? "{}"));
+function useDoneForNow() {
+  const [map, setMap] = useState<Record<string, string>>(() => JSON.parse(localStorage.getItem(DONE_FOR_NOW_KEY) ?? "{}"));
   const save = (next: Record<string, string>) => {
     setMap(next);
-    localStorage.setItem(SNOOZE_KEY, JSON.stringify(next));
+    localStorage.setItem(DONE_FOR_NOW_KEY, JSON.stringify(next));
   };
   return {
-    isSnoozed: (s: Subject) => map[s.id] === s.fingerprint,
-    snooze: (s: Subject) => save({ ...map, [s.id]: s.fingerprint }),
+    isDone: (s: Subject) => map[s.id] === s.fingerprint,
+    markDone: (s: Subject) => save({ ...map, [s.id]: s.fingerprint }),
     wake: (s: Subject) => {
       const { [s.id]: _gone, ...rest } = map;
       save(rest);
@@ -215,7 +217,7 @@ function runTone(run: HistoryRun): string {
 
 // ---- queue (left rail) --------------------------------------------------------------
 
-function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0 }: { s: Subject; selected: boolean; onSelect: () => void; now: number; summary?: TicketSummaryState; rank?: number; notes?: number }) {
+function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snoozedUntil }: { s: Subject; selected: boolean; onSelect: () => void; now: number; summary?: TicketSummaryState; rank?: number; notes?: number; snoozedUntil?: string }) {
   const top = lead(s);
   const run = primaryRun(s);
   const ref = useRef<HTMLButtonElement>(null);
@@ -248,6 +250,7 @@ function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0 }: { s
           ))}
           {summary && !done && <span className="tag tone-muted" title="Next steps drafted">✦ next steps</span>}
           {notes > 0 && <span className="tag tone-muted" title={`${plural(notes, "note")}`}>✎ {notes}</span>}
+          {snoozedUntil && <span className="tag tone-muted" title={new Date(snoozedUntil).toLocaleString()}>until {untilLabel(snoozedUntil, now)}</span>}
         </span>
       </span>
     </button>
@@ -736,14 +739,66 @@ function History({ runs: allRuns, now, onError, ticket, threads = {}, focus = nu
   );
 }
 
-function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSignal, noteSignal, agentSignal, anchor }: {
+/** Hides the ticket from the board until a time. `Z` snoozes with the picked option. */
+function SnoozeControl({ ticket, until, now, signal, onSnoozed, onError }: { ticket: string; until: string | undefined; now: number; signal: number; onSnoozed: () => void; onError: (m: string | null) => void }) {
+  const [option, setOption] = useState<SnoozeOption>(DEFAULT_SNOOZE);
+  const [date, setDate] = useState("");
+  const [busy, setBusy] = useState(false);
+  const snoozed = isSnoozed(until, now);
+  const at = snoozeUntil(option, new Date(now), date);
+  const save = async (next: Date | null) => {
+    setBusy(true);
+    const err = await api.snooze(ticket, next?.toISOString() ?? null);
+    setBusy(false);
+    onError(err);
+    if (!err && next) onSnoozed();
+  };
+  // The control mounts again for each entry, so only a press after the mount counts.
+  const seen = useRef(signal);
+  useEffect(() => {
+    if (signal === seen.current) return;
+    seen.current = signal;
+    if (!snoozed && at && !busy) save(at);
+  }, [signal]);
+
+  if (snoozed) {
+    return (
+      <span className="verb">
+        <span className="meta" title={new Date(until!).toLocaleString()}>Snoozed until {untilLabel(until!, now)}</span>
+        <button className="btn ghost" onClick={() => save(null)} disabled={busy}>
+          Unsnooze
+        </button>
+      </span>
+    );
+  }
+  return (
+    <span className="verb">
+      <button className="btn" onClick={() => at && save(at)} disabled={!at || busy} title={at ? `Hide from the board until ${at.toLocaleString()}` : "Pick a date in the future"}>
+        Snooze <Kbd>Z</Kbd>
+      </button>
+      <select value={option} onChange={(e) => setOption(e.target.value as SnoozeOption)} aria-label="Snooze for">
+        {SNOOZE_OPTIONS.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      {option === "date" && <input type="date" value={date} onChange={(e) => setDate(e.target.value)} aria-label="Snooze until" />}
+    </span>
+  );
+}
+
+function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, onSnoozed, focusSignal, noteSignal, agentSignal, snoozeSignal, anchor }: {
   s: Subject;
   data: Dashboard;
   now: number;
   position: string | null;
-  snoozed: boolean;
-  onSnooze: () => void;
+  doneForNow: boolean;
+  onDoneForNow: () => void;
   onWake: () => void;
+  /** After a snooze saves, so the board can move on. */
+  onSnoozed: () => void;
+  snoozeSignal: number;
   focusSignal: number;
   noteSignal: number;
   agentSignal: number;
@@ -817,17 +872,19 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
             </>
           )}
           <span className="grow" />
+          {t && <SnoozeControl key={t.key} ticket={t.key} until={data.snoozedUntil[t.key]} now={now} signal={snoozeSignal} onSnoozed={onSnoozed} onError={setError} />}
           {actionable(s) &&
-            (snoozed ? (
+            (doneForNow ? (
               <button className="btn ghost" onClick={onWake}>
                 Back to the queue
               </button>
             ) : (
-              <button className="btn" onClick={onSnooze} title="Hide until something about it changes">
+              <button className="btn" onClick={onDoneForNow} title="Hide until something about it changes">
                 Done for now <Kbd>E</Kbd>
               </button>
             ))}
         </div>
+        {s.ticket && <SdlcBar group={s.ticket} events={data.sdlcEvents[s.ticket.ticket.key] ?? []} cwd={cwd} onError={setError} />}
         {s.items.length > 0 && (
           <ul className="why">
             {s.items.map((a, i) => (
@@ -836,7 +893,7 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
                 <Dot tone={KIND[a.kind].tone} />
                 <span>{a.reason}</span>
                 <PrVerbButton item={a} data={data} />
-                {t && (a.kind === "overdue" || a.kind === "due_soon") && <DueDateVerb ticket={t} cwd={cwd} onError={setError} compact />}
+                {t && (a.kind === "overdue" || a.kind === "due_soon") && <DueDateVerb ticket={t} onError={setError} compact />}
               </li>
             ))}
           </ul>
@@ -855,6 +912,8 @@ function Workspace({ s, data, now, position, snoozed, onSnooze, onWake, focusSig
       )}
 
       {s.ticket && <NextSteps s={s} state={data.summaries[s.ticket.ticket.key]} notes={data.notes[s.ticket.ticket.key] ?? []} now={now} cwd={cwd} onError={setError} />}
+
+      {s.ticket && <Smoketests ticket={s.ticket.ticket.key} events={data.sdlcEvents[s.ticket.ticket.key] ?? []} now={now} cwd={cwd} onError={setError} />}
 
       {s.ticket && <StartAgent key={s.id} s={s} cwd={cwd} setCwd={setCwd} onError={setError} focusSignal={agentSignal} />}
 
@@ -1412,6 +1471,7 @@ const KEYS: [string, string][] = [
   ["↵", "On PRs and History: open the selected row"],
   ["T", "Show or hide the ticket's description and comments"],
   ["E", "Done for now (comes back when something changes)"],
+  ["Z", "Snooze the ticket (comes back at the time you pick)"],
   ["R", "Reply to the agent"],
   ["O", "Open the agent's iTerm tab, or its page if it has no tab"],
   ["S", "Draft next steps"],
@@ -1449,7 +1509,7 @@ export function App() {
   const { data, error, loading, refresh } = useDashboard();
   const notify = useWaitNotifications(data);
   const now = useNow(1_000);
-  const snoozed = useSnoozed();
+  const doneForNow = useDoneForNow();
   const [route, setRoute] = useState<Route>(() => parseHash(location.hash));
   const view = route.view;
   // The other views keep the board's ref, so going back lands on the same entry.
@@ -1458,19 +1518,24 @@ export function App() {
   const [focusSignal, setFocusSignal] = useState(0);
   const [noteSignal, setNoteSignal] = useState(0);
   const [agentSignal, setAgentSignal] = useState(0);
+  const [snoozeSignal, setSnoozeSignal] = useState(0);
 
   const subjects = useMemo(() => (data ? buildSubjects(data) : new Map<string, Subject>()), [data]);
-  const all = [...subjects.values()];
+  const until = (s: Subject) => (s.ticket ? data?.snoozedUntil[s.ticket.ticket.key] : undefined);
+  const ticketSnoozed = (s: Subject) => isSnoozed(until(s), now);
+  // A snoozed ticket leaves every other section until its time comes, whatever its signals say.
+  const snoozedList = [...subjects.values()].filter(ticketSnoozed).sort((a, b) => until(a)!.localeCompare(until(b)!));
+  const all = [...subjects.values()].filter((s) => !ticketSnoozed(s));
   const ranked = all.filter(actionable).sort((a, b) => lead(b)!.score - lead(a)!.score);
-  const queue = ranked.filter((s) => !snoozed.isSnoozed(s));
-  const done = ranked.filter((s) => snoozed.isSnoozed(s));
+  const queue = ranked.filter((s) => !doneForNow.isDone(s));
+  const done = ranked.filter((s) => doneForNow.isDone(s));
   // Only context left, such as a PR out for review: the ball is with someone else.
   const othersTurn = all.filter((s) => s.items.length && !actionable(s) && !isDone(s)).sort((a, b) => lead(b)!.score - lead(a)!.score);
   const working = all.filter((s) => !s.items.length && liveRuns(s).length && !isDone(s));
   // Closed in Jira, but agents still open on it: worth a glance to close the tabs, never a task.
   const doneInJira = all.filter((s) => isDone(s) && (s.items.length || liveRuns(s).length));
-  const quiet = data ? data.myTickets.map((g) => subjects.get(`t:${g.ticket.key}`)!).filter((s) => !s.items.length && !liveRuns(s).length) : [];
-  const order = [...queue, ...othersTurn, ...working, ...done, ...doneInJira, ...quiet];
+  const quiet = data ? data.myTickets.map((g) => subjects.get(`t:${g.ticket.key}`)!).filter((s) => !ticketSnoozed(s) && !s.items.length && !liveRuns(s).length) : [];
+  const order = [...queue, ...othersTurn, ...working, ...done, ...doneInJira, ...quiet, ...snoozedList];
 
   const target = data && boardRef ? resolveBoardRef(boardRef, data, new Set(subjects.keys())) : null;
   const selected = (target && subjects.get(target.subjectId)) || queue[0] || order[0] || null;
@@ -1499,13 +1564,24 @@ export function App() {
     [order, selected, select],
   );
 
-  const snoozeAndAdvance = useCallback(() => {
+  const doneAndAdvance = useCallback(() => {
     if (!selected || !actionable(selected)) return;
     const i = queue.findIndex((s) => s.id === selected.id);
     const next = queue[i + 1] ?? queue[i - 1];
-    snoozed.snooze(selected);
+    doneForNow.markDone(selected);
     if (next) select(next.id);
-  }, [selected, queue, snoozed, select]);
+  }, [selected, queue, doneForNow, select]);
+
+  // The snoozed entry is still in `order` until the next load, so step past it.
+  const advanceFrom = useCallback(
+    (id: string) => {
+      const rest = order.filter((s) => s.id === id || !ticketSnoozed(s));
+      const i = rest.findIndex((s) => s.id === id);
+      const next = rest[i + 1] ?? rest[i - 1];
+      if (next && next.id !== id) select(next.id);
+    },
+    [order, select],
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1515,7 +1591,8 @@ export function App() {
       if (view !== "board" && e.key !== "?" && e.key !== "Escape") return;
       if (e.key === "j" || e.key === "ArrowDown") move(1);
       else if (e.key === "k" || e.key === "ArrowUp") move(-1);
-      else if (e.key === "e") snoozeAndAdvance();
+      else if (e.key === "e") doneAndAdvance();
+      else if (e.key === "z" && selected?.ticket) setSnoozeSignal((n) => n + 1);
       else if (e.key === "?") setHelp((h) => !h);
       else if (e.key === "Escape") setHelp(false);
       else if (e.key === "r") setFocusSignal((n) => n + 1);
@@ -1534,7 +1611,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [move, snoozeAndAdvance, selected, data, view]);
+  }, [move, doneAndAdvance, selected, data, view]);
 
   useEffect(() => {
     const waiting = data?.counts.awaiting_input ?? 0;
@@ -1673,6 +1750,11 @@ export function App() {
                 <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
               ))}
             </RailSection>
+            <RailSection title="Snoozed" count={snoozedList.length} defaultOpen={false} hint="Back on the board at the time you picked">
+              {snoozedList.map((s) => (
+                <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} snoozedUntil={until(s)} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
+              ))}
+            </RailSection>
             <RailSection title="Done in Jira" count={doneInJira.length} defaultOpen={false} hint="Closed tickets that still have agents open">
               {doneInJira.map((s) => (
                 <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} />
@@ -1705,9 +1787,11 @@ export function App() {
                 data={data}
                 now={now}
                 position={position}
-                snoozed={snoozed.isSnoozed(selected)}
-                onSnooze={snoozeAndAdvance}
-                onWake={() => snoozed.wake(selected)}
+                doneForNow={doneForNow.isDone(selected)}
+                onDoneForNow={doneAndAdvance}
+                onWake={() => doneForNow.wake(selected)}
+                onSnoozed={() => advanceFrom(selected.id)}
+                snoozeSignal={snoozeSignal}
                 focusSignal={focusSignal}
                 noteSignal={noteSignal}
                 agentSignal={agentSignal}
