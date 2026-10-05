@@ -76,6 +76,8 @@ CREATE TABLE IF NOT EXISTS SDLC_Event (
   outcome      TEXT CHECK (outcome IN ('passed', 'failed')),
   test_details TEXT,
   test_results TEXT,
+  -- The pi session that runs the smoketest, when agent-dash started it, so the page can link to it.
+  session_id   TEXT,
   -- Set when Piper chose not to run the smoketest: the stage then counts as passed by on purpose.
   skipped_at   TEXT,
   created_at   TEXT NOT NULL
@@ -175,6 +177,7 @@ export function open(path = DB_PATH): DatabaseSync {
   const diagramColumns = new Set((db.prepare("PRAGMA table_info(diagrams)").all() as { name: string }[]).map((c) => c.name));
   for (const c of ["edited_at", "deleted_at"]) if (!diagramColumns.has(c)) db.exec(`ALTER TABLE diagrams ADD COLUMN ${c} TEXT`);
   // CREATE TABLE IF NOT EXISTS does not add a column to a table that is already there.
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = 'session_id'").get()) db.exec("ALTER TABLE SDLC_Event ADD COLUMN session_id TEXT");
   if (!(db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = 'skipped_at'").get())) db.exec("ALTER TABLE SDLC_Event ADD COLUMN skipped_at TEXT");
   // SQLite cannot change a CHECK, so an older table is copied into one that allows 'unlinked'.
   const threadTable = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'PiConversationStatusChange'").get() as { sql: string };
@@ -469,6 +472,7 @@ export interface NewSdlcEvent {
   outcome?: SdlcEvent["outcome"];
   testDetails?: string | null;
   testResults?: string | null;
+  sessionId?: string | null;
   skippedAt?: string | null;
   environments: SdlcEnvironment[];
   tickets: string[];
@@ -480,18 +484,39 @@ export function addSdlcEvent(e: NewSdlcEvent, now = new Date()): SdlcEvent {
   d.exec("BEGIN IMMEDIATE");
   try {
     const { id } = d
-      .prepare("INSERT INTO SDLC_Event (event_type, started_at, finished_at, outcome, test_details, test_results, skipped_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
-      .get(e.eventType, e.startedAt, e.finishedAt ?? null, e.outcome ?? null, e.testDetails ?? null, e.testResults ?? null, e.skippedAt ?? null, created) as { id: number };
+      .prepare("INSERT INTO SDLC_Event (event_type, started_at, finished_at, outcome, test_details, test_results, session_id, skipped_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
+      .get(e.eventType, e.startedAt, e.finishedAt ?? null, e.outcome ?? null, e.testDetails ?? null, e.testResults ?? null, e.sessionId ?? null, e.skippedAt ?? null, created) as { id: number };
     const env = d.prepare("INSERT OR IGNORE INTO SDLC_Event_Environment (sdlc_event_id, environment) VALUES (?, ?)");
     for (const x of e.environments) env.run(id, x);
-    const link = d.prepare("INSERT OR IGNORE INTO SDLC_Event_Ticket (sdlc_event_id, ticket, created_at) VALUES (?, ?, ?)");
-    for (const t of e.tickets) link.run(id, t, created);
+    // A smoketest that only started moves no stage yet, so it gets its draft when it finishes.
+    const drafted = e.sessionId && !e.finishedAt && !e.outcome && !e.skippedAt ? created : null;
+    const link = d.prepare("INSERT OR IGNORE INTO SDLC_Event_Ticket (sdlc_event_id, ticket, created_at, summary_requested_at) VALUES (?, ?, ?, ?)");
+    for (const t of e.tickets) link.run(id, t, created, drafted);
     d.exec("COMMIT");
     return sdlcEvents("WHERE e.id = ?", id)[0];
   } catch (err) {
     d.exec("ROLLBACK");
     throw err;
   }
+}
+
+export interface SdlcFinish {
+  finishedAt: string;
+  outcome: "passed" | "failed";
+  testDetails: string | null;
+  testResults: string | null;
+}
+
+/** Ends a running smoketest. Null when there is no such smoketest, or it already ended. */
+export function finishSdlcEvent(id: number, f: SdlcFinish): SdlcEvent | null {
+  const changed = open()
+    .prepare("UPDATE SDLC_Event SET finished_at = ?, outcome = ?, test_details = coalesce(?, test_details), test_results = coalesce(?, test_results) WHERE id = ? AND event_type = 'smoketest' AND finished_at IS NULL AND outcome IS NULL AND skipped_at IS NULL")
+    .run(f.finishedAt, f.outcome, f.testDetails, f.testResults, id).changes;
+  return changed ? getSdlcEvent(id) : null;
+}
+
+export function getSdlcEvent(id: number): SdlcEvent | null {
+  return sdlcEvents("WHERE e.id = ?", id)[0] ?? null;
 }
 
 export function deleteSdlcEvent(id: number): boolean {
@@ -513,7 +538,7 @@ export function deleteSdlcEvent(id: number): boolean {
 function sdlcEvents(where = "", ...params: number[]): SdlcEvent[] {
   const rows = open()
     .prepare(
-      `SELECT e.id, e.event_type AS eventType, e.started_at AS startedAt, e.finished_at AS finishedAt, e.outcome, e.test_details AS testDetails, e.test_results AS testResults, e.skipped_at AS skippedAt, e.created_at AS createdAt,
+      `SELECT e.id, e.event_type AS eventType, e.started_at AS startedAt, e.finished_at AS finishedAt, e.outcome, e.test_details AS testDetails, e.test_results AS testResults, e.session_id AS sessionId, e.skipped_at AS skippedAt, e.created_at AS createdAt,
         (SELECT group_concat(environment) FROM SDLC_Event_Environment WHERE sdlc_event_id = e.id) AS envs,
         (SELECT group_concat(ticket) FROM SDLC_Event_Ticket WHERE sdlc_event_id = e.id) AS keys
        FROM SDLC_Event e ${where} ORDER BY e.started_at DESC, e.id DESC`,

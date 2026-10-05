@@ -63,8 +63,8 @@ export function runInNewItermTab(command: string): Promise<{ result: FocusResult
 }
 
 /** The command a dash-started agent runs: pi in `dir`, named, with the context file and first message. */
-export function piCommand(dir: string, name: string, contextFile: string, messageFile: string): string {
-  return `cd ${shellQuote(dir)} && pi --name ${shellQuote(name)} @${shellQuote(contextFile)} "$(cat ${shellQuote(messageFile)})"`;
+export function piCommand(dir: string, name: string, contextFile: string, messageFile: string, sessionId: string): string {
+  return `cd ${shellQuote(dir)} && pi --session-id ${shellQuote(sessionId)} --name ${shellQuote(name)} @${shellQuote(contextFile)} "$(cat ${shellQuote(messageFile)})"`;
 }
 
 /** Single-quote a value for a POSIX shell. */

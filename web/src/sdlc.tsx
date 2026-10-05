@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { prRef } from "../../shared/refs.ts";
-import { ENV_LABEL, ENVIRONMENTS, mergePrs, SMOKETEST_ENV, sdlcProgress, type Stage, type StageState } from "../../shared/sdlc.ts";
-import type { PullRequest, SdlcEnvironment, SdlcEvent, TicketGroup } from "../../shared/types.ts";
+import { ENV_LABEL, ENVIRONMENTS, isSmoketestRunning, mergePrs, SMOKETEST_ENV, sdlcProgress, type Stage, type StageState } from "../../shared/sdlc.ts";
+import type { PullRequest, Run, SdlcEnvironment, SdlcEvent, TicketGroup } from "../../shared/types.ts";
 import { conversationHash, launchAgent, type LaunchBody } from "./agents.tsx";
 import { age, Markdown, post, stamp } from "./lib.tsx";
 import { href } from "./routes.ts";
@@ -99,16 +99,34 @@ function SkipSmoketest({ ticket, env, onError }: { ticket: string; env: SdlcEnvi
   );
 }
 
-const STATE_TEXT: Record<StageState, string> = { done: "done", failed: "failed", waiting: "waiting", skipped: "skipped", todo: "to do" };
+const STATE_TEXT: Record<StageState, string> = { done: "done", failed: "failed", running: "running", waiting: "waiting", skipped: "skipped", todo: "to do" };
+
+/** Its card in the ticket view; its page until pi writes the log. */
+function agentHref(sessionId: string, runs: Run[]): string {
+  return runs.some((r) => r.sessionId === sessionId) ? href(`r:${sessionId}`) : conversationHash(sessionId);
+}
+
+/** The agent link of a stage whose newest smoketest is running, if agent-dash started it. */
+function runningAgent(stage: Stage, runs: Run[]): string | null {
+  const id = stage.state === "running" ? stage.events[0]?.sessionId : null;
+  return id ? agentHref(id, runs) : null;
+}
 
 function StageActions({ stage, group, cwd, onError }: { stage: Stage; group: TicketGroup; cwd: string; onError: (m: string | null) => void }) {
   const key = group.ticket.key;
   const env = SMOKETEST_ENV[stage.id];
   if (env) {
+    const agent = runningAgent(stage, group.runs);
     return (
       <>
-        <SmoketestVerb ticket={key} env={env} cwd={cwd} onError={onError} />
-        {stage.state !== "done" && stage.state !== "skipped" && <SkipSmoketest ticket={key} env={env} onError={onError} />}
+        {agent ? (
+          <a className="btn small" href={agent}>
+            Open the smoketest
+          </a>
+        ) : (
+          <SmoketestVerb ticket={key} env={env} cwd={cwd} onError={onError} />
+        )}
+        {stage.state !== "done" && stage.state !== "skipped" && !agent && <SkipSmoketest ticket={key} env={env} onError={onError} />}
         {stage.events.length > 0 && (
           <a className="btn ghost small" href="#smoketests" onClick={(e) => (e.preventDefault(), document.getElementById("smoketests")?.scrollIntoView({ behavior: "smooth" }))}>
             See smoketests
@@ -178,14 +196,29 @@ export function SdlcBar({ group, events, cwd, onError }: { group: TicketGroup; e
   return (
     <div className="sdlc">
       <ol className="sdlc-bar" aria-label="SDLC progress">
-        {progress.stages.map((s, i) => (
-          <li key={s.id} className={`sdlc-stage st-${s.state} ${i === progress.current ? "current" : ""} ${s === shown ? "picked" : ""}`}>
-            <button type="button" onClick={() => setPicked(i)} title={`${s.label}: ${STATE_TEXT[s.state]}${s.detail ? ` · ${s.detail}` : ""}`}>
-              <span className="sdlc-dot">{s.state === "done" ? "✓" : s.state === "failed" ? "!" : i + 1}</span>
+        {progress.stages.map((s, i) => {
+          const title = `${s.label}: ${STATE_TEXT[s.state]}${s.detail ? ` · ${s.detail}` : ""}`;
+          const inner = (
+            <>
+              <span className="sdlc-dot">{s.state === "done" ? "✓" : s.state === "failed" ? "!" : s.state === "running" ? "…" : i + 1}</span>
               <span className="sdlc-label">{s.label}</span>
-            </button>
-          </li>
-        ))}
+            </>
+          );
+          const agent = runningAgent(s, group.runs);
+          return (
+            <li key={s.id} className={`sdlc-stage st-${s.state} ${i === progress.current ? "current" : ""} ${s === shown ? "picked" : ""}`}>
+              {agent ? (
+                <a href={agent} onClick={() => setPicked(i)} title={`${title} · open its agent`}>
+                  {inner}
+                </a>
+              ) : (
+                <button type="button" onClick={() => setPicked(i)} title={title}>
+                  {inner}
+                </button>
+              )}
+            </li>
+          );
+        })}
       </ol>
       {shown ? (
         <div className="sdlc-detail">
@@ -282,7 +315,8 @@ function RecordForm({ ticket, onError, onDone }: { ticket: string; onError: (m: 
   );
 }
 
-function SmoketestRow({ e, now, onError }: { e: SdlcEvent; now: number; onError: (m: string | null) => void }) {
+function SmoketestRow({ e, now, runs, onError }: { e: SdlcEvent; now: number; runs: Run[]; onError: (m: string | null) => void }) {
+  const running = isSmoketestRunning(e);
   const ran = e.finishedAt ? Math.round((Date.parse(e.finishedAt) - Date.parse(e.startedAt)) / 60_000) : null;
   return (
     <li id={`sdlc:${e.id}`}>
@@ -295,6 +329,8 @@ function SmoketestRow({ e, now, onError }: { e: SdlcEvent; now: number; onError:
             {ENV_LABEL[x]}
           </span>
         ))}
+        {running && <span className="tag tone-running">running</span>}
+        {running && e.sessionId && <a href={agentHref(e.sessionId, runs)}>Open the agent</a>}
         {e.skippedAt && <span className="tag">skipped</span>}
         {e.outcome && <span className={`tag ${e.outcome === "passed" ? "tone-good" : "tone-bad"}`}>{e.outcome}</span>}
         {e.tickets.length > 1 && <span>· also on {e.tickets.slice(1).join(", ")}</span>}
@@ -318,7 +354,7 @@ function SmoketestRow({ e, now, onError }: { e: SdlcEvent; now: number; onError:
   );
 }
 
-export function Smoketests({ ticket, events, now, cwd, onError }: { ticket: string; events: SdlcEvent[]; now: number; cwd: string; onError: (m: string | null) => void }) {
+export function Smoketests({ ticket, events, runs, now, cwd, onError }: { ticket: string; events: SdlcEvent[]; runs: Run[]; now: number; cwd: string; onError: (m: string | null) => void }) {
   const smoketests = events.filter((e) => e.eventType === "smoketest");
   const [recording, setRecording] = useState(false);
   const [env, setEnv] = useState<SdlcEnvironment>("localhost");
@@ -347,7 +383,7 @@ export function Smoketests({ ticket, events, now, cwd, onError }: { ticket: stri
       {smoketests.length ? (
         <ol className="note-list">
           {smoketests.map((e) => (
-            <SmoketestRow key={e.id} e={e} now={now} onError={onError} />
+            <SmoketestRow key={e.id} e={e} now={now} runs={runs} onError={onError} />
           ))}
         </ol>
       ) : (

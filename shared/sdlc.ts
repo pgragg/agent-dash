@@ -25,8 +25,8 @@ export function parseEnvironment(s: string): SdlcEnvironment | null {
 
 export type StageId = "ideation" | "pr" | "local_smoketest" | "in_beta" | "beta_smoketest" | "in_prod" | "prod_smoketest" | "done";
 
-/** "waiting": the deploy PR merged, but no one confirmed the deploy in Argo yet. */
-export type StageState = "done" | "failed" | "waiting" | "skipped" | "todo";
+/** "waiting": a deploy PR merged, unconfirmed in Argo. "running": a smoketest has no result yet. */
+export type StageState = "done" | "failed" | "running" | "waiting" | "skipped" | "todo";
 
 export interface Stage {
   id: StageId;
@@ -97,11 +97,17 @@ function tagged(events: SdlcEvent[], type: SdlcEvent["eventType"], envs: SdlcEnv
   return newestFirst(events.filter((e) => e.eventType === type && e.environments.some((x) => envs.includes(x))));
 }
 
+/** Needs a session id: a hand record with no outcome still counts as passed. */
+export function isSmoketestRunning(e: SdlcEvent): boolean {
+  return e.eventType === "smoketest" && !!e.sessionId && !e.finishedAt && !e.outcome;
+}
+
 function smoketestStage(id: StageId, events: SdlcEvent[], envs: SdlcEnvironment[]): Omit<Stage, "label"> {
   const found = tagged(events, "smoketest", envs);
   const last = found[0];
   if (!last) return { id, state: "todo", detail: `No smoketest tagged ${envs.map((e) => ENV_LABEL[e]).join(" or ")} yet`, events: [] };
   if (last.skippedAt) return { id, state: "skipped", detail: `Smoketest skipped ${last.skippedAt.slice(0, 10)}`, events: found };
+  if (isSmoketestRunning(last)) return { id, state: "running", detail: `Smoketest running since ${last.startedAt.slice(0, 16).replace("T", " ")} UTC`, events: found };
   const when = (last.finishedAt ?? last.startedAt).slice(0, 10);
   // The newest run decides: a fix after a failed run shows as done again.
   if (last.outcome === "failed") return { id, state: "failed", detail: `The newest smoketest failed (${when})`, events: found };
@@ -152,6 +158,7 @@ export function sdlcProgress({ ticket, prs, events }: { ticket: Ticket; prs: Pul
   let hint = next ? HINTS[next.id] : null;
   if (next?.state === "failed") hint = `The newest ${next.label.toLowerCase()} failed. Fix it, then run it again.`;
   if (next?.state === "waiting") hint = `${next.detail}.`;
+  if (next?.state === "running") hint = `${next.detail}. An agent runs it and records the result here.`;
   return { stages, current, next, hint };
 }
 
@@ -164,7 +171,7 @@ export const SMOKETEST_ENV: Partial<Record<StageId, SdlcEnvironment>> = {
 
 /** For a summary run's or an agent's context: one line per stage. */
 export function progressLines(p: SdlcProgress): string[] {
-  const mark: Record<StageState, string> = { done: "[x]", failed: "[!] failed", waiting: "[~] waiting", skipped: "[-] skipped", todo: "[ ]" };
+  const mark: Record<StageState, string> = { done: "[x]", failed: "[!] failed", running: "[~] running", waiting: "[~] waiting", skipped: "[-] skipped", todo: "[ ]" };
   return [
     ...p.stages.map((s, i) => `${i + 1}. ${mark[s.state]} ${s.label}${s.detail ? ` — ${s.detail}` : ""}`),
     "",
@@ -185,7 +192,7 @@ function recordCommand(script: string, key: string, type: "smoketest" | "deploy"
  * The first message of an agent that runs one smoketest and records it. `script` is the
  * absolute path of scripts/sdlc-event.ts, so the agent writes into this dash's database.
  */
-export function smoketestMessage(key: string, env: SdlcEnvironment, script: string): string {
+export function smoketestMessage(key: string, env: SdlcEnvironment, script: string, eventId: number): string {
   const label = ENV_LABEL[env];
   const how =
     env === "localhost"
@@ -199,10 +206,8 @@ export function smoketestMessage(key: string, env: SdlcEnvironment, script: stri
 
 Work out from the context what the change does, and test that it works on ${label} from a user's point of view. ${how}
 
-The tag is the environment under test. If you test a ${label} backend from a local frontend, the tag is still ${env}; add a second --env only if both sides are under test.
-
-When you finish, pass or fail, record the result:
-${recordCommand(script, key, "smoketest", env)} --started <ISO time you started> --finished <ISO time now> --outcome passed|failed --details-file <file> --results-file <file>
+agent-dash shows this smoketest as running (SDLC event ${eventId}) until you record the result. When you finish, pass or fail, record it:
+node ${script} finish --id ${eventId} --outcome passed|failed --details-file <file> --results-file <file>
 The details file says what you tested and how (stack, commands, URLs, versions). The results file says what you saw, with the evidence. Then reply with the outcome and a short summary.`;
 }
 

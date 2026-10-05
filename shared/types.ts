@@ -319,10 +319,12 @@ export interface SdlcEvent {
   eventType: SdlcEventType;
   startedAt: string;
   finishedAt: string | null;
-  /** No outcome counts as passed: the event exists. */
+  /** No outcome counts as passed, except on a dash-started smoketest: that one is still running. */
   outcome: "passed" | "failed" | null;
   testDetails: string | null;
   testResults: string | null;
+  /** The pi session that runs it, when agent-dash started that session. */
+  sessionId: string | null;
   /** Set on a smoketest that Piper chose to skip. It has no outcome. */
   skippedAt: string | null;
   environments: SdlcEnvironment[];
