@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AttentionItem, ConversationSummary } from "../shared/types.ts";
-import { addUpdate, agentFinished, entryOf, entryOfSignal, type Group, groupNotification, isNewSince, needSignals, newSignals, type Pending, pruneSeen, releasePending, runUpdate, SEEN_KEEP_MS, SUMMARY_WAIT_MS, signalUpdate, summaryText } from "../web/src/notify.ts";
+import { addUpdate, agentFinished, agentWaitsOnReview, entryOf, entryOfSignal, type Group, groupNotification, isNewSince, needSignals, newSignals, type Pending, pruneSeen, releasePending, runUpdate, SEEN_KEEP_MS, SUMMARY_WAIT_MS, signalUpdate, summaryText } from "../web/src/notify.ts";
 import { run } from "./helpers.ts";
 
 const since = "2026-10-05T10:00:00.000Z";
@@ -19,6 +19,23 @@ test("an agent is finished only when its current summary says it needs nothing",
   assert.equal(agentFinished(run({ ...waiting, dialog: { method: "confirm", title: "Run it?", since } }), summary()), false);
   // A question in the last message needs an answer, also when the summary missed it.
   assert.equal(agentFinished(run({ ...waiting, askedQuestion: true }), summary()), false);
+});
+
+test("an agent waits on review only when its current summary says so", () => {
+  const review = summary({ needs: "Waiting on review: PR 12" });
+  assert.equal(agentWaitsOnReview(waiting, review), true);
+  assert.equal(agentFinished(waiting, review), false);
+  assert.equal(agentWaitsOnReview(waiting, summary()), false);
+  assert.equal(agentWaitsOnReview(waiting, summary({ ...review, stale: true })), false);
+  assert.equal(agentWaitsOnReview(run({ ...waiting, dialog: { method: "confirm", title: "Run it?", since } }), review), false);
+  assert.equal(summaryText(review), "The lint step passes now.\nWaiting on review: PR 12");
+});
+
+test("a held notification is dropped when the agent only waits on a PR review", () => {
+  const held = new Map<string, Pending>([["s1", { since, heldAt: 0 }]]);
+  const out = releasePending(held, [waiting], { s1: summary({ needs: "Waiting on review: PR 12" }) }, 1000);
+  assert.equal(out.send.length, 0);
+  assert.equal(out.keep.size, 0);
 });
 
 test("the summary text is the latest message, plus the need when there is one", () => {

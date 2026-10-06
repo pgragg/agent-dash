@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { needsNothing } from "../../shared/conversationSummary.ts";
+import { needsNothing, waitsOnReview } from "../../shared/conversationSummary.ts";
 import type { ConversationSummary, Run } from "../../shared/types.ts";
 import { age, api } from "./lib.tsx";
 
@@ -43,7 +43,7 @@ export function ConversationGist({ run, summary, now, open, onToggle }: { run: R
     );
   }
   const needs = needsText(run, summary);
-  const nothing = needsNothing(needs) || run.status === "working";
+  const nothing = needsNothing(needs) || waitsOnReview(needs) || run.status === "working";
   return (
     <div className={`gist ${onToggle ? "clickable" : ""}`} onClick={onToggle && ((e) => (e.target as HTMLElement).closest("button") || window.getSelection()?.toString() || onToggle())} title={onToggle ? (open ? "Hide the details" : "Show the last message and the conversation") : undefined}>
       <dl>

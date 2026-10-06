@@ -26,6 +26,8 @@ ABOUT: <what the conversation is about, at most 15 words>
 LATEST: <what the agent's latest message says, at most 35 words>
 NEEDS: <what the agent needs from Piper now (an answer, a decision, an approval, a review), at most 25 words; or "Nothing">
 
+When the only thing left is that another person reviews or approves a PR (Piper only has to get it approved), and the agent asks nothing else, write NEEDS: Waiting on review: <the PR>.
+
 Use short sentences and simple words. Name the ticket, PR or system when the conversation names it. Do not invent facts.
 
 <conversation>
@@ -44,6 +46,14 @@ export function parseGist(raw: string): ConversationGist | null {
   const latest = field("LATEST");
   const needs = field("NEEDS");
   return about && latest && needs ? { about, latest, needs } : null;
+}
+
+/** Changes the basis of every summary, so a new prompt drafts the current ones again. */
+export const GIST_VERSION = 2;
+
+/** The prompt's marker for a stop where the next move is a reviewer's, not Piper's. */
+export function waitsOnReview(needs: string | null): boolean {
+  return !!needs && /^waiting on (a |the )?(pr )?(review|approval)\b/i.test(needs.trim());
 }
 
 /** "Nothing", "None", "Nothing now." and the like: the agent needs no input. */
