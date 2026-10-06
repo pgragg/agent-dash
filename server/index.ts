@@ -90,6 +90,9 @@ const sessions = new SessionIndex(config.sessionsDir, config.ticketPattern);
 const JIRA_ON = jiraConfigured();
 const myTickets = new Cached<Ticket[]>([], JIRA_ON ? fetchMyTickets : async () => []);
 const prs = new Cached<PullWithFeedback[]>([], () => fetchMyPrs(config.recentDays, config.ticketPattern));
+/** Force a refresh of GitHub data after login. */
+export const refreshGitHub = () => prs.get(true);
+loginRoute.setOnGitHubLogin(refreshGitHub);
 const others = new Map<string, Ticket>();
 let othersHealth: SourceHealth = { ok: true };
 

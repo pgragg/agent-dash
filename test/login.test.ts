@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,12 +25,21 @@ esac
 chmodSync(piAuthStub, 0o755);
 writeFileSync(piAuthCalls, "");
 
+// ghLogged controls whether gh auth status returns success (logged in) or failure
+let ghLogged = true;
 writeFileSync(
   ghStub,
   `#!/bin/sh
 echo "$@" >> ${ghCalls}
 case "$1 $2" in
-"auth status") echo "Logged in to github.com as user" && exit 0 ;;
+"auth status")
+  if [ -f "${dir}/gh-logged" ]; then
+    echo "Logged in to github.com as user" && exit 0
+  else
+    echo "You are not logged into any GitHub hosts." && exit 1
+  fi
+  ;;
+"auth login") echo "Login successful" && touch "${dir}/gh-logged" && exit 0 ;;
 "auth token") echo "gho_test_token_12345" && exit 0 ;;
 esac
 exit 1
@@ -38,6 +47,8 @@ exit 1
 );
 chmodSync(ghStub, 0o755);
 writeFileSync(ghCalls, "");
+// Start logged in
+writeFileSync(join(dir, "gh-logged"), "");
 
 process.env.AGENT_DASH_PI_AUTH = piAuthStub;
 process.env.AGENT_DASH_GH_CLI = ghStub;
@@ -73,11 +84,24 @@ test("jira runs pi-auth ensure", async () => {
   assert.match(readFileSync(piAuthCalls, "utf8"), /^ensure jira$/m);
 });
 
-test("github checks auth status and extracts token", async () => {
+test("github checks auth status and extracts token when logged in", async () => {
   const out = await call("github");
   assert.equal(out.code, 200);
   const calls = readFileSync(ghCalls, "utf8");
   assert.match(calls, /^auth status$/m);
+  assert.match(calls, /^auth token$/m);
+});
+
+test("github runs auth login --web when not logged in", async () => {
+  // Clear calls log and remove the logged-in marker
+  writeFileSync(ghCalls, "");
+  try { unlinkSync(join(dir, "gh-logged")); } catch {}
+  
+  const out = await call("github");
+  assert.equal(out.code, 200);
+  const calls = readFileSync(ghCalls, "utf8");
+  assert.match(calls, /^auth status$/m);
+  assert.match(calls, /^auth login --web$/m);
   assert.match(calls, /^auth token$/m);
 });
 

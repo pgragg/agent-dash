@@ -15,7 +15,7 @@ export function FixLogin({ sources, onFixed }: { sources: Dashboard["sources"]; 
     try {
       const res = await fetch(`/api/login?source=${encodeURIComponent(name)}`, { method: "POST", headers: { "X-Agent-Dash": "1" } });
       const body = await res.json().catch(() => ({}));
-      setResult((r) => ({ ...r, [name]: res.ok ? "" : (body.error ?? `failed (${res.status})`) }));
+      setResult((r) => ({ ...r, [name]: res.ok ? "ok" : (body.error ?? `failed (${res.status})`) }));
       if (res.ok) onFixed();
     } catch (err) {
       setResult((r) => ({ ...r, [name]: (err as Error).message }));
@@ -32,8 +32,8 @@ export function FixLogin({ sources, onFixed }: { sources: Dashboard["sources"]; 
         </button>
       ))}
       {shown && (
-        <div className="toast login-toast" role="alert">
-          {FIXABLE[shown[0]]} login: {shown[1]}
+        <div className={`toast login-toast ${shown[1] === "ok" ? "success" : ""}`} role="alert">
+          {FIXABLE[shown[0]]} login: {shown[1] === "ok" ? "✓ logged in" : shown[1]}
           <button className="btn ghost small" onClick={() => setResult((r) => ({ ...r, [shown[0]]: "" }))}>
             Dismiss
           </button>
