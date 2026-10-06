@@ -1,5 +1,5 @@
 import { needsNothing } from "../../shared/conversationSummary.ts";
-import type { ConversationSummary, Dashboard, Run, RunStatus } from "../../shared/types.ts";
+import type { AttentionItem, AttentionKind, ConversationSummary, Dashboard, Run, RunStatus } from "../../shared/types.ts";
 
 /**
  * Which runs to announce with a browser notification. Kept free of React so the tests can import it.
@@ -40,9 +40,14 @@ export function newlyWaiting(prev: Map<string, Seen> | null, runs: Run[], minRun
   });
 }
 
+/** The board entry that holds the run: its ticket, else the run itself. */
+export function entryOf(r: Run): string {
+  return r.tickets[0] ? `t:${r.tickets[0]}` : `r:${r.sessionId}`;
+}
+
 /** Where a click on the notification goes: the board entry that holds the run. */
 export function boardHash(r: Run): string {
-  return `#/${encodeURIComponent(r.tickets[0] ? `t:${r.tickets[0]}` : `r:${r.sessionId}`)}`;
+  return `#/${encodeURIComponent(entryOf(r))}`;
 }
 
 // ---- summaries ----------------------------------------------------------------------
@@ -91,9 +96,110 @@ export function releasePending(pending: Map<string, Pending>, runs: Run[], summa
   return { send, keep };
 }
 
-/** Without a ready summary, the last reply is the best text we have. */
-export function notificationFor(r: Run, s: ConversationSummary | undefined): { title: string; body: string } {
+// ---- one notification per board entry ------------------------------------------------
+
+/**
+ * Notifications are grouped by board entry (a ticket, else the run or PR with no ticket): four
+ * tickets with ten updates each make four notifications, not forty. The first update after you
+ * last looked at the entry alerts; each later one replaces that notification without a sound.
+ */
+
+/** One thing that happened on an entry. */
+export interface Update {
+  /** What it is about, so a second stop of the same agent replaces its line. */
+  key: string;
+  title: string;
+  line: string;
+}
+
+export interface Group {
+  label: string;
+  /** Every update since you last looked, also repeats of one key. */
+  count: number;
+  /** Newest first, one per key. */
+  updates: Update[];
+}
+
+/** `alert` is true for the first update since you last looked: only that one makes a sound. */
+export function addUpdate(groups: Map<string, Group>, id: string, label: string, u: Update): { group: Group; alert: boolean } {
+  const prev = groups.get(id);
+  const group = { label, count: (prev?.count ?? 0) + 1, updates: [u, ...(prev?.updates ?? []).filter((x) => x.key !== u.key)] };
+  groups.set(id, group);
+  return { group, alert: !prev };
+}
+
+/** Lines in the body before "and N more": a notification shows about three. */
+export const LINES_SHOWN = 3;
+
+const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+export function groupNotification(g: Group): { title: string; body: string } {
+  const only = g.count === 1 ? g.updates[0] : null;
+  const title = cut(only ? `${g.label}: ${only.title}` : `${g.label}: ${g.count} updates`, 90);
+  if (only) return { title, body: only.line };
+  const lines = g.updates.slice(0, LINES_SHOWN).map((u) => cut(`${u.title}: ${u.line.replace(/\s+/g, " ")}`, 120));
+  const more = g.updates.length - LINES_SHOWN;
+  return { title, body: [...lines, ...(more > 0 ? [`and ${more} more`] : [])].join("\n") };
+}
+
+/** An agent stop as an update. Without a ready summary, the last reply is the best text we have. */
+export function runUpdate(r: Run, s: ConversationSummary | undefined): Update {
   const name = r.name ?? r.firstPrompt;
-  const head = `${agentFinished(r, s) ? "Agent finished" : "Agent is waiting on you"}: ${name}`;
-  return { title: head.length > 90 ? `${head.slice(0, 89)}…` : head, body: summaryText(s) ?? (r.lastReply || "Waiting for you") };
+  const what = agentFinished(r, s) ? "Agent finished" : "Agent is waiting on you";
+  return { key: `agent:${r.sessionId}`, title: what, line: `${cut(name, 60)}\n${summaryText(s) ?? (r.lastReply || "Waiting for you")}` };
+}
+
+/**
+ * The signals that are not an agent stop and that need you. An agent's own signals come from
+ * its stop, which waits for the summary. `stalled` is no news, and a PR out for review waits on
+ * the reviewer.
+ */
+export const NEED_TITLES: Partial<Record<AttentionKind, string>> = {
+  changes_requested: "Changes requested",
+  ci_failing: "CI is failing",
+  merge_conflict: "Merge conflict",
+  ready_to_merge: "Ready to merge",
+  approved_with_feedback: "Approved, with feedback",
+  overdue: "Overdue",
+  due_soon: "Due soon",
+};
+
+export function needKey(a: Pick<AttentionItem, "kind" | "prUrl" | "ticketKey">): string {
+  return `${a.kind}:${a.prUrl ?? a.ticketKey ?? ""}`;
+}
+
+/** Each signal that needs you, by key. A Done ticket's signals are `info`, so they never count. */
+export function needSignals(attention: AttentionItem[]): Map<string, AttentionItem> {
+  return new Map(attention.filter((a) => !a.info && NEED_TITLES[a.kind]).map((a) => [needKey(a), a]));
+}
+
+/** With no earlier snapshot (the page just loaded), nothing is new. A signal that went away and came back is new again. */
+export function newSignals(prev: Map<string, AttentionItem> | null, now: Map<string, AttentionItem>): AttentionItem[] {
+  return prev ? [...now].filter(([k]) => !prev.has(k)).map(([, a]) => a) : [];
+}
+
+export function signalUpdate(a: AttentionItem): Update {
+  return { key: needKey(a), title: NEED_TITLES[a.kind] ?? a.kind, line: a.reason };
+}
+
+/** The entry of a signal, as the board groups it. */
+export function entryOfSignal(a: Pick<AttentionItem, "ticketKey" | "sessionId" | "prUrl">): string {
+  return a.ticketKey ? `t:${a.ticketKey}` : a.sessionId ? `r:${a.sessionId}` : `p:${a.prUrl}`;
+}
+
+// ---- seen ----------------------------------------------------------------------------
+
+/** When you last looked at each board entry, by entry id. Kept in localStorage. */
+export type SeenAt = Record<string, string>;
+
+/** Entries you have not looked at for this long drop out, so the record stays small. */
+export const SEEN_KEEP_MS = 30 * 24 * 3600_000;
+
+export function pruneSeen(seen: SeenAt, now: number): SeenAt {
+  return Object.fromEntries(Object.entries(seen).filter(([, at]) => now - Date.parse(at) < SEEN_KEEP_MS));
+}
+
+/** A row is new when it came after your last look. An entry you never looked at is all new. */
+export function isNewSince(since: string, lastLook: string | null): boolean {
+  return !lastLook || Date.parse(since) > Date.parse(lastLook);
 }

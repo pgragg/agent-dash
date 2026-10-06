@@ -9,10 +9,10 @@ import { filterHistory, groupByDay } from "./history.ts";
 import { PrPanel, PrVerbButton } from "./prPanel.tsx";
 import { ciTag } from "./prView.ts";
 import { countPrs, groupOpenPrs } from "./prs.ts";
-import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, resumeCommand, runTitle, shortDate, stamp, useDashboard, useFlash, useNow, useWaitNotifications } from "./lib.tsx";
+import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, lastSeen, resumeCommand, runTitle, shortDate, stamp, useDashboard, useFlash, useLook, useNow, usePageFocus, useWaitNotifications } from "./lib.tsx";
 import { Composer, LivePanel } from "./liveControl.tsx";
 import { needStep } from "./needs.ts";
-import { agentFinished, readySummary, runsOf, summaryText } from "./notify.ts";
+import { agentFinished, isNewSince, readySummary, runsOf, summaryText } from "./notify.ts";
 import { needsNothing } from "../../shared/conversationSummary.ts";
 import { href, humanAge, parseHash, resolveBoardRef, type Route } from "./routes.ts";
 import { FixLogin } from "./fixLogin.tsx";
@@ -1007,7 +1007,7 @@ function whyLine(r: WhyRow, needs: boolean): string | null {
  * The ticket header: what needs you, then news, newest first in each, one line a row. A click on
  * a row opens its full summary under it.
  */
-function WhyList({ s, data, now, cwd, onError }: { s: Subject; data: Dashboard; now: number; cwd: string; onError: (m: string | null) => void }) {
+function WhyList({ s, data, now, cwd, lastLook, onError }: { s: Subject; data: Dashboard; now: number; cwd: string; lastLook: string | null; onError: (m: string | null) => void }) {
   const t = s.ticket?.ticket;
   const [open, setOpen] = useState<string | null>(null);
   const [all, setAll] = useState(false);
@@ -1031,6 +1031,11 @@ function WhyList({ s, data, now, cwd, onError }: { s: Subject; data: Dashboard; 
   });
   const { needs, updates } = groupWhy(rows);
   const shown = all ? updates : updates.slice(0, UPDATES_SHOWN);
+  const fresh = (r: WhyRow) => isNewSince(r.item.since, lastLook);
+  const newCount = (list: WhyRow[]) => {
+    const n = list.filter(fresh).length;
+    return n ? <span className="why-new-count"> · {n} new</span> : null;
+  };
 
   const row = (r: WhyRow, need: boolean) => {
     const a = r.item;
@@ -1038,10 +1043,11 @@ function WhyList({ s, data, now, cwd, onError }: { s: Subject; data: Dashboard; 
     const isOpen = open === r.key;
     const date = a.kind === "overdue" || a.kind === "due_soon";
     const detail = r.smoke ? [r.smoke.detail, a.gist].filter(Boolean).join("\n") : (a.gist ?? a.reason);
+    const isNew = fresh(r);
     return (
       <li
         key={r.key}
-        className={`why-row ${need ? "" : "update"} ${isOpen ? "open" : ""}`}
+        className={`why-row ${need ? "" : "update"} ${isOpen ? "open" : ""} ${isNew ? "new" : ""}`}
         onClick={(e) => {
           if ((e.target as HTMLElement).closest("a, button, input, select, textarea") || window.getSelection()?.toString()) return;
           setOpen(isOpen ? null : r.key);
@@ -1060,6 +1066,11 @@ function WhyList({ s, data, now, cwd, onError }: { s: Subject; data: Dashboard; 
           )}
           {line && <span className="why-need">{line}</span>}
           <span className="grow" />
+          {isNew && (
+            <span className="tag why-new" title={lastLook ? `Since you last looked, ${stamp(lastLook)}` : "You have not looked at this ticket before"}>
+              new
+            </span>
+          )}
           {!date && <span className="meta why-age" title={stamp(a.since)}>{age(a.since, now)}</span>}
           {need ? <WhyAction r={r} ticket={t} cwd={cwd} data={data} onError={onError} /> : <PrVerbButton item={a} data={data} />}
         </div>
@@ -1072,13 +1083,19 @@ function WhyList({ s, data, now, cwd, onError }: { s: Subject; data: Dashboard; 
     <div className="why">
       {needs.length > 0 && (
         <>
-          <div className="why-group">Needs you · {needs.length}</div>
+          <div className="why-group">
+            Needs you · {needs.length}
+            {newCount(needs)}
+          </div>
           <ul className="why-rows">{needs.map((r) => row(r, true))}</ul>
         </>
       )}
       {updates.length > 0 && (
         <>
-          <div className="why-group">Updates · {updates.length}</div>
+          <div className="why-group">
+            Updates · {updates.length}
+            {newCount(updates)}
+          </div>
           <ul className="why-rows">{shown.map((r) => row(r, false))}</ul>
           {updates.length > shown.length && (
             <button className="btn ghost small why-more" onClick={() => setAll(true)}>
@@ -1091,8 +1108,10 @@ function WhyList({ s, data, now, cwd, onError }: { s: Subject; data: Dashboard; 
   );
 }
 
-function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, onSnoozed, focusSignal, noteSignal, agentSignal, snoozeSignal, anchor }: {
+function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, onSnoozed, focusSignal, noteSignal, agentSignal, snoozeSignal, anchor, lastLook }: {
   s: Subject;
+  /** Your look at this entry before this one: what came after it is marked new. */
+  lastLook: string | null;
   data: Dashboard;
   now: number;
   position: string | null;
@@ -1185,7 +1204,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
             ))}
         </div>
         {s.ticket && <SdlcBar group={s.ticket} events={data.sdlcEvents[s.ticket.ticket.key] ?? []} cwd={cwd} onError={setError} />}
-        {s.items.length > 0 && <WhyList s={s} data={data} now={now} cwd={cwd} onError={setError} />}
+        {s.items.length > 0 && <WhyList s={s} data={data} now={now} cwd={cwd} lastLook={lastLook} onError={setError} />}
       </header>
 
       {t && <TicketPanel key={t.key} ticket={t} cwd={cwd} onError={setError} />}
@@ -1589,7 +1608,7 @@ function HistoryView({ data, now }: { data: Dashboard; now: number }) {
   );
 }
 
-const NOTIFY_HINT = "A notification comes when an agent that worked for 45 s or more stops, after its summary is ready. It needs this page open in a tab.";
+const NOTIFY_HINT = "One notification per ticket: it comes when an agent on the ticket stops, or when something new on it needs you, and later updates join it until you look at the ticket. It needs this page open in a tab.";
 
 function NotifyButton({ state, onEnable, onMute }: { state: NotifyState; onEnable: () => void; onMute: () => void }) {
   if (state === "unsupported") return null;
@@ -1772,7 +1791,7 @@ function Help({ onClose }: { onClose: () => void }) {
 
 export function App() {
   const { data, error, loading, refresh } = useDashboard();
-  const notify = useWaitNotifications(data);
+  const focused = usePageFocus();
   const now = useNow(1_000);
   const doneForNow = useDoneForNow();
   const [route, setRoute] = useState<Route>(() => parseHash(location.hash));
@@ -1818,6 +1837,10 @@ export function App() {
 
   const target = data && boardRef ? resolveBoardRef(boardRef, data, new Set(subjects.keys())) : null;
   const selected = (target && subjects.get(target.subjectId)) || queue[0] || order[0] || null;
+  // You look at an entry while its workspace shows in a focused tab. On the kanban, that is the drawer.
+  const looking = focused && view === "board" && (boardMode === "queue" || drawer) && selected ? selected.id : null;
+  const look = useLook(looking);
+  const notify = useWaitNotifications(data, looking);
 
   useEffect(() => {
     const onHash = () => {
@@ -1941,6 +1964,7 @@ export function App() {
           noteSignal={noteSignal}
           agentSignal={agentSignal}
           anchor={target?.anchor ?? null}
+          lastLook={look?.id === selected.id ? look.lastLook : lastSeen(selected.id)}
         />
       ) : (
         <div className="zero big">Nothing to show.</div>
