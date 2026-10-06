@@ -55,7 +55,7 @@ export function readySummary(s: ConversationSummary | undefined): (ConversationS
 /** Without a ready summary we do not guess: the run counts as waiting. */
 export function agentFinished(run: Run | undefined, s: ConversationSummary | undefined): boolean {
   const ready = readySummary(s);
-  return !!run && !!ready && run.status === "awaiting_input" && !run.dialog && needsNothing(ready.needs);
+  return !!run && !!ready && run.status === "awaiting_input" && !run.dialog && !run.askedQuestion && needsNothing(ready.needs);
 }
 
 /** The need goes on its own line, so a notification shows it apart. */
@@ -84,7 +84,8 @@ export function releasePending(pending: Map<string, Pending>, runs: Run[], summa
     const r = byId.get(id);
     if (!r || r.status !== "awaiting_input" || r.statusSince !== p.since) continue;
     const s = summaries[id];
-    if (readySummary(s) || (s?.status === "failed" && !s.stale) || now - p.heldAt >= waitMs) send.push(r);
+    // A run with no message never gets a summary, so it does not wait for one.
+    if (!r.lastMessage || readySummary(s) || (s?.status === "failed" && !s.stale) || now - p.heldAt >= waitMs) send.push(r);
     else keep.set(id, p);
   }
   return { send, keep };

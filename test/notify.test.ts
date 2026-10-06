@@ -5,7 +5,7 @@ import { agentFinished, notificationFor, type Pending, releasePending, SUMMARY_W
 import { run } from "./helpers.ts";
 
 const since = "2026-10-05T10:00:00.000Z";
-const waiting = run({ sessionId: "s1", status: "awaiting_input", statusSince: since, lastReply: "Done. PR 12 is open." });
+const waiting = run({ sessionId: "s1", status: "awaiting_input", statusSince: since, lastReply: "Done. PR 12 is open.", lastMessage: "Done. PR 12 is open." });
 const summary = (o: Partial<ConversationSummary> = {}): ConversationSummary => ({ sessionId: "s1", status: "done", about: "Fix CI", latest: "The lint step passes now.", needs: "Nothing", generatedAt: since, error: null, stale: false, ...o });
 
 test("an agent is finished only when its current summary says it needs nothing", () => {
@@ -17,6 +17,8 @@ test("an agent is finished only when its current summary says it needs nothing",
   assert.equal(agentFinished(waiting, summary({ status: "in_progress" })), false);
   // An open dialog needs an answer, whatever the summary says.
   assert.equal(agentFinished(run({ ...waiting, dialog: { method: "confirm", title: "Run it?", since } }), summary()), false);
+  // A question in the last message needs an answer, also when the summary missed it.
+  assert.equal(agentFinished(run({ ...waiting, askedQuestion: true }), summary()), false);
 });
 
 test("the summary text is the latest message, plus the need when there is one", () => {
@@ -38,9 +40,15 @@ test("a held notification goes out when the summary is ready, fails, or the time
   // Failed: send, with the last reply.
   out = releasePending(held(), [waiting], { s1: summary({ status: "failed", error: "x" }) }, 1000);
   assert.deepEqual(out.send, [waiting]);
-  // No summary after the time limit: send.
+  // A failed draft of an older stop: keep holding.
+  assert.equal(releasePending(held(), [waiting], { s1: summary({ status: "failed", stale: true }) }, 1000).send.length, 0);
+  // No summary: hold until the time limit, then send.
+  assert.equal(releasePending(held(), [waiting], {}, SUMMARY_WAIT_MS - 1).send.length, 0);
   out = releasePending(held(), [waiting], {}, SUMMARY_WAIT_MS);
   assert.deepEqual(out.send, [waiting]);
+  // A run with no message never gets a summary: send at once.
+  const silent = run({ ...waiting, lastMessage: "" });
+  assert.deepEqual(releasePending(held(), [silent], {}, 1000).send, [silent]);
 });
 
 test("a held notification is dropped when the run moves on", () => {

@@ -113,7 +113,7 @@ function buildSubjects(d: Dashboard): Map<string, Subject> {
     const reason = finished && run ? `“${run.name ?? run.firstPrompt.slice(0, 60)}” finished ${age(run.statusSince, Date.parse(d.generatedAt))} ago` : a.reason;
     s.items.push({ ...a, reason, gist: summaryText(summary), finished });
   }
-  for (const s of out.values()) s.fingerprint = s.items.map((a) => `${a.kind}@${a.updatedAt}`).join("|");
+  for (const s of out.values()) s.fingerprint = s.items.map((a) => `${a.kind}${a.finished ? ":finished" : ""}@${a.updatedAt}`).join("|");
   return out;
 }
 
