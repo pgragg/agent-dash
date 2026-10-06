@@ -1219,7 +1219,19 @@ function firstStep(data: Dashboard, s: Subject): NextStep | null {
 }
 
 /** The entries behind "N notifications", in queue order, each with where to act. */
-function NeedsView({ queue, hidden, data, now }: { queue: Subject[]; hidden: number; data: Dashboard; now: number }) {
+function NeedsView({
+  queue,
+  hidden,
+  data,
+  now,
+  onDismiss,
+}: {
+  queue: Subject[];
+  hidden: number;
+  data: Dashboard;
+  now: number;
+  onDismiss: (s: Subject) => void;
+}) {
   return (
     <article className="workspace">
       <header className="ws-head">
@@ -1276,6 +1288,13 @@ function NeedsView({ queue, hidden, data, now }: { queue: Subject[]; hidden: num
                   <a className="btn small primary" href={href(next.ref)}>
                     {next.label} →
                   </a>
+                  <button
+                    className="btn small ghost"
+                    onClick={() => onDismiss(s)}
+                    title="Done for now. It comes back when something about it changes."
+                  >
+                    Dismiss
+                  </button>
                 </li>
               );
             })}
@@ -1788,7 +1807,7 @@ export function App() {
 
       {route.view === "needs" ? (
         <main className="main">
-          <NeedsView queue={queue} hidden={done.length} data={data} now={now} />
+          <NeedsView queue={queue} hidden={done.length} data={data} now={now} onDismiss={doneForNow.markDone} />
         </main>
       ) : route.view === "actions" ? (
         <main className="main">
