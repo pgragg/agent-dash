@@ -119,6 +119,13 @@ kbd {
 .tag.tone-warn { background: var(--warn-bg); color: var(--warn); }
 .tag.tone-good { background: var(--good-bg); color: var(--good); }
 .tag.tone-muted { background: var(--hover); color: var(--muted); }
+/* What the row is (Agent, PR, Due date): plain, so the status chip next to it keeps the colour. */
+.tag.type-chip { background: transparent; box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); }
+.row-head { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.row-name { color: var(--ink); }
+a.row-name { text-decoration: none; }
+a.row-name:hover { text-decoration: underline; }
+.why-main { min-width: 0; }
 
 .pill { font-size: 12px; font-weight: 500; padding: 1px 9px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--ink-2); }
 .pill.cat-indeterminate { border-color: transparent; background: var(--working-bg); color: var(--working); }

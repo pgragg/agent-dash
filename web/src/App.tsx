@@ -25,6 +25,7 @@ import { DiagramCards, DiagramsView, DiagramView } from "./diagrams.tsx";
 import { SessionScope } from "./mermaid.tsx";
 import { type BoardMode, kanbanColumns, type Searchable, searchCards, stageOf, useBoardMode } from "./kanban.ts";
 import { starredFirst } from "./star.ts";
+import { rowName, rowType } from "./whyRow.ts";
 import { DEFAULT_SNOOZE, isSnoozed, SNOOZE_OPTIONS, type SnoozeOption, snoozeUntil, untilLabel } from "./snooze.ts";
 
 /**
@@ -111,7 +112,7 @@ function buildSubjects(d: Dashboard): Map<string, Subject> {
     const finished = a.kind === "awaiting_input" && agentFinished(run, summary);
     // The server's reason says "is waiting for you", which a finished agent is not.
     const reason = finished && run ? `“${run.name ?? run.firstPrompt.slice(0, 60)}” finished ${age(run.statusSince, Date.parse(d.generatedAt))} ago` : a.reason;
-    s.items.push({ ...a, reason, gist: summaryText(summary), finished });
+    s.items.push({ ...a, reason, status: finished ? "finished" : a.status, gist: summaryText(summary), finished });
   }
   for (const s of out.values()) s.fingerprint = s.items.map((a) => `${a.kind}${a.finished ? ":finished" : ""}@${a.updatedAt}`).join("|");
   return out;
@@ -201,6 +202,31 @@ function useDoneForNow() {
 
 function Dot({ tone, pulse }: { tone: string; pulse?: boolean }) {
   return <span className={`dot tone-${tone} ${pulse ? "pulse" : ""}`} aria-hidden />;
+}
+
+/** "Agent · waiting 13h · <name>": what the row is, its state, and a link to it. */
+function RowHead({ a, summary, pageTicket }: { a: Item; summary?: ConversationSummary; pageTicket?: string | null }) {
+  const name = rowName(a, summary, pageTicket);
+  return (
+    <span className="row-head">
+      <TypeChip kind={a.kind} />
+      <span className={`tag tone-${look(a).tone}`}>{a.status}</span>
+      {name &&
+        (name.ref ? (
+          <a className="row-name" href={href(name.ref)} title={name.full}>
+            {name.text}
+          </a>
+        ) : (
+          <span className="row-name" title={name.full}>
+            {name.text}
+          </span>
+        ))}
+    </span>
+  );
+}
+
+function TypeChip({ kind }: { kind: ActionKind }) {
+  return <span className="tag type-chip">{rowType(kind)}</span>;
 }
 
 function Kbd({ children }: { children: string }) {
@@ -995,9 +1021,8 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
             {s.items.map((a, i) => (
               // A stable key: the verb button keeps its "Started" state when the list changes order.
               <li key={`${a.kind}:${a.prUrl ?? a.sessionId ?? a.ticketKey ?? i}`}>
-                <Dot tone={look(a).tone} />
-                <span>
-                  {a.reason}
+                <span className="why-main" title={a.reason}>
+                  <RowHead a={a} summary={a.sessionId ? data.conversationSummaries[a.sessionId] : undefined} pageTicket={t?.key} />
                   {a.gist && <span className="why-gist">{a.gist}</span>}
                 </span>
                 <PrVerbButton item={a} data={data} />
@@ -1168,6 +1193,7 @@ function ActionRow({ a, now }: { a: Action; now: number }) {
       <div className="action-body">
         <div className="action-summary">{inline(a.summary)}</div>
         <div className="action-meta">
+          <TypeChip kind={a.kind} />
           <span className={`tag tone-${kind.tone}`}>{kind.short}</span>
           {a.ticketKey ? (
             <a className="key-link" href={href(`t:${a.ticketKey}`)} title="Open the ticket on the board">
@@ -1268,7 +1294,7 @@ function NeedsView({
                   <Dot tone={tone} />
                   <div className="action-body">
                     <div className="action-summary">
-                      <b className={`tone-text-${tone}`}>{look(item).title}</b> · {inline(item.reason)}
+                      <TypeChip kind={item.kind} /> <b className={`tone-text-${tone}`}>{look(item).title}</b> · {inline(item.reason)}
                     </div>
                     {item.gist && <div className="need-gist">{item.gist}</div>}
                     <div className="action-meta">

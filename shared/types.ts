@@ -219,6 +219,12 @@ export interface AttentionItem {
   score: number;
   /** One line that says why this item is on the list. */
   reason: string;
+  /** The object's own name, in full: the run's session name, "repo#n" for a PR, or the ticket key. */
+  name: string;
+  /** A PR row's PR title. */
+  title?: string;
+  /** The state in a few words, for the row's status chip: "waiting 13h", "CI red", "3d late". */
+  status: string;
   /** Context, not a call to act: the ball is with someone else. Alone, it does not put an entry in the queue. */
   info?: boolean;
   ticketKey: string | null;

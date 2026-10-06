@@ -4,7 +4,7 @@ import type { AttentionItem } from "../shared/types.ts";
 import { parseHash } from "../web/src/routes.ts";
 import { needStep } from "../web/src/needs.ts";
 
-const item = (o: Partial<AttentionItem>): AttentionItem => ({ kind: "awaiting_input", score: 1, reason: "", ticketKey: "FSDK-1", ticketUrl: null, since: "", updatedAt: "", ...o });
+const item = (o: Partial<AttentionItem>): AttentionItem => ({ kind: "awaiting_input", score: 1, reason: "", name: "", status: "", ticketKey: "FSDK-1", ticketUrl: null, since: "", updatedAt: "", ...o });
 const step = { id: 5, summaryId: 1, ticket: "FSDK-1", position: 1, body: "do" };
 
 test("#/needs opens the needs-you view", () => {
