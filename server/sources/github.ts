@@ -6,17 +6,21 @@ import { extractTickets } from "./sessions.ts";
 
 const run = promisify(execFile);
 
-const QUERY = `query($q: String!) {
+const PR_FIELDS = `url number title state isDraft headRefName reviewDecision mergeable mergeStateStatus updatedAt
+        repository { nameWithOwner }
+        commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state contexts(first: 50) { nodes { ... on CheckRun { name conclusion } ... on StatusContext { context state } } } } } } }`;
+
+/** GitHub charges for each nested page that it could return, so these cost about 50 of the 55 points. */
+const FEEDBACK_FIELDS = `author { login }
+        reviews(last: 30) { nodes { author { login __typename } state body submittedAt url } }
+        comments(last: 30) { nodes { author { login __typename } createdAt url } }
+        reviewThreads(first: 50) { nodes { isResolved isOutdated comments(last: 1) { nodes { author { login __typename } createdAt url } } } }`;
+
+const searchQuery = (fields: string) => `query($q: String!) {
   search(query: $q, type: ISSUE, first: 100) {
     nodes {
       ... on PullRequest {
-        url number title state isDraft headRefName reviewDecision mergeable mergeStateStatus updatedAt
-        repository { nameWithOwner }
-        author { login }
-        reviews(last: 30) { nodes { author { login __typename } state body submittedAt url } }
-        comments(last: 30) { nodes { author { login __typename } body createdAt url } }
-        reviewThreads(first: 50) { nodes { isResolved isOutdated comments(last: 1) { nodes { author { login __typename } createdAt url } } } }
-        commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state contexts(first: 50) { nodes { ... on CheckRun { name conclusion } ... on StatusContext { context state } } } } } } }
+        ${fields}
       }
     }
   }
@@ -80,8 +84,9 @@ export function feedbackOf(n: any): Omit<FeedbackSource, "addressed"> {
   };
 }
 
-async function searchPrs(q: string, ticketPattern: RegExp): Promise<PullWithFeedback[]> {
-  const { stdout } = await run("gh", ["api", "graphql", "-f", `query=${QUERY}`, "-f", `q=${q}`], { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 });
+async function searchPrs(q: string, ticketPattern: RegExp, withFeedback: boolean): Promise<PullWithFeedback[]> {
+  const query = searchQuery(withFeedback ? `${PR_FIELDS}\n        ${FEEDBACK_FIELDS}` : PR_FIELDS);
+  const { stdout } = await run("gh", ["api", "graphql", "-f", `query=${query}`, "-f", `q=${q}`], { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 });
   const nodes: any[] = JSON.parse(stdout).data?.search?.nodes ?? [];
   return nodes
     .filter((n) => n?.url)
@@ -100,14 +105,14 @@ async function searchPrs(q: string, ticketPattern: RegExp): Promise<PullWithFeed
       mergeStateStatus: n.mergeStateStatus ?? "UNKNOWN",
       updatedAt: n.updatedAt,
       tickets: extractTickets(`${n.title} ${n.headRefName}`, ticketPattern),
-      ...(n.state === "OPEN" ? { feedback: feedbackOf(n) } : {}),
+      ...(withFeedback && n.state === "OPEN" ? { feedback: feedbackOf(n) } : {}),
     }));
 }
 
 /** My PRs updated in the window. Uses the `gh` login, so no token is stored here. */
 export function fetchMyPrs(sinceDays: number, ticketPattern: RegExp): Promise<PullWithFeedback[]> {
   const since = new Date(Date.now() - sinceDays * 86_400_000).toISOString().slice(0, 10);
-  return searchPrs(`is:pr author:@me updated:>=${since}`, ticketPattern);
+  return searchPrs(`is:pr author:@me updated:>=${since}`, ticketPattern, true);
 }
 
 /**
@@ -116,5 +121,6 @@ export function fetchMyPrs(sinceDays: number, ticketPattern: RegExp): Promise<Pu
  */
 export async function fetchTicketPrs(key: string, ticketPattern: RegExp): Promise<PullRequest[]> {
   // Search matches words, so FSDK-12 would also find FSDK-123; keep only exact keys.
-  return (await searchPrs(`is:pr in:title "${key}"`, ticketPattern)).filter((p) => p.tickets.includes(key)).map(({ feedback: _f, ...p }) => p);
+  // No feedback fields: the SDLC bar does not read them, and they are most of the search's cost.
+  return (await searchPrs(`is:pr in:title "${key}"`, ticketPattern, false)).filter((p) => p.tickets.includes(key));
 }
