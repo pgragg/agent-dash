@@ -118,8 +118,8 @@ function ticketItems(tickets: Ticket[], runs: Run[], prs: PullRequest[], now: nu
   return items;
 }
 
-export function rankAttention(runs: Run[], prs: PullRequest[], tickets: Ticket[], now: number, jiraServer = ""): AttentionItem[] {
+export function rankAttention(runs: Run[], prs: PullRequest[], tickets: Ticket[], now: number, ticketUrl: (key: string) => string | null = () => null): AttentionItem[] {
   return [...runItems(runs, now), ...prItems(prs, now), ...ticketItems(tickets, runs, prs, now)]
-    .map((item) => ({ ...item, ticketUrl: item.ticketKey && jiraServer ? `${jiraServer}/browse/${item.ticketKey}` : null }))
+    .map((item) => ({ ...item, ticketUrl: item.ticketKey ? ticketUrl(item.ticketKey) : null }))
     .sort((a, b) => b.score - a.score);
 }

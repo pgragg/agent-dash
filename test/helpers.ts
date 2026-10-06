@@ -71,6 +71,11 @@ export function pr(over: Partial<PullRequest> = {}): PullRequest {
   };
 }
 
+export const JIRA = { id: "jira", label: "Jira", dueDate: true, move: true };
+/** The model's link and stub for a key, as a Jira provider at https://jira gives them. */
+export const ticketUrl = (key: string) => `https://jira/browse/${key}`;
+export const stubTicket = (key: string): Ticket => ({ ...ticket({ key, url: ticketUrl(key), summary: "(not found in Jira)", status: "?", statusCategory: "new", priority: null, updatedAt: "", assignedToMe: false }) });
+
 export function ticket(over: Partial<Ticket> = {}): Ticket {
   return {
     key: "FSDK-1",
@@ -82,6 +87,7 @@ export function ticket(over: Partial<Ticket> = {}): Ticket {
     dueDate: null,
     updatedAt: minutesAgo(60),
     assignedToMe: true,
+    source: JIRA,
     ...over,
   };
 }

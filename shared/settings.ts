@@ -5,6 +5,31 @@ import { AGENT_LABEL, DEFAULT_TEAM, type Team } from "./team.ts";
  * defaults, env overrides and validation, and the Settings page's form. Free of Node and React.
  */
 
+/**
+ * One ticket tracker in `ticketProviders`. `id` names it in the source health and must be unique;
+ * it defaults to the type (`jira`) or `local-<prefix>`.
+ */
+export type TicketProviderSettings =
+  | {
+      type: "jira";
+      id?: string;
+      server: string;
+      login: string;
+      /** A file with a JIRA_API_TOKEN=… line. The JIRA_API_TOKEN env var wins over it. */
+      tokenFile: string;
+      excludeProjects: string[];
+      /** Key prefixes in this Jira. Empty: every key that no other provider claims. */
+      projects: string[];
+    }
+  | {
+      type: "local";
+      id?: string;
+      /** The key prefix, such as AD for AD-12. */
+      prefix: string;
+      /** The folder above the status folders: <dir>/<status>/<PREFIX>-<n>-<slug>.md. */
+      dir: string;
+    };
+
 export interface Settings extends Team {
   port: number;
   sessionsDir: string;
@@ -23,6 +48,11 @@ export interface Settings extends Team {
   slackWorkspaceUrl: string;
   slackReloginCommand: string;
   smoketestGuide: string;
+  /**
+   * The ticket trackers, in order. Empty: the flat Jira fields and the local tickets folder make
+   * them. The Settings page does not edit this list yet; the file does.
+   */
+  ticketProviders: TicketProviderSettings[];
 }
 
 export type SettingKey = keyof Settings;
@@ -69,6 +99,7 @@ export const DEFAULT_SETTINGS: Settings = {
   slackWorkspaceUrl: "https://postman.enterprise.slack.com",
   slackReloginCommand: "",
   smoketestGuide: "",
+  ticketProviders: [],
 };
 
 const PROJECT = /^[A-Z][A-Z0-9]*$/;
@@ -149,7 +180,7 @@ export const SETTING_FIELDS: SettingField[] = [
   },
   {
     key: "localTicketsDir", group: "Tickets", label: "Local tickets folder", kind: "path", env: "AGENT_DASH_LOCAL_TICKETS_DIR",
-    help: "agent-dash's own AD-<n> tickets: <folder>/<status>/AD-<n>-<slug>.md. Add AD to the ticket projects too.",
+    help: "agent-dash's own AD-<n> tickets: <folder>/<status>/AD-<n>-<slug>.md. AD keys link without a ticket project. For other prefixes or folders, use a ticketProviders list in the file.",
     example: "~/pi/projects/27_agent_dash/project_management",
     find: "Usually empty: only for people who work on agent-dash itself. It is the folder above the status folders of the AD-*.md files: `mdfind -onlyin ~ 'kMDItemFSName == \"AD-*.md\"' | grep -E '/(todo|in-progress|in-review|done|canceled)/AD-' | head -3`.",
   },
@@ -227,6 +258,42 @@ export const SETTING_FIELDS: SettingField[] = [
   },
 ];
 
+const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
+const text = (v: unknown): v is string => typeof v === "string" && v.length <= 1_000 && !/[\r\n]/.test(v);
+
+/** The `ticketProviders` list, checked, or an error for the first bad entry. */
+export function validateTicketProviders(v: unknown): { value: TicketProviderSettings[] } | { error: string } {
+  if (!Array.isArray(v)) return { error: "must be a list of ticket providers" };
+  const out: TicketProviderSettings[] = [];
+  for (const [i, raw] of v.entries()) {
+    const p = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    const id = p.id === undefined ? undefined : text(p.id) && /^[\w-]+$/.test(p.id) ? p.id : null;
+    if (id === null) return { error: `entry ${i + 1}: id must be letters, digits, - or _` };
+    if (p.type === "jira") {
+      const server = p.server ?? "";
+      if (!text(server) || (server && !/^https?:\/\/[^\s/]+/.test(server))) return { error: `entry ${i + 1}: server must start with http:// or https://` };
+      for (const k of ["login", "tokenFile"]) if (p[k] !== undefined && !text(p[k])) return { error: `entry ${i + 1}: ${k} must be one line of text` };
+      for (const k of ["excludeProjects", "projects"]) {
+        if (p[k] !== undefined && !(strings(p[k]) && p[k].every((x) => PROJECT.test(x)))) return { error: `entry ${i + 1}: ${k} must be a list of project keys` };
+      }
+      out.push({
+        type: "jira",
+        ...(id ? { id } : {}),
+        server: server.trim().replace(/\/+$/, ""),
+        login: ((p.login as string) ?? "").trim(),
+        tokenFile: ((p.tokenFile as string) ?? "").trim(),
+        excludeProjects: (p.excludeProjects as string[]) ?? [],
+        projects: (p.projects as string[]) ?? [],
+      });
+    } else if (p.type === "local") {
+      if (!text(p.prefix) || !PROJECT.test(p.prefix)) return { error: `entry ${i + 1}: prefix must be a project key, such as AD` };
+      if (!text(p.dir) || !p.dir.trim()) return { error: `entry ${i + 1}: dir must be a folder` };
+      out.push({ type: "local", ...(id ? { id } : {}), prefix: p.prefix, dir: p.dir.trim() });
+    } else return { error: `entry ${i + 1}: type must be jira or local` };
+  }
+  return { value: out };
+}
+
 /** A list setting from an env var: "A,B", "A|B" (the old regex form) or "A B". */
 export const splitList = (s: string): string[] => s.split(/[\s,|]+/).filter(Boolean);
 
@@ -265,6 +332,12 @@ export function validateSettings(input: unknown): { settings: Settings; errors: 
       else if (s && f.pattern && !f.pattern.test(s)) errors[f.key] = "does not look right";
       else settings[f.key] = f.kind === "url" ? s.replace(/\/+$/, "") : s;
     }
+  }
+  // Not a field of the form: a list of objects, which the file holds.
+  if (Object.hasOwn(raw, "ticketProviders")) {
+    const r = validateTicketProviders(raw.ticketProviders);
+    if ("error" in r) errors.ticketProviders = r.error;
+    else settings.ticketProviders = r.value;
   }
   return { settings: settings as unknown as Settings, errors };
 }

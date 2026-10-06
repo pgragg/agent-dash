@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { DEFAULT_SETTINGS, SETTING_FIELDS, type SettingKey, type Settings, splitList, validateSettings } from "../shared/settings.ts";
+import { DEFAULT_SETTINGS, SETTING_FIELDS, type SettingKey, type Settings, splitList, type TicketProviderSettings, validateSettings } from "../shared/settings.ts";
 import { setTeam } from "../shared/team.ts";
 
 const home = homedir();
@@ -103,10 +103,38 @@ export function ticketPatternOf(projects: string[], ignore: string[]): RegExp {
   return new RegExp(`\\b${skip}(?:${projects.map(escape).join("|")})-\\d+\\b`, "g");
 }
 
+/** A provider's settings with its id set and its paths expanded. */
+export type TicketProviderConfig = TicketProviderSettings & { id: string };
+
+/**
+ * The ticket trackers, in order. The file's `ticketProviders` list wins; without one, the flat Jira
+ * fields make a Jira provider and the local tickets folder makes an AD provider, as before the list.
+ */
+export function ticketProvidersOf(s: Settings): TicketProviderConfig[] {
+  const list: TicketProviderSettings[] = s.ticketProviders.length
+    ? s.ticketProviders
+    : [
+        ...(s.jiraServer ? [{ type: "jira" as const, server: s.jiraServer, login: s.jiraLogin, tokenFile: s.jiraTokenFile, excludeProjects: s.jiraExcludeProjects, projects: [] }] : []),
+        ...(s.localTicketsDir ? [{ type: "local" as const, prefix: "AD", dir: s.localTicketsDir }] : []),
+      ];
+  return list.map((p) =>
+    p.type === "jira"
+      ? { ...p, id: p.id ?? "jira", tokenFile: expandPath(p.tokenFile) }
+      : { ...p, id: p.id ?? `local-${p.prefix}`, dir: expandPath(p.dir) },
+  );
+}
+
+/** The ticket projects, plus each provider's own prefixes, so a local folder needs no second setting. */
+export function ticketProjectsOf(s: Settings, providers: TicketProviderConfig[]): string[] {
+  const own = providers.flatMap((p) => (p.type === "local" ? [p.prefix] : p.projects));
+  return [...new Set([...s.ticketProjects, ...own])];
+}
+
 /** The folder of an agent's session logs. */
 export const sessionsDirOf = (s: Settings, agent: Settings["agent"]): string => expandPath(agent === "claude" ? s.claudeProjectsDir : s.sessionsDir);
 
 export function buildConfig(s: Settings) {
+  const providers = ticketProvidersOf(s);
   return {
     settings: s,
     port: s.port,
@@ -121,16 +149,10 @@ export function buildConfig(s: Settings) {
     handoffDir: join(home, ".agent-dash/handoffs"),
     /** stdin FIFO and output log of each headless conversation started from the dash. */
     conversationsDir: env.AGENT_DASH_CONVERSATIONS_DIR ?? join(home, ".agent-dash/conversations"),
-    jira: {
-      server: s.jiraServer,
-      login: s.jiraLogin,
-      tokenFile: expandPath(s.jiraTokenFile),
-      excludeProjects: s.jiraExcludeProjects,
-    },
-    /** agent-dash's own tickets (`AD-<n>`): markdown files in one folder per status, not Jira issues. */
-    localTicketsDir: expandPath(s.localTicketsDir),
+    /** The ticket trackers that the board reads, in order. `server/tickets/registry.ts` makes a provider of each. */
+    ticketProviders: providers,
     /** Ticket keys that a run can link to. */
-    ticketPattern: ticketPatternOf(s.ticketProjects, s.ignoreTickets),
+    ticketPattern: ticketPatternOf(ticketProjectsOf(s, providers), s.ignoreTickets),
     piAuth: expandPath(s.piAuth),
     slack: {
       stateFile: expandPath(s.slackStateFile),
@@ -141,7 +163,7 @@ export function buildConfig(s: Settings) {
     smoketestGuide: expandPath(s.smoketestGuide),
     /** Runs and PRs older than this do not create "other ticket" groups or unlinked rows. */
     recentDays: s.recentDays,
-    /** Jira and GitHub answers are cached this long, so a page refresh does not hit the APIs. */
+    /** Remote tracker and GitHub answers are cached this long, so a page refresh does not hit the APIs. */
     remoteTtlMs: Number(env.AGENT_DASH_REMOTE_TTL_MS ?? 120_000),
   };
 }
@@ -149,18 +171,16 @@ export function buildConfig(s: Settings) {
 export const config = buildConfig(effectiveSettings(readSettingsFile().settings));
 setTeam(config.settings);
 
-/** Jira is asked only with a server and a login; without them it is off, not down. */
-export const jiraConfigured = (c: Pick<ReturnType<typeof buildConfig>, "jira"> = config): boolean => !!(c.jira.server && c.jira.login);
-
 /** What a new user still has to set before the board works, in words for the setup banner. */
-export function setupNeeded(c: Pick<ReturnType<typeof buildConfig>, "jira" | "settings"> = config, e: NodeJS.ProcessEnv = env): string[] {
+export function setupNeeded(c: Pick<ReturnType<typeof buildConfig>, "ticketProviders" | "settings"> = config, e: NodeJS.ProcessEnv = env): string[] {
   const out: string[] = [];
-  if (!c.jira.server) out.push("the Jira server");
-  else {
-    if (!c.jira.login) out.push("your Jira login");
-    if (!c.jira.tokenFile && !e.JIRA_API_TOKEN) out.push("a Jira token file");
+  if (!c.ticketProviders.length) out.push("the Jira server");
+  for (const p of c.ticketProviders) {
+    if (p.type !== "jira") continue;
+    if (!p.login) out.push("your Jira login");
+    if (!p.tokenFile && !e.JIRA_API_TOKEN) out.push("a Jira token file");
   }
-  if (!c.settings.ticketProjects.length) out.push("your ticket projects");
+  if (!ticketProjectsOf(c.settings, c.ticketProviders).length) out.push("your ticket projects");
   if (!c.settings.userName) out.push("your first name");
-  return out;
+  return [...new Set(out)];
 }

@@ -51,7 +51,9 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   } catch {
     return json(400, { error: "the body is not JSON" });
   }
-  const { settings, errors } = validateSettings(body);
+  // The page's form does not hold the ticket providers list, so a save keeps the file's.
+  const kept = { ticketProviders: readSettingsFile(file).settings.ticketProviders };
+  const { settings, errors } = validateSettings({ ...kept, ...(body && typeof body === "object" ? body : {}) });
   if (Object.keys(errors).length) return json(400, { error: "some settings are not valid", errors });
   writeSettingsFile(settings, file);
   return json(200, settingsState(file, readOnly));

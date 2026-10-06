@@ -18,8 +18,10 @@ const GH_TOKEN_FILE = process.env.AGENT_DASH_GH_TOKEN_FILE ?? join(homedir(), ".
 export const LOGIN_TARGETS: Record<string, "gh" | "pi-auth"> = { github: "gh", jira: "pi-auth" };
 
 /** What to do by hand when automated login fails. */
+const jira = config.ticketProviders.find((p) => p.id === "jira");
+const jiraTokenFile = jira?.type === "jira" ? jira.tokenFile : "";
 const MANUAL: Record<string, string> = {
-  jira: `Make a new API token at https://id.atlassian.com/manage-profile/security/api-tokens and put it in ${config.jira.tokenFile ? `${config.jira.tokenFile} as JIRA_API_TOKEN=…` : "the JIRA_API_TOKEN env var, or in a token file that you set on the Settings page"}.`,
+  jira: `Make a new API token at https://id.atlassian.com/manage-profile/security/api-tokens and put it in ${jiraTokenFile ? `${jiraTokenFile} as JIRA_API_TOKEN=…` : "the JIRA_API_TOKEN env var, or in a token file that you set on the Settings page"}.`,
   github: "Run `gh auth login` in a terminal, then retry.",
 };
 

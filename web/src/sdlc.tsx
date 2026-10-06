@@ -12,7 +12,7 @@ import type { SmoketestRow } from "./smoketestRow.ts";
 /**
  * The SDLC progress bar at the top of a ticket, and the ticket's Smoketests card. Smoketest plans,
  * smoketest executions and confirmed deploys are rows in SQLite; the PR stage reads GitHub and
- * the Done stage reads Jira. An agent plans each smoketest first. A plan that changes Beta or
+ * the Done stage reads the ticket status. An agent plans each smoketest first. A plan that changes Beta or
  * Prod state runs only after Piper confirms it here.
  */
 

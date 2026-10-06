@@ -352,7 +352,7 @@ export const api = {
     return json.sessionId;
   },
   endConversation: (sessionId: string) => post(`/api/conversations/end?session=${encodeURIComponent(sessionId)}`),
-  /** `from` is the due date the page showed; the server refuses if Jira holds another one. */
+  /** `from` is the due date the page showed; the server refuses if the tracker holds another one. */
   setDueDate: (ticket: string, date: string, from: string | null) => post(`/api/ticket/due?key=${encodeURIComponent(ticket)}`, { date, from }),
   moveTicket: (ticket: string, to: string, from: string) => post(`/api/ticket/move?key=${encodeURIComponent(ticket)}`, { to, from }),
   startAgent: (ticket: string, message: string, cwd: string) => post(`/api/agents?ticket=${encodeURIComponent(ticket)}`, { message, cwd }),

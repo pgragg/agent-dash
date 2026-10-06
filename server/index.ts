@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, normalize } from "node:path";
 import type { Dashboard, PullRequest, SourceHealth, Ticket } from "../shared/types.ts";
-import { config, jiraConfigured, setupNeeded } from "./config.ts";
+import { config, setupNeeded } from "./config.ts";
 import { team } from "../shared/team.ts";
 import { startConversation } from "./conversations.ts";
 import { recordExit, wroteRecently } from "./exits.ts";
@@ -35,8 +35,8 @@ import { sweep as sweepParks } from "./park.ts";
 import { fetchMyPrs, ghLogin, type PullWithFeedback } from "./sources/github.ts";
 import { toAddressCount } from "../shared/feedback.ts";
 import { approvalCount } from "../shared/ownerApproval.ts";
-import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
-import { isLocalKey, readLocalTickets } from "./sources/localTickets.ts";
+import type { TicketProvider } from "./tickets/provider.ts";
+import { ticketProviders } from "./tickets/registry.ts";
 import { SessionIndex, transcriptTurns } from "./sources/sessions.ts";
 import { isAlive, readReportedStatuses } from "./sources/status.ts";
 import * as summaryDb from "./summaries/db.ts";
@@ -86,15 +86,49 @@ class Cached<T> {
 }
 
 const sessions = new SessionIndex(config.sessionsDir, config.ticketPattern);
-/** With no Jira server or login, Jira is off: no requests, and no "Jira down". */
-const JIRA_ON = jiraConfigured();
-const myTickets = new Cached<Ticket[]>([], JIRA_ON ? fetchMyTickets : async () => []);
+/**
+ * Each ticket provider's tickets. A remote one keeps its open list in a cache and the tickets that
+ * runs name in `others`; an exhaustive one (local files) is read again on every build.
+ */
+interface ProviderState {
+  provider: TicketProvider;
+  mine: Cached<Ticket[]> | null;
+  others: Map<string, Ticket>;
+  othersHealth: SourceHealth;
+  /** Exhaustive providers: the last build's tickets, and its health. */
+  all: Map<string, Ticket>;
+  readHealth: SourceHealth;
+}
+const providerStates: ProviderState[] = ticketProviders.list.map((provider) => ({
+  provider,
+  mine: provider.enabled && !provider.exhaustive ? new Cached<Ticket[]>([], () => provider.listMine()) : null,
+  others: new Map(),
+  othersHealth: { ok: true },
+  all: new Map(),
+  readHealth: { ok: true },
+}));
+const stateFor = (key: string) => {
+  const p = ticketProviders.providerFor(key);
+  return providerStates.find((s) => s.provider === p);
+};
+
+/** One health per provider: off when it is not set up, else the worst of its reads. */
+function providerHealth(s: ProviderState): SourceHealth {
+  const label = s.provider.source.label;
+  if (!s.provider.enabled) return { ok: true, off: true, label };
+  if (!s.mine) return { ...s.readHealth, label };
+  return { ...(!s.mine.health.ok || s.othersHealth.ok ? s.mine.health : s.othersHealth), label };
+}
 const prs = new Cached<PullWithFeedback[]>([], () => fetchMyPrs(config.recentDays, config.ticketPattern));
 /** Force a refresh of GitHub data after login. */
 export const refreshGitHub = () => prs.get(true);
 loginRoute.setOnGitHubLogin(refreshGitHub);
-const others = new Map<string, Ticket>();
-let othersHealth: SourceHealth = { ok: true };
+
+/** Every key with the provider's prefix that a session or PR names, at any time. */
+function allKeys(sessions: { tickets: string[] }[], pulls: { tickets: string[] }[], p: TicketProvider): string[] {
+  const keys = new Set([...sessions, ...pulls].flatMap((x) => x.tickets));
+  return [...keys].filter((k) => ticketProviders.providerFor(k) === p);
+}
 
 /** Counted on each build, so a feedback entry marked addressed on the panel counts at once. */
 function withToAddress({ feedback, ...pr }: PullWithFeedback): PullRequest {
@@ -106,34 +140,56 @@ function withToAddress({ feedback, ...pr }: PullWithFeedback): PullRequest {
 async function dashboard(force: boolean) {
   const now = Date.now();
   let sessionsHealth: SourceHealth = { ok: true, fetchedAt: new Date(now).toISOString() };
-  const [scanned, reported, jiraMine, rawPulls] = await Promise.all([
+  const [scanned, reported, remoteMine, rawPulls] = await Promise.all([
     sessions.scan().catch((err: Error) => {
       sessionsHealth = { ok: false, error: err.message };
       return [];
     }),
     readReportedStatuses(config.statusDir),
-    myTickets.get(force),
+    Promise.all(providerStates.map((s) => s.mine?.get(force) ?? [])),
     prs.get(force),
   ]);
 
-  // agent-dash's own tickets are local files, so they are read again on each build and never asked of Jira.
-  const local = new Map(readLocalTickets(config.localTicketsDir, config.port).map((t) => [t.key, t]));
-  // Keys match in any case, so a name such as /tmp/ad-7791.log reads as a key. With no file, it is not a ticket.
-  const real = (k: string) => !isLocalKey(k) || local.has(k);
+  // Exhaustive providers are cheap, so they are read again on each build and never cached.
+  for (const s of providerStates) {
+    if (!s.provider.exhaustive || !s.provider.enabled) continue;
+    try {
+      s.all = new Map((await s.provider.lookup(allKeys(scanned, rawPulls, s.provider))).map((t) => [t.key, t]));
+      s.readHealth = { ok: true, fetchedAt: new Date(now).toISOString() };
+    } catch (err) {
+      s.readHealth = { ok: false, error: (err as Error).message };
+    }
+  }
+  // Keys match in any case, so a name such as /tmp/ad-7791.log reads as a key. An exhaustive provider
+  // knows all of its tickets, so a key that it did not find is not a ticket.
+  const real = (k: string) => {
+    const s = stateFor(k);
+    return !s?.provider.exhaustive || s.all.has(k);
+  };
   const parsed = scanned.map((s) => (s.tickets.every(real) ? s : { ...s, tickets: s.tickets.filter(real) }));
   const pulls = rawPulls.map(withToAddress).map((p) => (p.tickets.every(real) ? p : { ...p, tickets: p.tickets.filter(real) }));
-  const mine = [...jiraMine, ...[...local.values()].filter((t) => t.statusCategory !== "done")];
+  const exhaustiveMine = await Promise.all(providerStates.map((s) => (s.provider.exhaustive && s.provider.enabled ? s.provider.listMine().catch(() => []) : [])));
+  const mine = [...remoteMine.flat(), ...exhaustiveMine.flat()];
   const otherKeys = otherTicketKeys(parsed, pulls, new Set(mine.map((t) => t.key)), now, config.recentDays);
-  const otherLocal = otherKeys.flatMap((k) => local.get(k) ?? []);
-  // Tickets outside my open list are looked up once and kept; their summaries rarely change.
-  const missing = JIRA_ON ? otherKeys.filter((k) => !isLocalKey(k) && (force || !others.has(k))) : [];
-  if (missing.length) {
-    try {
-      for (const t of await fetchTickets(missing)) others.set(t.key, t);
-      othersHealth = { ok: true };
-    } catch (err) {
-      othersHealth = { ok: false, error: (err as Error).message };
+  const otherTickets: Ticket[] = [];
+  for (const s of providerStates) {
+    if (!s.provider.enabled) continue;
+    const keys = otherKeys.filter((k) => stateFor(k) === s);
+    if (s.provider.exhaustive) {
+      otherTickets.push(...keys.flatMap((k) => s.all.get(k) ?? []));
+      continue;
     }
+    // Tickets outside my open list are looked up once and kept; their summaries rarely change.
+    const missing = keys.filter((k) => force || !s.others.has(k));
+    if (missing.length) {
+      try {
+        for (const t of await s.provider.lookup(missing)) s.others.set(t.key, t);
+        s.othersHealth = { ok: true };
+      } catch (err) {
+        s.othersHealth = { ok: false, error: (err as Error).message };
+      }
+    }
+    otherTickets.push(...s.others.values());
   }
 
   reconcile();
@@ -144,16 +200,15 @@ async function dashboard(force: boolean) {
     summaries[key] = { latest: pub(latest), lastDone: lastDone ? pub(lastDone) : null };
   }
 
-  const jira = !JIRA_ON ? { ok: true, off: true } : !myTickets.health.ok ? myTickets.health : othersHealth.ok ? myTickets.health : othersHealth;
   const d = buildDashboard({
     sessions: parsed,
     reported,
     myTickets: mine,
-    otherTickets: [...others.values(), ...otherLocal],
+    otherTickets,
     prs: pulls,
     now,
     recentDays: config.recentDays,
-    sources: { jira, github: prs.health, sessions: sessionsHealth },
+    sources: { ...Object.fromEntries(providerStates.map((s) => [s.provider.source.id, providerHealth(s)])), github: { ...prs.health, label: "GitHub" }, sessions: sessionsHealth },
     extensionInstalled: config.agent === "claude" ? claudeHooksInstalled() : existsSync(piExtensionFile()),
     summaries,
     notes: summaryDb.notesByTicket(),
@@ -162,7 +217,8 @@ async function dashboard(force: boolean) {
     threads: summaryDb.currentThreadStatuses(),
     parked: new Set(summaryDb.activeParked().map((p) => p.sessionId)),
     folderExists: existsSync,
-    jiraServer: config.jira.server,
+    ticketUrl: ticketProviders.ticketUrl,
+    stubTicket: ticketProviders.stub,
   });
 
   // A recent run can take its ticket from its PR; old logs cannot.
@@ -190,9 +246,9 @@ async function dashboard(force: boolean) {
   return d;
 }
 
-/** Show a Jira change the dash just made at once, without a new Jira search. */
+/** Show a ticket change the dash just made at once, without asking the provider again. */
 const onTicketChange: ticketRoute.OnTicketChange = (key, patch) => {
-  for (const t of [...myTickets.value, ...others.values()]) if (t.key === key) Object.assign(t, patch);
+  for (const s of providerStates) for (const t of [...(s.mine?.value ?? []), ...s.others.values()]) if (t.key === key) Object.assign(t, patch);
   broadcast();
 };
 

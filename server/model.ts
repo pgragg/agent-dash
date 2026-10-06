@@ -24,7 +24,10 @@ export interface ModelInput {
   isAlive?: (pid: number) => boolean;
   /** For a run with no status file: a run whose folder is gone is not live. */
   folderExists?: (dir: string) => boolean;
-  jiraServer: string;
+  /** A ticket's link from its provider, or null when no provider owns the key. */
+  ticketUrl: (key: string) => string | null;
+  /** A ticket that a run names but that its provider did not return. */
+  stubTicket: (key: string) => Ticket;
 }
 
 export function toRuns(sessions: ParsedSession[], reported: Map<string, ReportedStatus>, now: number, isAlive?: (pid: number) => boolean, folderExists?: (dir: string) => boolean): Run[] {
@@ -111,7 +114,7 @@ export function isRecent(iso: string, now: number, days: number): boolean {
   return now - Date.parse(iso) <= days * 86_400_000;
 }
 
-/** Ticket keys worth a Jira lookup: named by a recent run or PR, but not on my open list. */
+/** Ticket keys worth a provider lookup: named by a recent run or PR, but not on my open list. */
 export function otherTicketKeys(sessions: ParsedSession[], prs: PullRequest[], myKeys: Set<string>, now: number, days: number): string[] {
   const keys = new Set<string>();
   for (const s of sessions) if (s.userMessageCount > 0 && isRecent(s.lastActivityAt, now, days)) s.tickets.forEach((k) => keys.add(k));
@@ -149,10 +152,6 @@ export function withoutResolved(runs: Run[], threads: ThreadMap, done: Set<strin
   });
 }
 
-function stubTicket(key: string, server: string): Ticket {
-  return { key, url: `${server}/browse/${key}`, summary: "(not found in Jira)", status: "?", statusCategory: "new", priority: null, dueDate: null, updatedAt: "", assignedToMe: false };
-}
-
 const byRecent = (a: Run, b: Run) => b.lastActivityAt.localeCompare(a.lastActivityAt);
 
 /**
@@ -187,7 +186,7 @@ export function buildDashboard(input: ModelInput): Dashboard {
   const done = new Set([...input.myTickets, ...input.otherTickets].filter((t) => t.statusCategory === "done").map((t) => t.key));
   const parked = input.parked ?? new Set<string>();
   const signalRuns = recentRuns.filter((r) => !(r.status === "finished" && parked.has(r.sessionId)));
-  const attention = rankAttention(withoutResolved(signalRuns, threads, done), prs, input.myTickets, now, input.jiraServer);
+  const attention = rankAttention(withoutResolved(signalRuns, threads, done), prs, input.myTickets, now, input.ticketUrl);
   // The ticket is closed, so nothing on it is a task any more: an open tab there is only worth knowing about.
   for (const a of attention) if (a.ticketKey && done.has(a.ticketKey)) a.info = true;
   attachRuns(attention, withoutResolved(runs, threads, done));
@@ -211,7 +210,7 @@ export function buildDashboard(input: ModelInput): Dashboard {
   const otherKeys = new Set([...recentRuns.flatMap((r) => r.tickets), ...prs.filter((p) => isRecent(p.updatedAt, now, recentDays)).flatMap((p) => p.tickets)]);
   const otherTickets = [...otherKeys]
     .filter((k) => !myKeys.has(k))
-    .map((k) => group(known.get(k) ?? stubTicket(k, input.jiraServer), runs, prs, threads))
+    .map((k) => group(known.get(k) ?? input.stubTicket(k), runs, prs, threads))
     .sort((a, b) => lastRunAt(b).localeCompare(lastRunAt(a)));
 
   const unlinkedRuns = recentRuns.filter((r) => r.tickets.length === 0).sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));

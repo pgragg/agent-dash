@@ -4,8 +4,8 @@ import type { Ticket, TicketDetail } from "../../shared/types.ts";
 import { age, api, Markdown, plural, stamp } from "./lib.tsx";
 
 /**
- * The ticket's description and newest comments, read from Jira when the section opens, and
- * verb buttons for one Jira change each. The server makes the change: no agent.
+ * The ticket's description and newest comments, read from its tracker when the section opens, and
+ * verb buttons for one change each, where the tracker supports it. The server makes the change: no agent.
  */
 
 const TTL_MS = 2 * 60_000;
@@ -45,7 +45,7 @@ export function useTicketDetail(key: string, open: boolean) {
   return { detail, error, reload: () => setNonce((n) => n + 1) };
 }
 
-/** Moves the ticket in Jira. The click is Piper's approval of that one change. */
+/** Moves the ticket in its tracker. The click is Piper's approval of that one change. */
 export function MoveButton({ ticket, target, from, onError, onMoved }: { ticket: string; target: MoveTarget; from: string; onError: (m: string | null) => void; onMoved: () => void }) {
   const [state, setState] = useState<"idle" | "moving" | "moved">("idle");
   const move = async () => {
@@ -58,13 +58,13 @@ export function MoveButton({ ticket, target, from, onError, onMoved }: { ticket:
     onMoved();
   };
   return (
-    <button className="btn small" disabled={state !== "idle"} onClick={move} title={`Move ${ticket} from "${from}"${target.via ? ` through "${target.via}"` : ""} to "${target.to}" in Jira`}>
+    <button className="btn small" disabled={state !== "idle"} onClick={move} title={`Move ${ticket} from "${from}"${target.via ? ` through "${target.via}"` : ""} to "${target.to}"`}>
       {state === "moving" ? "Moving…" : state === "moved" ? `${target.to} ✓` : `Move to ${target.to}`}
     </button>
   );
 }
 
-/** "Set due date": the server sets it in Jira. The click is Piper's approval of that one change. */
+/** "Set due date": the server sets it in the tracker. The click is Piper's approval of that one change. */
 export function DueDateVerb({ ticket, onError, onSet, compact = false }: { ticket: Ticket; onError: (m: string | null) => void; onSet?: () => void; compact?: boolean }) {
   const [open, setOpen] = useState(!compact);
   const [date, setDate] = useState(() => defaultDueDate(new Date()));
@@ -90,7 +90,7 @@ export function DueDateVerb({ ticket, onError, onSet, compact = false }: { ticke
     <span className="verb">
       <span className="meta">Set due date</span>
       <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-      <button className="btn small" disabled={!isDate(date) || date === ticket.dueDate || state !== "idle"} onClick={save} title={`Set ${ticket.key} due ${date} in Jira`}>
+      <button className="btn small" disabled={!isDate(date) || date === ticket.dueDate || state !== "idle"} onClick={save} title={`Set ${ticket.key} due ${date} in ${ticket.source.label}`}>
         {state === "saving" ? "Saving…" : state === "saved" ? "Saved ✓" : "Set"}
       </button>
       {ticket.dueDate && <span className="meta">changes {ticket.dueDate}</span>}
@@ -159,7 +159,7 @@ export function TicketPanel({ ticket, onError }: { ticket: Ticket; onError: (m: 
             Reload
           </button>
         )}
-        <a className="btn ghost small" href={ticket.url} target="_blank" rel="noreferrer" title={ticket.file ? "Open the ticket file" : "Open in Jira"}>
+        <a className="btn ghost small" href={ticket.url} target="_blank" rel="noreferrer" title={ticket.file ? "Open the ticket file" : `Open in ${ticket.source.label}`}>
           ↗
         </a>
       </header>
@@ -180,7 +180,7 @@ export function TicketPanel({ ticket, onError }: { ticket: Ticket; onError: (m: 
               {earlier > 0 && (
                 <li className="meta">
                   <a href={ticket.url} target="_blank" rel="noreferrer">
-                    {plural(earlier, "earlier comment")} in Jira ↗
+                    {plural(earlier, "earlier comment")} in {ticket.source.label} ↗
                   </a>
                 </li>
               )}
@@ -195,15 +195,16 @@ export function TicketPanel({ ticket, onError }: { ticket: Ticket; onError: (m: 
               ))}
             </ol>
           )}
-          {ticket.file ? (
-            <p className="meta">A local ticket: {ticket.file}. Move the file to another status folder to change its status.</p>
-          ) : (
+          {(ticket.source.move || ticket.source.dueDate) && (
             <>
               <div className="verbs">
-                <MoveVerb ticket={ticket} detail={detail} onError={onError} onMoved={reload} />
-                <DueDateVerb ticket={{ ...ticket, dueDate: detail.dueDate }} onError={onError} onSet={reload} />
+                {ticket.source.move && <MoveVerb ticket={ticket} detail={detail} onError={onError} onMoved={reload} />}
+                {ticket.source.dueDate && <DueDateVerb ticket={{ ...ticket, dueDate: detail.dueDate }} onError={onError} onSet={reload} />}
               </div>
-              <p className="meta">Both change Jira at once. A move can give a ticket with no due date the default one, two weeks out.</p>
+              <p className="meta">
+                {ticket.file ? `A move renames ${ticket.file} into the other status folder.` : `${ticket.source.move && ticket.source.dueDate ? "Both change" : "It changes"} ${ticket.source.label} at once.`}
+                {ticket.source.move && ticket.source.dueDate ? " A move can give a ticket with no due date the default one, two weeks out." : ""}
+              </p>
             </>
           )}
         </>

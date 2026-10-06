@@ -168,6 +168,11 @@ export function SettingsView() {
           This server runs in a worktree, so it uses the main checkout's settings. Change them from the main checkout's server.
         </div>
       )}
+      {state && state.saved.ticketProviders.length > 0 && (
+        <div className="toast settings-note" role="status">
+          The file's <code>ticketProviders</code> list sets the ticket trackers ({state.saved.ticketProviders.map((p) => (p.type === "jira" ? `Jira at ${p.server || "no server"}` : `${p.prefix} files`)).join(", ")}), so the Jira fields and the local tickets folder below are not used. Edit the list in the file.
+        </div>
+      )}
       {state?.restartNeeded && (
         <div className="toast settings-note" role="status">
           {saved ? "Saved. " : ""}The server still runs with the old values. Restart agent-dash to use the saved ones.

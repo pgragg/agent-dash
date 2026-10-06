@@ -4,7 +4,7 @@ import { buildDashboard } from "../server/model.ts";
 import type { ParsedSession } from "../server/sources/sessions.ts";
 import type { ReportedStatus } from "../server/sources/status.ts";
 import type { ThreadStatusChange } from "../shared/types.ts";
-import { NOW, minutesAgo, pr, ticket } from "./helpers.ts";
+import { NOW, minutesAgo, pr, stubTicket, ticket, ticketUrl } from "./helpers.ts";
 
 function session(over: Partial<ParsedSession>): ParsedSession {
   return {
@@ -41,7 +41,7 @@ const base = (sessions: ParsedSession[]) => ({
   recentDays: 14,
   sources: { jira: ok, github: ok, sessions: ok },
   extensionInstalled: false,
-  jiraServer: "https://jira",
+  ticketUrl, stubTicket,
 });
 const build = (sessions: ParsedSession[], prs = [pr()], myTickets = [ticket()], threads: ThreadStatusChange[] = []) =>
   buildDashboard({
@@ -55,7 +55,7 @@ const build = (sessions: ParsedSession[], prs = [pr()], myTickets = [ticket()], 
     recentDays: 14,
     sources: { jira: ok, github: ok, sessions: ok },
     extensionInstalled: false,
-    jiraServer: "https://jira",
+    ticketUrl, stubTicket,
   });
 
 test("runs sit under their ticket, oldest first", () => {
@@ -112,7 +112,7 @@ test("only a live run with a reported iTerm tab offers 'open tab'", () => {
     sources: { jira: ok, github: ok, sessions: ok },
     extensionInstalled: true,
     isAlive: () => true,
-    jiraServer: "https://jira",
+    ticketUrl, stubTicket,
   });
   const tab = Object.fromEntries(d.unlinkedRuns.map((r) => [r.sessionId, r.itermSessionId]));
   assert.deepEqual(tab, { live: "UUID-1", dead: null });
