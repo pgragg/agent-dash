@@ -7,7 +7,7 @@ import { href } from "./routes.ts";
 /** The waiting agents that agent-dash stopped, grouped by ticket, with what each one needed. */
 
 const REASON: Record<ParkReason, string> = {
-  ticket_done: "ticket is Done",
+  ticket_done: "ticket Done or thread resolved",
   needs_nothing: "needs nothing",
   superseded: "a newer agent took over",
   stale: "waited over 24 h",
