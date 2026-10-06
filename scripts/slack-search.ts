@@ -1,20 +1,19 @@
 /**
- * Search Slack messages, read-only, with Piper's saved Slack login.
+ * Search Slack messages, read-only, with the saved Slack login in the config file (slackStateFile).
  *
  *   node scripts/slack-search.ts "FSDK-2046" [count]
  *
  * Clicking through Slack's search box from a headless browser is unreliable, so this opens
  * Slack once and calls Slack's own search.messages endpoint from inside the page, with the
  * page's token and cookies. It only searches; it never posts, reacts, or marks anything read.
- * Login and safety notes: ~/pi/secrets/slack/README.md.
+ * The state file is an agent-browser state with a Slack login: `agent-browser state save <file>`.
  *
  * With AGENT_DASH_SLACK_HITS set (a summary run sets it), each match is also appended to that
  * file as a JSON line, so the dashboard can quote the messages a summary links to.
  */
 import { execFileSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { config } from "../server/config.ts";
 
 const query = process.argv[2];
 const count = Number(process.argv[3] ?? 15);
@@ -23,13 +22,18 @@ if (!query) {
   process.exit(2);
 }
 
-const ORG = "E071JP7HM0C"; // Postman Enterprise Grid: an org-level search covers every workspace.
+if (!config.slack.stateFile) {
+  console.error("Slack search is not set up: set the Slack login state on agent-dash's Settings page.");
+  process.exit(1);
+}
+// An Enterprise Grid org id searches every workspace; empty takes the first logged-in team.
+const ORG = config.slack.orgId;
 const session = `agentdash-slack-${process.pid}`;
 const ab = (...args: string[]) => execFileSync("agent-browser", ["--session", session, ...args], { encoding: "utf8", timeout: 60_000 });
 
 const SEARCH = `(async () => {
   const cfg = JSON.parse(localStorage.getItem("localConfig_v2") || "{}");
-  const team = (cfg.teams || {})[${JSON.stringify(ORG)}] || Object.values(cfg.teams || {}).find((t) => t.token);
+  const team = (${JSON.stringify(ORG)} && (cfg.teams || {})[${JSON.stringify(ORG)}]) || Object.values(cfg.teams || {}).find((t) => t.token);
   if (!team || !team.token) return JSON.stringify({ error: "not_logged_in" });
   const fd = new FormData();
   fd.append("token", team.token);
@@ -44,11 +48,11 @@ const SEARCH = `(async () => {
 })()`;
 
 try {
-  ab("--state", join(homedir(), "pi/secrets/slack/state.json"), "open", `https://app.slack.com/client/${ORG}`);
+  ab("--state", config.slack.stateFile, "open", `https://app.slack.com/client/${ORG}`);
   ab("wait", "--load", "networkidle");
   const url = ab("get", "url").trim();
   if (!url.includes("app.slack.com/client")) {
-    console.error(`Slack login expired (landed on ${url}). See ~/pi/secrets/slack/README.md to refresh it.`);
+    console.error(`Slack login expired (landed on ${url}). Save a new login to ${config.slack.stateFile}.`);
     process.exit(1);
   }
   // `eval` prints the returned string as a JSON string literal.

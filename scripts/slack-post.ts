@@ -1,21 +1,22 @@
 /**
- * Post one Slack message as Piper, through Slack's hosted MCP and Piper's own OAuth grant:
+ * Post one Slack message as you, through Slack's hosted MCP and your own OAuth grant:
  *
  *   echo "PR: bind slack token env vars https://github.com/…/pull/1" | node scripts/slack-post.ts --channel C0BFE2ABFA9
  *
- * Prints {"ts", "permalink"} as JSON. The server runs it when Piper clicks a review request's Post
- * button: that click is the approval. It reuses pi-mcp-adapter's sign-in (~/pi/slack/README.md),
+ * Prints {"ts", "permalink"} as JSON. The server runs it when you click a review request's Post
+ * button: that click is the approval. It reuses pi-mcp-adapter's sign-in,
  * because copied Slack cookies get the session revoked. The grant needs chat:write; the adapter
  * config hides the send tool from pi agents, so only this script can post.
  */
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import { config as dash } from "../server/config.ts";
 
 const ADAPTER = process.env.AGENT_DASH_MCP_ADAPTER ?? join(homedir(), ".pi/agent/npm/node_modules/pi-mcp-adapter/dist");
 const SERVER = "slack";
 const SEND_TOOL = "slack_send_message";
-const RELOGIN = "Run `node ~/pi/slack/bin/mcp-slack-login.mjs --force` and click Allow in Chrome.";
+const RELOGIN = dash.slack.reloginCommand ? `Run \`${dash.slack.reloginCommand}\` and allow the grant in the browser.` : "Sign in to the slack MCP server of pi-mcp-adapter again.";
 
 async function readStdin(): Promise<string> {
   let s = "";
@@ -59,7 +60,7 @@ try {
   if (res.isError) fail(`Slack refused the message: ${out.slice(0, 500)}`);
   const permalink = out.match(/https:\/\/[\w.-]*slack\.com\/archives\/[^\s)"'\\|>]+/)?.[0] ?? null;
   const ts = out.match(/\b(\d{10}\.\d{6})\b/)?.[1] ?? permalink?.match(/\/p(\d{10})(\d{6})/)?.slice(1).join(".") ?? null;
-  console.log(JSON.stringify({ ts, permalink: permalink ?? (ts ? `https://postman.enterprise.slack.com/archives/${channel}/p${ts.replace(".", "")}` : null) }));
+  console.log(JSON.stringify({ ts, permalink: permalink ?? (ts && dash.slack.workspaceUrl ? `${dash.slack.workspaceUrl}/archives/${channel}/p${ts.replace(".", "")}` : null) }));
 } finally {
   await servers.closeAll().catch(() => undefined);
 }

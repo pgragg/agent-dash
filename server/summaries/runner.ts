@@ -116,7 +116,7 @@ export function buildPrompt(key: string, id: number, workDir: string): string {
   const ticketStep = isLocalKey(key)
     ? `2. ${key} is a local ticket, not a Jira issue. Read its file, named as "Ticket file" in the context file.`
     : `2. Jira body and comments:
-   set -a; source ~/pi/secrets/jira/.env.personal; set +a; jira issue view ${key} --comments 20 --plain`;
+   ${config.jira.tokenFile ? `set -a; source '${config.jira.tokenFile.replace(/'/g, "'\\''")}'; set +a; ` : ""}jira issue view ${key} --comments 20 --plain`;
   return `Write a next-steps summary for ticket ${key}. Piper oversees several coding agents at once and reads it in a dashboard, so keep it very short.
 
 RULES

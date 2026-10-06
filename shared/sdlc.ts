@@ -319,9 +319,9 @@ function recordCommand(script: string, key: string, type: "deploy", env: SdlcEnv
 /** The environments where a smoketest needs Piper's confirmation before it changes state. */
 export const SHARED_ENVS = "Postman Beta, Postman Prod, Fern Dev and Fern Prod";
 
-function envNotes(env: SdlcEnvironment): string {
+function envNotes(env: SdlcEnvironment, guide: string): string {
   const label = ENV_LABEL[env];
-  if (env === "localhost") return "Read ~/pi/wiki/how-to/Local smoketesting.md first, and pick the local stack that exercises this change. The skill smoketest-happy-path-local scripts the publish-docs flow.";
+  if (env === "localhost") return `${guide ? `Read ${guide} first, and pick` : "Pick"} the local stack that exercises this change. The skill smoketest-happy-path-local scripts the publish-docs flow.`;
   if (env === "fern_dev") return `${label} is shared team infrastructure. The skill smoketest-happy-path-dev scripts the publish-docs flow.`;
   const what = env === "postman_beta" ? "is shared team infrastructure" : "carries real customer traffic";
   return `${label} ${what}. Find the deployed version first (the argocd skill, read-only), so you know what you test.`;
@@ -331,11 +331,12 @@ function envNotes(env: SdlcEnvironment): string {
  * The first message of an agent that plans one smoketest and records the plan. `script` is the
  * absolute path of scripts/sdlc-event.ts, so the agent writes into this dash's database.
  */
-export function planMessage(key: string, env: SdlcEnvironment, script: string, planId: number): string {
+/** `guide` is a file that a local plan reads first; empty for none. */
+export function planMessage(key: string, env: SdlcEnvironment, script: string, planId: number, guide = ""): string {
   const label = ENV_LABEL[env];
   return `Plan a smoketest of ${key} on ${label}. Write the plan only: do not run the test yet.
 
-Work out from the context what the change does, and plan a test that shows that it works on ${label} from a user's point of view: the stack, URLs and versions, the steps, what you expect to see, and the evidence you will keep. ${envNotes(env)}
+Work out from the context what the change does, and plan a test that shows that it works on ${label} from a user's point of view: the stack, URLs and versions, the steps, what you expect to see, and the evidence you will keep. ${envNotes(env, guide)}
 
 While you plan, change no state on ${SHARED_ENVS}: use read-only requests only. If the test must change state there (create or edit data, change a setting, deploy, sync), write each change in a state changes file: one line per change, with the system and the exact command or request. A change to local state only (a local database, local files) is not one of them.
 

@@ -21,9 +21,11 @@ export const isLocalKey = (key: string): boolean => /^AD-\d+$/.test(key);
 /** The page opens this to read the file; a browser cannot open a file:// link from an http page. */
 export const localTicketUrl = (port: number, key: string): string => `http://127.0.0.1:${port}/api/local-ticket?key=${key}`;
 
-/** Every AD ticket in the folder, done ones too. A missing folder means no tickets. */
+/** Every AD ticket in the folder, done ones too. A missing folder, or none set, means no tickets. */
 export function readLocalTickets(dir: string, port: number): Ticket[] {
   const out: Ticket[] = [];
+  // An empty dir would read `todo/` and so on relative to the server's cwd.
+  if (!dir) return out;
   for (const [folder, status] of Object.entries(STATUS)) {
     let names: string[];
     try {

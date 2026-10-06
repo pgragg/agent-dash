@@ -724,3 +724,14 @@ a.btn.verb { text-decoration: none; }
 .parked-head h3 { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .action.parked { align-items: flex-start; }
 .parked-reply textarea { min-height: 38px; padding: 8px 12px; }
+
+/* Settings */
+.settings .setting { display: grid; grid-template-columns: 180px 1fr; gap: 4px 14px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.settings .setting:first-of-type { border-top: 0; }
+.settings .setting-label { font-size: 13.5px; font-weight: 550; }
+.settings .setting input { height: 30px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg); font: 13px var(--mono); color: var(--ink); min-width: 0; }
+.settings .setting input[aria-invalid="true"] { border-color: var(--bad); }
+.settings .setting .meta { grid-column: 2; font-size: 12.5px; }
+.settings .setting-error { color: var(--bad); }
+.settings .settings-note { background: var(--warn-bg); color: var(--warn); }
+.settings-bar { display: flex; gap: 10px; }

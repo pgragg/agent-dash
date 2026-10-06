@@ -1,0 +1,18 @@
+{
+  "port": 7777,
+  "sessionsDir": "~/.pi/agent/sessions",
+  "recentDays": 14,
+  "jiraServer": "https://your-company.atlassian.net",
+  "jiraLogin": "you@your-company.com",
+  "jiraTokenFile": "~/.config/agent-dash/jira.env",
+  "jiraExcludeProjects": [],
+  "ticketProjects": ["ABC", "AD"],
+  "ignoreTickets": [],
+  "localTicketsDir": "~/agent-dash-tickets",
+  "piAuth": "",
+  "slackStateFile": "",
+  "slackOrgId": "",
+  "slackWorkspaceUrl": "https://your-company.slack.com",
+  "slackReloginCommand": "",
+  "smoketestGuide": ""
+}

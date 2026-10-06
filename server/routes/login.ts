@@ -3,9 +3,10 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { writeFile, mkdir } from "node:fs/promises";
+import { config } from "../config.ts";
 
-/** Path to pi-auth binary. Set to empty string or "none" to disable pi-auth entirely. */
-const PI_AUTH = process.env.AGENT_DASH_PI_AUTH ?? "";
+/** Path to pi-auth binary. Empty or "none" turns pi-auth off. */
+const PI_AUTH = config.piAuth;
 
 /** Path to gh CLI. Defaults to "gh" (expects it in PATH). */
 const GH_CLI = process.env.AGENT_DASH_GH_CLI ?? "gh";
@@ -18,7 +19,7 @@ export const LOGIN_TARGETS: Record<string, "gh" | "pi-auth"> = { github: "gh", j
 
 /** What to do by hand when automated login fails. */
 const MANUAL: Record<string, string> = {
-  jira: "Make a new API token at https://id.atlassian.com/manage-profile/security/api-tokens and put it in ~/pi/secrets/jira/.env.personal.",
+  jira: `Make a new API token at https://id.atlassian.com/manage-profile/security/api-tokens and put it in ${config.jira.tokenFile ? `${config.jira.tokenFile} as JIRA_API_TOKEN=…` : "the JIRA_API_TOKEN env var, or in a token file that you set on the Settings page"}.`,
   github: "Run `gh auth login` in a terminal, then retry.",
 };
 
@@ -69,7 +70,7 @@ async function handleGitHub(): Promise<{ code: number; error?: string; output?: 
 /** Handle other logins via pi-auth (if configured). */
 async function handlePiAuth(target: string): Promise<{ code: number; error?: string; output?: string }> {
   if (!PI_AUTH || PI_AUTH === "none") {
-    return { code: 501, error: `pi-auth is not configured. Set AGENT_DASH_PI_AUTH to the path of your pi-auth binary.` };
+    return { code: 501, error: "pi-auth is not set up. Set the pi-auth binary on the Settings page." };
   }
   const known = await run(PI_AUTH, ["targets"], 10_000);
   if (known.code !== 0) return { code: 500, error: `could not run ${PI_AUTH}: ${known.output || `exit ${known.code}`}` };
