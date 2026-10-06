@@ -390,7 +390,8 @@ export interface SdlcEvent {
   writesSummary: string | null;
   /** On a plan: when it was accepted, and by whom. "auto": it changes no Beta or Prod state. */
   confirmedAt: string | null;
-  confirmedBy: "piper" | "auto" | null;
+  /** The GitHub login of the person who confirmed the plan, or "auto" for a plan with no state changes. */
+  confirmedBy: string | null;
   /** On an execution: the plan that it runs. */
   planId: number | null;
   /** One short line from the agent that ran the smoketest: what it showed. The collapsed row shows it. On a plan: a very short summary of the plan. */

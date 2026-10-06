@@ -364,14 +364,14 @@ Use the first command only when the test changes no state on ${sharedEnvs()}. ag
  */
 export function executeMessage(key: string, env: SdlcEnvironment, script: string, executionId: number, plan: SdlcEvent): string {
   const label = ENV_LABEL[env];
-  const byPiper = plan.confirmedBy === "piper";
-  const approval = byPiper
+  const byPerson = !!plan.confirmedBy && plan.confirmedBy !== "auto";
+  const approval = byPerson
     ? `${User()} confirmed the smoketest plan of ${key} on ${label} (SDLC event ${plan.id}, the version recorded at ${plan.plannedAt}). This confirmation is ${user()}'s approval to make the state changes that the plan lists, and only those:
 ${plan.stateChanges ?? "(none)"}
 
 If the test needs another state change on ${sharedEnvs()}, do not make it: record the smoketest as blocked, and say which change you need.`
     : `agent-dash accepted the smoketest plan of ${key} on ${label} (SDLC event ${plan.id}), because it changes no state on ${sharedEnvs()}. Change no state there. If the test needs a change after all, do not make it: record the smoketest as blocked, and say which change you need.`;
-  const planText = byPiper ? `
+  const planText = byPerson ? `
 
 The plan:
 <plan>

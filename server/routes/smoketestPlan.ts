@@ -19,6 +19,8 @@ export interface PlanDeps {
   context: (key: string) => Promise<string | null>;
   /** The script that agents record with, so the message names this dash's own copy. */
   script: string;
+  /** The GitHub login that a Confirm records. */
+  login: () => Promise<string>;
   onChange: () => void;
 }
 
@@ -85,7 +87,13 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   const confirming = !plan.confirmedAt;
   if (confirming) {
     // The page sends the version it showed: a confirmation approves one exact text.
-    const confirmed = db.confirmPlan(id, body.plannedAt ?? "");
+    let by: string;
+    try {
+      by = await deps.login();
+    } catch {
+      return json(503, { error: "cannot read your GitHub login: run `gh auth login`, then confirm again" });
+    }
+    const confirmed = db.confirmPlan(id, body.plannedAt ?? "", by);
     if (!confirmed) return json(409, { error: "the plan changed since the page loaded it: read the new version, then confirm again" });
     plan = confirmed;
   }

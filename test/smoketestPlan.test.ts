@@ -21,7 +21,7 @@ writeFileSync(join(process.env.AGENT_DASH_STATUS_DIR, "plan-live-1.json"), JSON.
 
 let changes = 0;
 const server = createServer(async (req, res) => {
-  const deps = { sessions: { scan: async () => [] } as unknown as Sessions, context: async () => null, script: "/dash/scripts/sdlc-event.ts", onChange: () => changes++ };
+  const deps = { sessions: { scan: async () => [] } as unknown as Sessions, context: async () => null, script: "/dash/scripts/sdlc-event.ts", login: async () => "octocat", onChange: () => changes++ };
   if (!(await handle(req, res, new URL(req.url ?? "/", "http://localhost"), deps))) res.writeHead(404).end();
 });
 await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -50,7 +50,7 @@ test("Confirm approves the plan version on the page, and sends the run to the li
   const ok = await run(p.id, { plannedAt: "2026-10-05T10:05:00.000Z" });
   assert.equal(ok.code, 201);
   assert.equal(ok.body!.sessionId, "plan-live-1");
-  assert.equal(db.getSdlcEvent(p.id)!.confirmedBy, "piper");
+  assert.equal(db.getSdlcEvent(p.id)!.confirmedBy, "octocat");
   const execution = db.sdlcEventsByTicket()["FSDK-80"].find((e) => e.eventType === "smoketest_execution")!;
   assert.deepEqual([execution.planId, execution.sessionId, execution.finishedAt], [p.id, "plan-live-1", null]);
   const inbox = join(process.env.AGENT_DASH_INBOX_DIR!, "plan-live-1");

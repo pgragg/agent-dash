@@ -92,7 +92,7 @@ test("a plan is running while its agent writes it, waits when it changes Beta or
   assert.equal(states(auto).local_smoketest_plan, "done");
   assert.match(auto.stages[auto.current].detail, /accepted at once 2026-10-02: it changes no Beta or Prod state/);
   assert.equal(auto.next?.id, "local_smoketest");
-  const byPiper = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [plan({ confirmedBy: "piper" })] });
+  const byPiper = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [plan({ confirmedBy: "octocat" })] });
   assert.match(byPiper.stages[byPiper.current].detail, /confirmed by you/);
   // A smoketest recorded by hand, with no plan, passes the plan stage too.
   assert.equal(states(sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev()] })).local_smoketest_plan, "skipped");
@@ -324,7 +324,7 @@ test("verb messages name the environment and the record command; the summary pro
   assert.match(m, /--state-changes-file <file>/);
   assert.match(m, /change no state on Postman Beta, Postman Prod, Fern Dev and Fern Prod/);
   assert.match(planMessage("FSDK-1", "postman_prod", "/s", 1), /real customer traffic/);
-  const confirmed = plan({ id: 40, confirmedBy: "piper", stateChanges: "POST /api/projects on Postman Beta", testDetails: "1. Create a project." });
+  const confirmed = plan({ id: 40, confirmedBy: "octocat", stateChanges: "POST /api/projects on Postman Beta", testDetails: "1. Create a project." });
   const run = executeMessage("FSDK-1", "postman_beta", "/s", 41, confirmed);
   assert.match(run, /Piper confirmed the smoketest plan of FSDK-1 on Postman Beta \(SDLC event 40, the version recorded at 2026-10-02T09:10:00\.000Z\)/);
   assert.match(run, /approval to make the state changes that the plan lists, and only those:\nPOST \/api\/projects on Postman Beta/);
@@ -418,7 +418,21 @@ INSERT INTO SDLC_Event_Ticket (sdlc_event_id, ticket, created_at, summary_reques
   // The rename is in the copy, not an UPDATE, so the change trigger does not ask for a draft per ticket.
   assert.equal(after.prepare("SELECT count(*) AS n FROM SDLC_Event_Ticket WHERE ticket = 'FSDK-90' AND summary_requested_at IS NULL").get()!.n, 0);
   assert.throws(() => after.prepare("INSERT INTO SDLC_Event (event_type, started_at, created_at) VALUES ('smoketest', 't', 't')").run(), /CHECK/);
-  assert.throws(() => after.prepare("INSERT INTO SDLC_Event (event_type, started_at, created_at, confirmed_by) VALUES ('smoketest_plan', 't', 't', 'someone')").run(), /CHECK/);
+  assert.throws(() => after.prepare("INSERT INTO SDLC_Event (event_type, started_at, created_at, confirmed_by) VALUES ('smoketest_plan', 't', 't', '')").run(), /CHECK/);
+});
+
+test("a database whose confirmed_by takes only 'piper' is copied into one that takes any GitHub login", () => {
+  const old = join(dir, "old-confirmer.db");
+  const d = new DatabaseSync(old);
+  d.exec(`CREATE TABLE SDLC_Event (id INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT NOT NULL CHECK (event_type IN ('smoketest_plan', 'smoketest_execution', 'deploy', 'review_request')), started_at TEXT NOT NULL, finished_at TEXT, outcome TEXT CHECK (outcome IN ('passed', 'failed', 'blocked')), test_details TEXT, test_results TEXT, session_id TEXT, skipped_at TEXT, created_at TEXT NOT NULL, summary TEXT, pr_url TEXT, channel TEXT, message TEXT, message_url TEXT, planned_at TEXT, state_changes TEXT, writes_summary TEXT, confirmed_at TEXT, confirmed_by TEXT CHECK (confirmed_by IN ('piper', 'auto')), plan_id INTEGER REFERENCES SDLC_Event (id));
+INSERT INTO SDLC_Event (id, event_type, started_at, created_at, confirmed_by) VALUES (7, 'smoketest_plan', 't', 't', 'piper');`);
+  d.close();
+  const script = new URL("../scripts/sdlc-event.ts", import.meta.url).pathname;
+  execFileSync("node", [script, "deploy", "--ticket", "FSDK-92", "--env", "postman_beta"], { env: { ...process.env, AGENT_DASH_DB: old } });
+  const after = new DatabaseSync(old);
+  assert.equal(after.prepare("SELECT confirmed_by AS by FROM SDLC_Event WHERE id = 7").get()!.by, "piper");
+  after.prepare("UPDATE SDLC_Event SET confirmed_by = 'pgragg' WHERE id = 7").run();
+  assert.equal(after.prepare("SELECT confirmed_by AS by FROM SDLC_Event WHERE id = 7").get()!.by, "pgragg");
 });
 
 test("a plan with no Beta or Prod state changes is accepted when it is recorded; any other waits for Piper's exact version", () => {
@@ -428,10 +442,10 @@ test("a plan with no Beta or Prod state changes is accepted when it is recorded;
   assert.deepEqual([v1.testDetails, v1.stateChanges, v1.confirmedAt], ["1. Create a project", "POST /projects on Beta", null]);
   const v2 = db.recordPlan(p.id, { plan: "1. Create a project\n2. Delete it", stateChanges: "POST and DELETE /projects on Beta", plannedAt: "2026-10-05T10:05:00.000Z" })!;
   // Piper confirmed the version the page showed before the agent changed it: refused.
-  assert.equal(db.confirmPlan(p.id, v1.plannedAt!), null);
-  const ok = db.confirmPlan(p.id, v2.plannedAt!)!;
-  assert.deepEqual([ok.confirmedBy, !!ok.confirmedAt], ["piper", true]);
-  assert.equal(db.confirmPlan(p.id, v2.plannedAt!), null);
+  assert.equal(db.confirmPlan(p.id, v1.plannedAt!, "octocat"), null);
+  const ok = db.confirmPlan(p.id, v2.plannedAt!, "octocat")!;
+  assert.deepEqual([ok.confirmedBy, !!ok.confirmedAt], ["octocat", true]);
+  assert.equal(db.confirmPlan(p.id, v2.plannedAt!, "octocat"), null);
   // A confirmed plan is frozen: the approval is for that text.
   assert.equal(db.recordPlan(p.id, { plan: "other", stateChanges: null, plannedAt: "2026-10-05T10:10:00.000Z" }), null);
   db.unconfirmPlan(p.id);
@@ -449,7 +463,7 @@ test("a plan's changes start no next-steps draft; the run's result does", () => 
   db.claimNewEventTickets();
   const p = db.addSdlcEvent({ eventType: "smoketest_plan", startedAt: new Date().toISOString(), environments: ["localhost"], tickets: ["FSDK-71"], sessionId: "plan-72" });
   db.recordPlan(p.id, { plan: "1. pnpm dev", stateChanges: "x", plannedAt: new Date().toISOString() });
-  db.confirmPlan(p.id, db.getSdlcEvent(p.id)!.plannedAt!);
+  db.confirmPlan(p.id, db.getSdlcEvent(p.id)!.plannedAt!, "octocat");
   assert.equal(db.hasNewEventTickets(), false);
 });
 
@@ -505,7 +519,7 @@ test("the Smoketests card has one lane per stage pair, and the bar's next stage 
   const events = [
     plan({ id: 901 }),
     ev({ id: 902, startedAt: "2026-10-02T10:00:00.000Z" }),
-    plan({ id: 903, environments: ["fern_dev"], confirmedBy: "piper" }),
+    plan({ id: 903, environments: ["fern_dev"], confirmedBy: "octocat" }),
     ev({ id: 904, environments: ["fern_dev"], outcome: "failed", startedAt: "2026-10-02T11:00:00.000Z" }),
     ev({ id: 905, environments: ["fern_dev"], outcome: "blocked", startedAt: "2026-10-02T12:00:00.000Z" }),
     plan({ id: 906, environments: ["postman_prod"], confirmedAt: null, confirmedBy: null, stateChanges: "merge #1" }),
