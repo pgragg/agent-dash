@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { type FeedbackNote, mergeVerbs, type PrVerb, REVIEW_AND_MERGE, verbFor } from "../../shared/prVerbs.ts";
+import { type FeedbackNote, mergeVerbs, type PrVerb, READ_FEEDBACK, REVIEW_AND_MERGE, verbFor } from "../../shared/prVerbs.ts";
 import { prRef } from "../../shared/refs.ts";
 import type { AttentionItem, AttentionKind, Dashboard, PrCheck, PrDetail, PullRequest } from "../../shared/types.ts";
 import { age, api, Markdown, plural, prName, runTitle } from "./lib.tsx";
@@ -16,8 +16,12 @@ const TONE: Partial<Record<AttentionKind, string>> = {
   ci_failing: "bad",
   merge_conflict: "bad",
   ready_to_merge: "good",
+  approved_with_feedback: "warn",
   in_review: "working",
 };
+
+/** The signals whose merge is at the end of the Feedback section. */
+const MERGEABLE = new Set<AttentionKind>(["ready_to_merge", "approved_with_feedback"]);
 
 const Dot = ({ tone }: { tone: string }) => <span className={`dot tone-${tone}`} aria-hidden />;
 
@@ -30,6 +34,14 @@ type StartState = { s: "idle" } | { s: "confirm" } | { s: "starting" } | { s: "s
  */
 export function PrVerbButton({ item, data }: { item: AttentionItem; data: Dashboard }) {
   const pr = item.prUrl ? data.prs.find((p) => p.url === item.prUrl) : undefined;
+  const panel = pr && prRef(pr.url);
+  if (item.kind === "approved_with_feedback" && panel) {
+    return (
+      <a className="btn small verb" href={href(panel)} title="Read the feedback on the PR panel">
+        {READ_FEEDBACK}
+      </a>
+    );
+  }
   const verb = pr ? verbFor(item, pr) : null;
   if (!pr || !verb) return null;
   const ref = prRef(pr.url);
@@ -254,7 +266,7 @@ function note(e: FeedbackEntry): FeedbackNote {
 /** The merge, at the end of the feedback, so it is read first. With feedback to address, that comes first. */
 function MergeVerbs({ pr, entries, data }: { pr: PullRequest; entries: FeedbackEntry[]; data: Dashboard }) {
   const open = entries.filter((e) => e.state === "to_address").map(note);
-  const item = data.attention.find((a) => a.prUrl === pr.url && a.kind === "ready_to_merge");
+  const item = data.attention.find((a) => a.prUrl === pr.url && MERGEABLE.has(a.kind));
   return (
     <div className="pr-merge">
       {mergeVerbs(pr, open).map((v, i) => (
@@ -385,7 +397,7 @@ function Panel({ refId, path, url, data, now }: { refId: string; path: string; u
                 <Dot tone={TONE[a.kind] ?? "muted"} />
                 <span>{a.reason}</span>
                 {/* The merge is at the end of the Feedback section. */}
-                {a.kind !== "ready_to_merge" && <PrVerbButton item={a} data={data} />}
+                {!MERGEABLE.has(a.kind) && <PrVerbButton item={a} data={data} />}
               </li>
             ))}
           </ul>
@@ -395,7 +407,7 @@ function Panel({ refId, path, url, data, now }: { refId: string; path: string; u
       {error && <div className="toast">{error}</div>}
       {!pr && <p className="meta">This PR is not one of your open PRs from the last 14 days, so it has no signals or verbs here.</p>}
 
-      {detail ? <Feedback detail={detail} review={review} now={now} onMark={mark} merge={pr && items.some((a) => a.kind === "ready_to_merge") ? { pr, data } : undefined} /> : !error && <span className="shimmer wide" />}
+      {detail ? <Feedback detail={detail} review={review} now={now} onMark={mark} merge={pr && items.some((a) => MERGEABLE.has(a.kind)) ? { pr, data } : undefined} /> : !error && <span className="shimmer wide" />}
 
       <section className="card">
         <header className="card-head">

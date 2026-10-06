@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import type { FeedbackSource } from "../../shared/feedback.ts";
 import type { CheckState, PullRequest } from "../../shared/types.ts";
 import { extractTickets } from "./sessions.ts";
 
@@ -11,7 +12,11 @@ const QUERY = `query($q: String!) {
       ... on PullRequest {
         url number title state isDraft headRefName reviewDecision mergeable mergeStateStatus updatedAt
         repository { nameWithOwner }
-        commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 50) { nodes { ... on CheckRun { name conclusion } ... on StatusContext { context state } } } } } } }
+        author { login }
+        reviews(last: 30) { nodes { author { login __typename } state body submittedAt url } }
+        comments(last: 30) { nodes { author { login __typename } createdAt url } }
+        reviewThreads(first: 50) { nodes { isResolved isOutdated comments(last: 1) { nodes { author { login __typename } createdAt url } } } }
+        commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state contexts(first: 50) { nodes { ... on CheckRun { name conclusion } ... on StatusContext { context state } } } } } } }
       }
     }
   }
@@ -51,7 +56,30 @@ export function failedCheckNames(contexts: RawContext[]): string[] {
   return [...new Set(contexts.filter((c) => contextState(c) === "failure").map(contextName))];
 }
 
-async function searchPrs(q: string, ticketPattern: RegExp): Promise<PullRequest[]> {
+/** nitpickybot is a plain user account, so the login counts too. */
+export const isBot = (author: any) => author?.__typename === "Bot" || /bot(\[bot\])?$/i.test(author?.login ?? "");
+
+/** A search result, with what the feedback rule reads. The server counts it, then drops it. */
+export type PullWithFeedback = PullRequest & { feedback?: Omit<FeedbackSource, "addressed"> };
+
+/**
+ * The feedback of an open PR as the rule reads it. Only the last comment of a thread decides its
+ * state, and the rule needs no comment text, so the search asks for neither.
+ */
+export function feedbackOf(n: any): Omit<FeedbackSource, "addressed"> {
+  const person = (a: any) => ({ author: a?.login ?? "ghost", bot: isBot(a) });
+  return {
+    author: n.author?.login ?? null,
+    reviews: (n.reviews?.nodes ?? []).filter(Boolean).map((r: any) => ({ ...person(r.author), state: r.state, body: r.body ?? "", submittedAt: r.submittedAt, url: r.url })),
+    comments: (n.comments?.nodes ?? []).filter(Boolean).map((c: any) => ({ ...person(c.author), body: "", createdAt: c.createdAt, url: c.url })),
+    threads: (n.reviewThreads?.nodes ?? [])
+      .filter((t: any) => t && !t.isResolved)
+      .map((t: any) => ({ path: "", line: null, isOutdated: !!t.isOutdated, comments: (t.comments?.nodes ?? []).map((c: any) => ({ ...person(c.author), body: "", createdAt: c.createdAt, url: c.url })) })),
+    lastCommitAt: n.commits?.nodes?.[0]?.commit?.committedDate ?? null,
+  };
+}
+
+async function searchPrs(q: string, ticketPattern: RegExp): Promise<PullWithFeedback[]> {
   const { stdout } = await run("gh", ["api", "graphql", "-f", `query=${QUERY}`, "-f", `q=${q}`], { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 });
   const nodes: any[] = JSON.parse(stdout).data?.search?.nodes ?? [];
   return nodes
@@ -71,11 +99,12 @@ async function searchPrs(q: string, ticketPattern: RegExp): Promise<PullRequest[
       mergeStateStatus: n.mergeStateStatus ?? "UNKNOWN",
       updatedAt: n.updatedAt,
       tickets: extractTickets(`${n.title} ${n.headRefName}`, ticketPattern),
+      ...(n.state === "OPEN" ? { feedback: feedbackOf(n) } : {}),
     }));
 }
 
 /** My PRs updated in the window. Uses the `gh` login, so no token is stored here. */
-export function fetchMyPrs(sinceDays: number, ticketPattern: RegExp): Promise<PullRequest[]> {
+export function fetchMyPrs(sinceDays: number, ticketPattern: RegExp): Promise<PullWithFeedback[]> {
   const since = new Date(Date.now() - sinceDays * 86_400_000).toISOString().slice(0, 10);
   return searchPrs(`is:pr author:@me updated:>=${since}`, ticketPattern);
 }
@@ -86,5 +115,5 @@ export function fetchMyPrs(sinceDays: number, ticketPattern: RegExp): Promise<Pu
  */
 export async function fetchTicketPrs(key: string, ticketPattern: RegExp): Promise<PullRequest[]> {
   // Search matches words, so FSDK-12 would also find FSDK-123; keep only exact keys.
-  return (await searchPrs(`is:pr in:title "${key}"`, ticketPattern)).filter((p) => p.tickets.includes(key));
+  return (await searchPrs(`is:pr in:title "${key}"`, ticketPattern)).filter((p) => p.tickets.includes(key)).map(({ feedback: _f, ...p }) => p);
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { splitSummary } from "../../shared/nextSteps.ts";
 import { prRef } from "../../shared/refs.ts";
-import { REVIEW_AND_MERGE } from "../../shared/prVerbs.ts";
+import { READ_FEEDBACK, REVIEW_AND_MERGE } from "../../shared/prVerbs.ts";
 import type { Action, ActionKind, AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState } from "../../shared/types.ts";
 import { conversationHash, launchAgent, ResumeHere, resuming } from "./agents.tsx";
 import { filterHistory, groupByDay } from "./history.ts";
@@ -70,6 +70,7 @@ const KIND: Record<AttentionKind, { title: string; tone: "waiting" | "working" |
   ci_failing: { title: "CI is failing", tone: "bad" },
   merge_conflict: { title: "Merge conflict", tone: "bad" },
   ready_to_merge: { title: "Ready to merge", tone: "good" },
+  approved_with_feedback: { title: "Approved, with feedback", tone: "warn" },
   in_review: { title: "PR out for review", tone: "working" },
   overdue: { title: "Overdue", tone: "bad" },
   due_soon: { title: "Due soon", tone: "warn" },
@@ -83,6 +84,7 @@ const SHORT: Record<AttentionKind, string> = {
   ci_failing: "CI red",
   merge_conflict: "conflict",
   ready_to_merge: "merge",
+  approved_with_feedback: "feedback",
   in_review: "in review",
   overdue: "overdue",
   due_soon: "due soon",
@@ -1222,7 +1224,7 @@ function ActionRow({ a, now }: { a: Action; now: number }) {
         {humanAge(a.createdAt, now) === "just now" ? "added just now" : `added ${humanAge(a.createdAt, now)} ago`}
       </a>
       <a className="btn small" href={href(a.target)}>
-        {a.kind === "ready_to_merge" ? REVIEW_AND_MERGE : targetLabel(a.target)} →
+        {a.kind === "ready_to_merge" ? REVIEW_AND_MERGE : a.kind === "approved_with_feedback" ? READ_FEEDBACK : targetLabel(a.target)} →
       </a>
     </li>
   );

@@ -137,6 +137,8 @@ export type VerbId = "fix_ci" | "address_review" | "rebase" | "merge" | "nudge";
 
 /** Outside the PR panel, a PR that is ready to merge gets this link to the panel, not a merge. */
 export const REVIEW_AND_MERGE = "Review & merge";
+/** An approved PR with feedback to address gets this link to the panel's Feedback section. */
+export const READ_FEEDBACK = "Read feedback";
 
 export interface PrVerb {
   id: VerbId;

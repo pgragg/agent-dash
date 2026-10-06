@@ -104,6 +104,8 @@ export interface PullRequest {
   tickets: string[];
   /** Names of the failing checks and status contexts on the head commit. */
   failedChecks?: string[];
+  /** On an open PR: the feedback entries with no answer yet, by the PR panel's rule. */
+  toAddress?: number;
 }
 
 /** One check run or status context on a PR's head commit. */
@@ -209,6 +211,8 @@ export type AttentionKind =
   | "ci_failing"
   | "merge_conflict"
   | "ready_to_merge"
+  /** Approved and green, but a review comment or thread still needs an answer. */
+  | "approved_with_feedback"
   | "in_review"
   | "overdue"
   | "due_soon"

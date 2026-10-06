@@ -24,6 +24,7 @@ export function needStep(item: AttentionItem, firstStep: NextStep | null, fallba
     case "ci_failing":
     case "merge_conflict":
     case "ready_to_merge":
+    case "approved_with_feedback":
     case "in_review":
       return pr ? { label: "Open the PR", ref: pr } : { label: "Open on the board", ref: ticket };
     case "overdue":
