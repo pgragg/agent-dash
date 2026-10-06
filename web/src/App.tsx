@@ -291,7 +291,7 @@ function runTone(run: HistoryRun): string {
 /** A lane's agent state, from the ticket's runs. Null until pi saves the first message. */
 function laneRun(s: Subject, sessionId: string, now: number): LaneRun | null {
   const run = s.ticket?.runs.find((r) => r.sessionId === sessionId);
-  return run ? { tone: runTone(run), text: statusText(run, now) } : null;
+  return run ? { tone: runTone(run), text: statusText(run, now), working: run.status === "working" } : null;
 }
 
 // ---- queue (left rail) --------------------------------------------------------------
@@ -1222,7 +1222,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
 
       {s.ticket && <Smoketests group={s.ticket} events={data.sdlcEvents[s.ticket.ticket.key] ?? []} now={now} cwd={cwd} onError={setError} />}
 
-      {s.ticket && (data.lanes[s.ticket.ticket.key]?.length ?? 0) > 0 && <LanesCard lanes={data.lanes[s.ticket.ticket.key]} runFor={(id) => laneRun(s, id, now)} />}
+      {s.ticket && (data.lanes[s.ticket.ticket.key]?.length ?? 0) > 0 && <LanesCard ticket={s.ticket.ticket.key} title={s.ticket.ticket.summary} lanes={data.lanes[s.ticket.ticket.key]} prs={prs} runFor={(id) => laneRun(s, id, now)} onError={setError} />}
 
       {s.ticket && <StartAgent key={s.id} s={s} cwd={cwd} setCwd={setCwd} onError={setError} focusSignal={agentSignal} />}
 

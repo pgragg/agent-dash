@@ -240,7 +240,11 @@ Each agent card opens on a short summary of its conversation, in three lines: **
 - **`pr` mode**: each lane branches from `origin/<base>`, and its agent opens its own PR.
 - **Per lane**: `git worktree add --no-track -b <key>-<lane> ../<repo>-<key>-<lane>`, a row in `lanes`, and a headless agent named `<KEY>/<lane>: …` that starts in the worktree. Its first message is the ticket context, a lane brief (its folder and branch, the other lanes and their goals, a port for a dev server, and how its work comes back), the shared brief, and its own message.
 - If a worktree fails, the server removes the ones that the same request made. A lane name whose branch or folder exists already is refused before anything changes.
-- **The Parallel lanes card** on the ticket shows one row per lane: its branch, commits ahead and behind its base, uncommitted files, and its agent's state. A lane whose worktree is gone, or whose agent checked out another branch, shows in red.
+- **The Parallel lanes card** on the ticket shows one row per lane: its branch, commits ahead and behind its base, uncommitted files, and its agent's state. A lane whose worktree is gone, or whose agent checked out another branch, shows in red. A `pr`-mode lane shows its PR once GitHub has it.
+- **Land** (`POST /api/lanes/land?id=<n>`, `land` mode) rebases the lane onto `<key>`, runs the repo's checks in the lane (the `typecheck` and `test` scripts of `package.json`, with the package manager of its lockfile; no `package.json` means no gate), and fast-forwards `<key>`. One land runs at a time per ticket, so each one rebases onto what the one before it landed, and `<key>` stays linear and green.
+  - It refuses, and changes nothing, while the lane's agent is working, while the lane has uncommitted files, when the lane has no new commits, or when the integration worktree is not clean or not on `<key>` (another tool can take the branch).
+  - On a conflict it aborts the rebase, marks the lane `conflict` with the files, and sends the lane's agent a message: rebase onto `<key>`, keep both changes, commit, and stop. On red checks it marks the lane `checks_failed` and sends the end of the output. Then **Land** again.
+- **Open PR** (`POST /api/lanes/pr?ticket=<KEY>&title=<title>`) starts an agent in the integration worktree that pushes `<key>` and opens the PR into the base, after at least one lane landed. Once GitHub has that PR, the button becomes its link.
 
 ## Storage
 
@@ -261,7 +265,7 @@ Everything you write lives in SQLite at `~/.agent-dash/agent-dash.db`:
 | `SDLC_Event_Ticket` | One per ticket of an event: `sdlc_event_id`, `ticket`, `created_at` (when the link was made), `summary_requested_at` (when the server started the next-steps draft for it; empty until then, set at once for a smoketest that only started, and empty again when the event changes), `changed_at` (when the event last changed; set by the `sdlc_event_changed` trigger) |
 | `conversation_summaries` | One per pi conversation with a summary: `session_id`, `status` (`in_progress`, `done` or `failed`), `basis` (the prompt count, a hash of the last message, and live or ended: the state it describes), `about`, `latest`, `needs`, `error`, `requested_at`, `generated_at` |
 | `PiConversationStatusChange` | One per change to a thread's relevance: `ticket`, `session_id`, `status` (`relevant` or `resolved`), `reason` (resolved only, optional), `created_at`. Append-only; the newest row per ticket and thread is the current state. |
-| `lanes` | One per parallel lane: `ticket`, `repo` (the main checkout), `lane`, `mode` (`land` or `pr`), `base`, `branch`, `worktree`, `integration_branch` and `integration_worktree` (`land` mode), `session_id`, `goal` (its first message), `state`, `created_at`. Written by the server when it makes the worktree. See [Parallel lanes](#parallel-lanes). |
+| `lanes` | One per parallel lane: `ticket`, `repo` (the main checkout), `lane`, `mode` (`land` or `pr`), `base`, `branch`, `worktree`, `integration_branch` and `integration_worktree` (`land` mode), `session_id`, `goal` (its first message), `state` (`working`, `landing`, `landed`, `conflict`, `checks_failed` or `removed`), `note` (what the last land said), `created_at`, `landed_at`. Written by the server when it makes the worktree. See [Parallel lanes](#parallel-lanes). |
 
 ## Reply to an agent
 

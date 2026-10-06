@@ -517,7 +517,8 @@ export interface SlackQuote {
  */
 export type LaneMode = "land" | "pr";
 
-export type LaneState = "working" | "removed";
+/** "landing" while its land runs; "conflict" and "checks_failed" after a land that did not go in. */
+export type LaneState = "working" | "landing" | "landed" | "conflict" | "checks_failed" | "removed";
 
 /** One of N agents on a ticket, each in its own git worktree. The server makes the worktree and this record. */
 export interface WorkLane {
@@ -537,9 +538,14 @@ export interface WorkLane {
   sessionId: string | null;
   goal: string;
   state: LaneState;
+  /** What the last land said: the conflicting files, or why it was refused. */
+  note: string | null;
   createdAt: string;
+  landedAt: string | null;
   /** Read from the worktree on each build. Null when the worktree is gone. */
   git: LaneGit | null;
+  /** In "land" mode, commits on the integration branch that `origin/<base>` does not have. */
+  integrationAhead: number | null;
 }
 
 export interface LaneGit {

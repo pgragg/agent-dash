@@ -5,9 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createLanes, LaneError, laneGit, listWorktrees, planLanes } from "../server/lanes.ts";
-import { startLanes } from "../server/routes/lanes.ts";
+import { land, openPr, startLanes } from "../server/routes/lanes.ts";
+import { landLane } from "../server/land.ts";
 import * as db from "../server/summaries/db.ts";
-import { laneAgentName, laneBrief, laneGitText, lanesProblem } from "../shared/lanes.ts";
+import { landBlocker, laneAgentName, laneBrief, laneGitText, lanesProblem } from "../shared/lanes.ts";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "agent-dash-lanes-")));
 db.open(join(root, "test.db"));
@@ -141,4 +142,131 @@ test("a lane's git state reads as a few words, and a switched branch or a gone w
   assert.deepEqual(laneGitText({ ...l, mode: "pr", git: { head: "ad-1-a", ahead: 0, behind: 4, dirty: 0 } }), { text: "no commits yet · 4 behind origin/main", warn: false });
   assert.deepEqual(laneGitText({ ...l, git: { head: "main", ahead: 0, behind: 0, dirty: 0 } }), { text: "on main, not ad-1-a", warn: true });
   assert.deepEqual(laneGitText({ ...l, git: null }), { text: "worktree gone", warn: true });
+  assert.deepEqual(laneGitText({ ...l, landedAt: "2026-10-06T00:00:00Z", git: { head: "ad-1-a", ahead: 0, behind: 2, dirty: 0 } }), { text: "all landed · 2 behind ad-1", warn: false });
+});
+
+// ---- AD-21: Land -------------------------------------------------------------------------
+
+let ticketCount = 0;
+
+/** Three lanes on a fresh repo: a and b change the same line, c adds a file. Commits are made, nothing is landed. */
+async function threeLanes(name: string, pkg?: object): Promise<{ app: string; dir: (l: string) => string; rows: db.LaneRecord[] }> {
+  const app = repo(name);
+  if (pkg) {
+    writeFileSync(join(app, "package.json"), JSON.stringify(pkg));
+    writeFileSync(join(app, "check.mjs"), 'import { readFileSync } from "node:fs"; if (readFileSync("a.txt", "utf8").includes("BAD")) { console.log("a.txt is BAD"); process.exit(1); }\n');
+    sh(app, "add", "-A");
+    sh(app, "commit", "-qm", "checks");
+    sh(app, "push", "-q", "origin", "main");
+  }
+  const key = `AD-${900 + ++ticketCount}`;
+  const out = await startLanes({ key, context: "", cwd: app, mode: "land", lanes: ["a", "b", "c"].map((n) => ({ name: n, message: `lane ${n}` })) }, (o) => o.sessionId!);
+  assert.equal(out.status, 201);
+  const rows = db.activeLanes().filter((l) => l.repo === app);
+  const dir = (l: string) => rows.find((r) => r.lane === l)!.worktree;
+  const commit = (l: string, file: string, text: string) => {
+    writeFileSync(join(dir(l), file), text);
+    sh(dir(l), "add", "-A");
+    sh(dir(l), "commit", "-qm", `lane ${l}`);
+  };
+  commit("a", "a.txt", "one from a\n");
+  commit("b", "a.txt", "one from b\n");
+  commit("c", "c.txt", "c\n");
+  return { app, dir, rows };
+}
+
+test("land: lanes go in one at a time, a conflict goes back to its lane's agent, and the fix lands", async () => {
+  const { dir, rows } = await threeLanes("land-flow");
+  const id = (l: string) => rows.find((r) => r.lane === l)!.id;
+  const sent: { session: string; text: string }[] = [];
+  const deps = { context: async () => "", onChange: () => {}, agentWorking: async () => false, inbox: (session: string, _s: string, text: string) => void sent.push({ session, text }) };
+
+  // a and c at once: the queue runs them in turn, and both go in.
+  const [a, c] = await Promise.all([land(id("a"), deps), land(id("c"), deps)]);
+  assert.equal((a.body as { ok: boolean }).ok, true);
+  assert.equal((c.body as { ok: boolean }).ok, true);
+  const integration = rows[0].integrationWorktree!;
+  assert.equal(sh(integration, "log", "--format=%s", "-3"), "lane c\nlane a\ninit");
+
+  const b = await land(id("b"), deps);
+  assert.deepEqual((b.body as { kind: string; files: string[] }).files, ["a.txt"]);
+  assert.equal(db.getLane(id("b"))!.state, "conflict");
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].session, rows.find((r) => r.lane === "b")!.sessionId);
+  assert.match(sent[0].text, /Conflicting files: `a\.txt`/);
+  // The abort leaves the lane as it was, with nothing half-rebased.
+  assert.equal(sh(dir("b"), "status", "--porcelain"), "");
+  assert.equal(sh(dir("b"), "log", "--format=%s", "-1"), "lane b");
+
+  // The agent resolves it as the message says.
+  assert.throws(() => sh(dir("b"), "rebase", rows[0].integrationBranch!));
+  writeFileSync(join(dir("b"), "a.txt"), "one from a and b\n");
+  sh(dir("b"), "add", "a.txt");
+  execFileSync("git", ["-C", dir("b"), "-c", "core.editor=true", "rebase", "--continue"], { stdio: "ignore" });
+  const again = await land(id("b"), deps);
+  assert.equal((again.body as { ok: boolean }).ok, true);
+  assert.equal(db.getLane(id("b"))!.state, "landed");
+  assert.equal(sh(integration, "log", "--format=%s", "-4"), "lane b\nlane c\nlane a\ninit");
+  assert.equal(sh(integration, "show", "HEAD:a.txt"), "one from a and b");
+});
+
+test("land: refuses a working agent, uncommitted files, a moved integration worktree, and a lane with nothing new", async () => {
+  const { dir, rows } = await threeLanes("land-refuse");
+  const lane = (l: string) => rows.find((r) => r.lane === l)!;
+  const opts = { agentWorking: false, checks: async () => ({ ok: true, ran: [], output: "" }) };
+  assert.match((await landLane(lane("a"), { ...opts, agentWorking: true }) as { message: string }).message, /agent is working/);
+  writeFileSync(join(dir("a"), "wip.txt"), "wip\n");
+  assert.match((await landLane(lane("a"), opts) as { message: string }).message, /1 uncommitted files/);
+  execFileSync("rm", [join(dir("a"), "wip.txt")]);
+  const integration = lane("a").integrationWorktree!;
+  sh(integration, "switch", "-q", "--detach");
+  assert.match((await landLane(lane("a"), opts) as { message: string }).message, /integration worktree is on a detached HEAD/);
+  sh(integration, "switch", "-q", lane("a").integrationBranch!);
+  assert.equal((await landLane(lane("a"), opts)).ok, true);
+  assert.match((await landLane(lane("a"), opts) as { message: string }).message, /no commits that/);
+});
+
+test("land: red checks keep the integration branch where it was, and send the output to the agent", async () => {
+  const { dir, rows } = await threeLanes("land-checks", { type: "module", scripts: { test: "node check.mjs" } });
+  const b = rows.find((r) => r.lane === "b")!;
+  writeFileSync(join(dir("b"), "a.txt"), "BAD\n");
+  sh(dir("b"), "commit", "-qam", "break it");
+  const sent: string[] = [];
+  const before = sh(b.integrationWorktree!, "rev-parse", "HEAD");
+  const out = await land(b.id, { context: async () => "", onChange: () => {}, agentWorking: async () => false, inbox: (_s, _x, text) => void sent.push(text) });
+  assert.equal((out.body as { kind: string }).kind, "checks");
+  assert.equal(db.getLane(b.id)!.state, "checks_failed");
+  assert.equal(sh(b.integrationWorktree!, "rev-parse", "HEAD"), before);
+  assert.match(sent[0], /a\.txt is BAD/);
+  // With the checks green, the land goes in and names what ran.
+  writeFileSync(join(dir("b"), "a.txt"), "fine\n");
+  sh(dir("b"), "commit", "-qam", "fix it");
+  const ok = await land(b.id, { context: async () => "", onChange: () => {}, agentWorking: async () => false });
+  assert.deepEqual((ok.body as { checks: string[] }).checks, ["npm run test"]);
+  assert.match(db.getLane(b.id)!.note!, /landed 3 commits after npm run test/);
+});
+
+test("open PR: needs a landed lane, and starts an agent in the integration worktree", async () => {
+  const { rows } = await threeLanes("land-pr");
+  const key = rows[0].ticket;
+  const started: { cwd: string; message?: string; name?: string }[] = [];
+  const deps = { context: async () => "# ctx", onChange: () => {}, agentWorking: async () => false, start: (o: { cwd: string; message?: string; name?: string }) => (started.push(o), "s") };
+  assert.equal((await openPr(key, "Title", deps)).status, 409);
+  await land(rows[0].id, deps);
+  assert.equal((await openPr(key, "Title", deps)).status, 201);
+  assert.equal(started[0].cwd, rows[0].integrationWorktree);
+  assert.match(started[0].message!, new RegExp(`titled \`${key}: Title\``));
+  assert.match(started[0].message!, /lane `b` \(not landed: working\)/);
+});
+
+test("Land is on only for a land-mode lane with new commits, no uncommitted files, and an idle agent", () => {
+  const l = { mode: "land" as const, state: "working" as const, branch: "ad-1-a", integrationBranch: "ad-1", git: { head: "ad-1-a", ahead: 1, behind: 0, dirty: 0 } };
+  assert.equal(landBlocker(l, false), null);
+  assert.equal(landBlocker(l, true), "its agent is working");
+  assert.equal(landBlocker({ ...l, git: { ...l.git, dirty: 2 } }, false), "2 files are not committed");
+  assert.equal(landBlocker({ ...l, git: { ...l.git, ahead: 0 } }, false), "no commits that ad-1 does not have");
+  assert.equal(landBlocker({ ...l, mode: "pr" }, false), "this lane opens its own PR");
+  assert.equal(landBlocker({ ...l, state: "landing" }, false), "it is landing now");
+  // A lane that hit a conflict lands again once its agent fixed it.
+  assert.equal(landBlocker({ ...l, state: "conflict" as never }, false), null);
 });

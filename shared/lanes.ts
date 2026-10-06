@@ -60,10 +60,23 @@ export function laneBrief(key: string, me: BriefLane, others: Pick<WorkLane, "la
 }
 
 /** The lane's git state in a few words, and whether it needs a look. */
-export function laneGitText(l: Pick<WorkLane, "git" | "branch" | "mode" | "base" | "integrationBranch">): { text: string; warn: boolean } {
+export function laneGitText(l: Pick<WorkLane, "git" | "branch" | "mode" | "base" | "integrationBranch"> & { landedAt?: string | null }): { text: string; warn: boolean } {
   if (!l.git) return { text: "worktree gone", warn: true };
   if (l.git.head !== l.branch) return { text: `on ${l.git.head ?? "a detached HEAD"}, not ${l.branch}`, warn: true };
   const base = l.mode === "land" && l.integrationBranch ? l.integrationBranch : `origin/${l.base}`;
-  const parts = [l.git.ahead ? `${l.git.ahead} ahead` : "no commits yet", ...(l.git.behind ? [`${l.git.behind} behind ${base}`] : []), ...(l.git.dirty ? [`${l.git.dirty} uncommitted`] : [])];
+  // A landed lane has nothing ahead; "no commits yet" would read as if it never worked.
+  const parts = [l.git.ahead ? `${l.git.ahead} ahead` : l.landedAt ? "all landed" : "no commits yet", ...(l.git.behind ? [`${l.git.behind} behind ${base}`] : []), ...(l.git.dirty ? [`${l.git.dirty} uncommitted`] : [])];
   return { text: parts.join(" · "), warn: false };
+}
+
+/** Why Land is off for this lane, or null when it can land now. The server checks again. */
+export function landBlocker(l: Pick<WorkLane, "mode" | "state" | "git" | "branch" | "integrationBranch">, agentWorking: boolean): string | null {
+  if (l.mode !== "land") return "this lane opens its own PR";
+  if (l.state === "landing") return "it is landing now";
+  if (!l.git) return "its worktree is gone";
+  if (l.git.head !== l.branch) return `its worktree is on ${l.git.head ?? "a detached HEAD"}`;
+  if (agentWorking) return "its agent is working";
+  if (l.git.dirty) return `${l.git.dirty} files are not committed`;
+  if (!l.git.ahead) return `no commits that ${l.integrationBranch} does not have`;
+  return null;
 }
