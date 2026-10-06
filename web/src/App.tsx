@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type MoveTarget, moveStepTarget, moveTargets } from "../../shared/jiraVerbs.ts";
 import { splitSummary } from "../../shared/nextSteps.ts";
+import { awaitsOwner, ownerWaitText } from "../../shared/ownerApproval.ts";
 import { prRef } from "../../shared/refs.ts";
 import { READ_FEEDBACK, REVIEW_AND_MERGE } from "../../shared/prVerbs.ts";
 import type { AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, LaneMode, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState } from "../../shared/types.ts";
@@ -808,7 +809,7 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket, summary }:
 
 function PrRow({ pr, now }: { pr: PullRequest; now: number }) {
   const open = pr.state === "open";
-  const review = pr.reviewDecision === "APPROVED" ? ["approved", "good"] : pr.reviewDecision === "CHANGES_REQUESTED" ? ["changes requested", "bad"] : pr.reviewDecision === "REVIEW_REQUIRED" ? ["needs review", "muted"] : null;
+  const review = awaitsOwner(pr) ? [ownerWaitText(pr.approvals), "muted"] : pr.reviewDecision === "APPROVED" ? ["approved", "good"] : pr.reviewDecision === "CHANGES_REQUESTED" ? ["changes requested", "bad"] : pr.reviewDecision === "REVIEW_REQUIRED" ? ["needs review", "muted"] : null;
   const ci = open ? ciTag(pr) : null;
   return (
     <div className="pr-line">

@@ -128,6 +128,8 @@ export interface PullRequest {
   failedChecks?: string[];
   /** On an open PR: the feedback entries with no answer yet, by the PR panel's rule. */
   toAddress?: number;
+  /** On an open PR: the people whose latest review approves it. */
+  approvals?: number;
 }
 
 /** One check run or status context on a PR's head commit. */
