@@ -72,7 +72,7 @@ test("the run of a plan in the same session decides the row: passed is news", ()
 });
 
 test("a blocked run needs you, with Run again on its plan", () => {
-  const plan = ev({ confirmedAt: "2026-10-02T10:06:00.000Z", confirmedBy: "piper" });
+  const plan = ev({ confirmedAt: "2026-10-02T10:06:00.000Z", confirmedBy: "octocat" });
   const run = ev({ eventType: "smoketest_execution", planId: plan.id, outcome: "blocked", finishedAt: "2026-10-02T10:20:00.000Z" });
   const row = smoketestRow("s1", [run, plan], { asked: false, finished: true })!;
   assert.equal(row.title, "Prod blocked");
@@ -82,7 +82,7 @@ test("a blocked run needs you, with Run again on its plan", () => {
 });
 
 test("a run still going, where the agent waits, asks for a Reply", () => {
-  const plan = ev({ confirmedAt: "2026-10-02T10:06:00.000Z", confirmedBy: "piper" });
+  const plan = ev({ confirmedAt: "2026-10-02T10:06:00.000Z", confirmedBy: "octocat" });
   const run = ev({ eventType: "smoketest_execution", planId: plan.id });
   assert.equal(smoketestRow("s1", [plan, run], idle)!.title, "Prod smoketest: the agent waits for you");
 });

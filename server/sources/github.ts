@@ -109,6 +109,20 @@ async function searchPrs(q: string, ticketPattern: RegExp, withFeedback: boolean
     }));
 }
 
+let login: Promise<string> | null = null;
+
+/** The `gh` user's login, read once. A failed read is tried again on the next call. */
+export function ghLogin(): Promise<string> {
+  login ??= run("gh", ["api", "user", "--jq", ".login"], { timeout: 15_000 }).then(
+    ({ stdout }) => stdout.trim(),
+    (err) => {
+      login = null;
+      throw err;
+    },
+  );
+  return login;
+}
+
 /** My PRs updated in the window. Uses the `gh` login, so no token is stored here. */
 export function fetchMyPrs(sinceDays: number, ticketPattern: RegExp): Promise<PullWithFeedback[]> {
   const since = new Date(Date.now() - sinceDays * 86_400_000).toISOString().slice(0, 10);

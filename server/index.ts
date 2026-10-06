@@ -30,7 +30,7 @@ import { confirmDeployMessage, deployStageOf, parseEnvironment, planMessage } fr
 import { requestConversationSummaries, summariesFor } from "./conversationSummaries.ts";
 import { syncDiagrams } from "./diagramSync.ts";
 import { sweep as sweepParks } from "./park.ts";
-import { fetchMyPrs, type PullWithFeedback } from "./sources/github.ts";
+import { fetchMyPrs, ghLogin, type PullWithFeedback } from "./sources/github.ts";
 import { toAddressCount } from "../shared/feedback.ts";
 import { approvalCount } from "../shared/ownerApproval.ts";
 import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
@@ -267,7 +267,7 @@ const server = createServer(async (req, res) => {
     if (await prRoute.handle(req, res, url, broadcast)) return;
     if (await ticketRoute.handle(req, res, url, onTicketChange)) return;
     if (await diagramRoute.handle(req, res, url, sessions, broadcast)) return;
-    if (await smoketestPlanRoute.handle(req, res, url, { sessions, context: ticketContext, script: SDLC_SCRIPT, onChange: broadcast })) return;
+    if (await smoketestPlanRoute.handle(req, res, url, { sessions, context: ticketContext, script: SDLC_SCRIPT, login: ghLogin, onChange: broadcast })) return;
     if (await sdlcRoute.handle(req, res, url, broadcast)) return;
     // The dashboard's PRs carry the tickets that cross-linking gave them.
     if (await reviewRoute.handle(req, res, url, { prs: async () => (await dashboard(false)).prs, onChange: broadcast })) return;

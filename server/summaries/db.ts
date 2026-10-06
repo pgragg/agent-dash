@@ -85,7 +85,8 @@ CREATE TABLE IF NOT EXISTS SDLC_Event (
   -- The plan's own short summary goes in summary.
   writes_summary TEXT,
   confirmed_at  TEXT,
-  confirmed_by  TEXT CHECK (confirmed_by IN ('piper', 'auto')),
+  -- The GitHub login of the person who confirmed the plan, or 'auto' for a plan with no state changes.
+  confirmed_by  TEXT CHECK (confirmed_by <> ''),
   -- An execution: the plan that it runs.
   plan_id       INTEGER REFERENCES SDLC_Event (id)
 );
@@ -255,7 +256,7 @@ const SDLC_EVENT_COLUMNS = ["session_id", "skipped_at", "pr_url", "channel", "me
  */
 function upgradeSdlcEventChecks(d: DatabaseSync): void {
   const row = d.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'SDLC_Event'").get() as { sql: string } | undefined;
-  if (!row || (row.sql.includes("'blocked'") && row.sql.includes("'smoketest_plan'") && row.sql.includes("'piper'"))) return;
+  if (!row || (row.sql.includes("'blocked'") && row.sql.includes("'smoketest_plan'") && row.sql.includes("confirmed_by <> ''"))) return;
   const create = SCHEMA.slice(SCHEMA.indexOf("CREATE TABLE IF NOT EXISTS SDLC_Event ("), SCHEMA.indexOf("-- The environments under test"));
   const cols = ["id, event_type, started_at, finished_at, outcome, test_details, test_results, created_at", ...SDLC_EVENT_COLUMNS].join(", ");
   const select = cols.replace("event_type", "CASE event_type WHEN 'smoketest' THEN 'smoketest_execution' ELSE event_type END");
@@ -679,13 +680,13 @@ export function recordPlan(id: number, p: SdlcPlan): SdlcEvent | null {
 }
 
 /**
- * Piper's confirmation of the plan version that the page showed. Null when the plan changed since
- * `plannedAt`, or is already confirmed: a confirmation is an approval of one exact text.
+ * The confirmation, by the GitHub login `by`, of the plan version that the page showed. Null when the
+ * plan changed since `plannedAt`, or is already confirmed: a confirmation is an approval of one exact text.
  */
-export function confirmPlan(id: number, plannedAt: string, now = new Date()): SdlcEvent | null {
+export function confirmPlan(id: number, plannedAt: string, by: string, now = new Date()): SdlcEvent | null {
   const changed = open()
-    .prepare("UPDATE SDLC_Event SET confirmed_at = ?, confirmed_by = 'piper' WHERE id = ? AND event_type = 'smoketest_plan' AND planned_at = ? AND confirmed_at IS NULL AND skipped_at IS NULL")
-    .run(now.toISOString(), id, plannedAt).changes;
+    .prepare("UPDATE SDLC_Event SET confirmed_at = ?, confirmed_by = ? WHERE id = ? AND event_type = 'smoketest_plan' AND planned_at = ? AND confirmed_at IS NULL AND skipped_at IS NULL")
+    .run(now.toISOString(), by, id, plannedAt).changes;
   return changed ? getSdlcEvent(id) : null;
 }
 
