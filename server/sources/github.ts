@@ -1,10 +1,21 @@
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import type { FeedbackSource } from "../../shared/feedback.ts";
 import type { CheckState, PullRequest } from "../../shared/types.ts";
 import { extractTickets } from "./sessions.ts";
 
-const run = promisify(execFile);
+/**
+ * Run a command and return { stdout, code }. Unlike promisify(execFile), this does not reject on
+ * non-zero exit codes, so we can handle partial GraphQL errors (e.g. SAML) where `gh` returns valid
+ * data but exits 1.
+ */
+function run(cmd: string, args: string[], opts: { timeout: number; maxBuffer?: number }): Promise<{ stdout: string; stderr: string; code: number }> {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { timeout: opts.timeout, maxBuffer: opts.maxBuffer, encoding: "utf8" }, (err, stdout, stderr) => {
+      const code = err && typeof (err as any).code === "number" ? (err as any).code : err ? 1 : 0;
+      resolve({ stdout: stdout ?? "", stderr: stderr ?? "", code });
+    });
+  });
+}
 
 const PR_FIELDS = `url number title state isDraft headRefName reviewDecision mergeable mergeStateStatus updatedAt
         repository { nameWithOwner }
@@ -86,8 +97,11 @@ export function feedbackOf(n: any): Omit<FeedbackSource, "addressed"> {
 
 async function searchPrs(q: string, ticketPattern: RegExp, withFeedback: boolean): Promise<PullWithFeedback[]> {
   const query = searchQuery(withFeedback ? `${PR_FIELDS}\n        ${FEEDBACK_FIELDS}` : PR_FIELDS);
-  const { stdout } = await run("gh", ["api", "graphql", "-f", `query=${query}`, "-f", `q=${q}`], { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 });
-  const nodes: any[] = JSON.parse(stdout).data?.search?.nodes ?? [];
+  const { stdout, code } = await run("gh", ["api", "graphql", "-f", `query=${query}`, "-f", `q=${q}`], { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 });
+  // gh exits 1 on partial errors (e.g. SAML) but still returns valid data; use it if present.
+  const json = stdout ? JSON.parse(stdout) : null;
+  if (!json?.data?.search?.nodes && code !== 0) throw new Error(`gh api graphql exited ${code}`);
+  const nodes: any[] = json?.data?.search?.nodes ?? [];
   return nodes
     .filter((n) => n?.url)
     .map((n) => ({
@@ -114,10 +128,12 @@ let login: Promise<string> | null = null;
 /** The `gh` user's login, read once. A failed read is tried again on the next call. */
 export function ghLogin(): Promise<string> {
   login ??= run("gh", ["api", "user", "--jq", ".login"], { timeout: 15_000 }).then(
-    ({ stdout }) => stdout.trim(),
-    (err) => {
-      login = null;
-      throw err;
+    ({ stdout, code }) => {
+      if (code !== 0 || !stdout.trim()) {
+        login = null;
+        throw new Error(`gh api user exited ${code}`);
+      }
+      return stdout.trim();
     },
   );
   return login;
