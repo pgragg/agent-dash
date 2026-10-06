@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ConversationSummary } from "../shared/types.ts";
-import { agentFinished, notificationFor, type Pending, releasePending, SUMMARY_WAIT_MS, summaryText } from "../web/src/notify.ts";
+import type { AttentionItem, ConversationSummary } from "../shared/types.ts";
+import { addUpdate, agentFinished, entryOf, entryOfSignal, type Group, groupNotification, isNewSince, needSignals, newSignals, type Pending, pruneSeen, releasePending, runUpdate, SEEN_KEEP_MS, SUMMARY_WAIT_MS, signalUpdate, summaryText } from "../web/src/notify.ts";
 import { run } from "./helpers.ts";
 
 const since = "2026-10-05T10:00:00.000Z";
@@ -58,8 +58,69 @@ test("a held notification is dropped when the run moves on", () => {
   assert.equal(releasePending(held, [], { s1: summary() }, 1000).keep.size, 0);
 });
 
-test("the notification says finished or waiting, and shows the summary, else the last reply", () => {
-  assert.deepEqual(notificationFor(waiting, summary()), { title: "Agent finished: A run", body: "The lint step passes now." });
-  assert.deepEqual(notificationFor(waiting, summary({ needs: "Approve the merge" })), { title: "Agent is waiting on you: A run", body: "The lint step passes now.\nNeeds from you: Approve the merge" });
-  assert.deepEqual(notificationFor(waiting, undefined), { title: "Agent is waiting on you: A run", body: "Done. PR 12 is open." });
+test("an agent stop says finished or waiting, and shows the summary, else the last reply", () => {
+  assert.deepEqual(runUpdate(waiting, summary()), { key: "agent:s1", title: "Agent finished", line: "A run\nThe lint step passes now." });
+  assert.deepEqual(runUpdate(waiting, summary({ needs: "Approve the merge" })), { key: "agent:s1", title: "Agent is waiting on you", line: "A run\nThe lint step passes now.\nNeeds from you: Approve the merge" });
+  assert.deepEqual(runUpdate(waiting, undefined), { key: "agent:s1", title: "Agent is waiting on you", line: "A run\nDone. PR 12 is open." });
+});
+
+// ---- one notification per board entry ----
+
+const item = (o: Partial<AttentionItem>): AttentionItem => ({ kind: "ci_failing", score: 85, reason: "repo#12: CI is red: lint", name: "repo#12", status: "CI red", ticketKey: "ABC-123", ticketUrl: null, prUrl: "https://github.com/o/repo/pull/12", since, updatedAt: since, ...o });
+
+test("ten agent stops on one ticket make one alert and one notification that counts them", () => {
+  const groups = new Map<string, Group>();
+  const alerts: boolean[] = [];
+  for (let i = 0; i < 10; i++) {
+    const r = run({ ...waiting, sessionId: `s${i % 3}`, tickets: ["ABC-123"], name: `Agent ${i % 3}` });
+    alerts.push(addUpdate(groups, entryOf(r), "ABC-123 · Fix login", runUpdate(r, undefined)).alert);
+  }
+  assert.deepEqual(alerts, [true, ...Array(9).fill(false)]);
+  assert.equal(groups.size, 1);
+  const n = groupNotification(groups.get("t:ABC-123")!);
+  assert.equal(n.title, "ABC-123 · Fix login: 10 updates");
+  // One line per agent, newest first, at most three.
+  assert.equal(n.body.split("\n").length, 3);
+  assert.match(n.body.split("\n")[0], /^Agent is waiting on you: Agent 0/);
+});
+
+test("four tickets make four notifications", () => {
+  const groups = new Map<string, Group>();
+  for (const key of ["ABC-1", "ABC-2", "ABC-3", "ABC-4"]) for (let i = 0; i < 10; i++) addUpdate(groups, `t:${key}`, key, signalUpdate(item({ ticketKey: key, prUrl: `https://github.com/o/r/pull/${i}` })));
+  assert.equal(groups.size, 4);
+});
+
+test("a single update names itself, and more than three say how many more", () => {
+  const groups = new Map<string, Group>();
+  addUpdate(groups, "t:ABC-123", "ABC-123", signalUpdate(item({})));
+  assert.deepEqual(groupNotification(groups.get("t:ABC-123")!), { title: "ABC-123: CI is failing", body: "repo#12: CI is red: lint" });
+  for (const n of [13, 14, 15, 16]) addUpdate(groups, "t:ABC-123", "ABC-123", signalUpdate(item({ prUrl: `https://github.com/o/repo/pull/${n}`, reason: `repo#${n}: CI is red` })));
+  assert.match(groupNotification(groups.get("t:ABC-123")!).body, /\nand 2 more$/);
+});
+
+test("a run with no ticket and a PR with no ticket are their own entries", () => {
+  assert.equal(entryOf(run({ sessionId: "s9", tickets: [] })), "r:s9");
+  assert.equal(entryOfSignal({ ticketKey: null, prUrl: "https://github.com/o/r/pull/1" }), "p:https://github.com/o/r/pull/1");
+});
+
+test("only a new signal that needs you is news", () => {
+  const before = needSignals([item({}), item({ kind: "in_review", info: true })]);
+  // The first snapshot announces nothing.
+  assert.deepEqual(newSignals(null, before), []);
+  const after = needSignals([item({}), item({ kind: "merge_conflict" }), item({ kind: "stalled", prUrl: undefined }), item({ kind: "awaiting_input", sessionId: "s1", prUrl: undefined }), item({ kind: "overdue", prUrl: undefined, info: true })]);
+  assert.deepEqual(newSignals(before, after).map((a) => a.kind), ["merge_conflict"]);
+  // A signal that went away and came back is new again.
+  assert.deepEqual(newSignals(needSignals([]), before).map((a) => a.kind), ["ci_failing"]);
+});
+
+test("a row is new when it came after your last look, and all rows are new when you never looked", () => {
+  assert.equal(isNewSince("2026-10-05T10:00:00Z", "2026-10-05T09:00:00Z"), true);
+  assert.equal(isNewSince("2026-10-05T08:00:00Z", "2026-10-05T09:00:00Z"), false);
+  assert.equal(isNewSince("2026-10-05T08:00:00Z", null), true);
+});
+
+test("old looks drop out of the seen record", () => {
+  const now = Date.parse("2026-10-05T10:00:00Z");
+  const seen = { "t:ABC-1": new Date(now - 1000).toISOString(), "t:ABC-2": new Date(now - SEEN_KEEP_MS - 1).toISOString() };
+  assert.deepEqual(Object.keys(pruneSeen(seen, now)), ["t:ABC-1"]);
 });

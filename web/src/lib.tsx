@@ -2,7 +2,7 @@ import { Fragment, type ReactNode, useCallback, useEffect, useRef, useState } fr
 import type { Dashboard, DiagramWithSource, HistoryRun, PrDetail, ThreadStatus, Transcript } from "../../shared/types.ts";
 import { internalHref, JIRA_BROWSE, splitTrailing } from "./links.ts";
 import { EmbeddedImage, MermaidFence, setKnownDiagrams } from "./mermaid.tsx";
-import { boardHash, newlyWaiting, notificationFor, type Pending, releasePending, runsOf, type Seen, snapshot } from "./notify.ts";
+import { addUpdate, entryOf, entryOfSignal, type Group, groupNotification, needSignals, newlyWaiting, newSignals, type Pending, pruneSeen, releasePending, runsOf, runUpdate, type Seen, type SeenAt, signalUpdate, snapshot, type Update } from "./notify.ts";
 
 // ---- time ---------------------------------------------------------------------------
 
@@ -145,35 +145,129 @@ const MUTE_KEY = "agent-dash:notifications-muted";
 
 export type NotifyState = "unsupported" | "ask" | "on" | "muted" | "blocked";
 
+/** True while this tab is visible and has the focus: only then do you look at the page. */
+export function usePageFocus(): boolean {
+  const read = () => document.visibilityState === "visible" && document.hasFocus();
+  const [focused, setFocused] = useState(read);
+  useEffect(() => {
+    const update = () => setFocused(read());
+    for (const e of ["focus", "blur"]) window.addEventListener(e, update);
+    document.addEventListener("visibilitychange", update);
+    return () => {
+      for (const e of ["focus", "blur"]) window.removeEventListener(e, update);
+      document.removeEventListener("visibilitychange", update);
+    };
+  }, []);
+  return focused;
+}
+
+const SEEN_KEY = "agent-dash:seen";
+
+function readSeenAll(): SeenAt {
+  try {
+    return JSON.parse(localStorage.getItem(SEEN_KEY) ?? "{}") as SeenAt;
+  } catch {
+    return {};
+  }
+}
+
+/** When you last looked at a board entry, or null if you never did. */
+export function lastSeen(id: string): string | null {
+  return readSeenAll()[id] ?? null;
+}
+
+function markSeen(id: string) {
+  const now = Date.now();
+  localStorage.setItem(SEEN_KEY, JSON.stringify({ ...pruneSeen(readSeenAll(), now), [id]: new Date(now).toISOString() }));
+}
+
 /**
- * Browser notifications for runs that start to wait for you. They replace the pi extension
- * that asked macOS for a notification, so they fire only while this page is open in a tab.
+ * Records that you look at a board entry, while you do. Returns your look before this one, so the
+ * page can mark what came after it. It stays when you leave the tab, and is read again when you
+ * come back, so what came while you were away is new.
  */
-export function useWaitNotifications(data: Dashboard | null) {
+export function useLook(id: string | null): { id: string; lastLook: string | null } | null {
+  // Read at render, before the effect marks the look: StrictMode runs an effect twice in dev.
+  const prev = useRef<string | null>(null);
+  const look = useRef<{ id: string; lastLook: string | null } | null>(null);
+  if (id !== prev.current) {
+    prev.current = id;
+    if (id) look.current = { id, lastLook: lastSeen(id) };
+  }
+  useEffect(() => {
+    if (!id) return;
+    const mark = () => markSeen(id);
+    mark();
+    const timer = setInterval(mark, 5000);
+    return () => {
+      clearInterval(timer);
+      mark();
+    };
+  }, [id]);
+  return look.current;
+}
+
+/** The notification's heading: the ticket key and title, else the run or PR. */
+function entryLabel(d: Dashboard, id: string): string {
+  if (id.startsWith("t:")) {
+    const key = id.slice(2);
+    const g = [...d.myTickets, ...d.otherTickets].find((x) => x.ticket.key === key);
+    return g ? `${key} · ${g.ticket.summary}` : key;
+  }
+  if (id.startsWith("r:")) {
+    const r = runsOf(d).find((x) => x.sessionId === id.slice(2));
+    return r ? (r.name ?? r.firstPrompt) : "Agent";
+  }
+  return prName(id.slice(2));
+}
+
+/**
+ * Browser notifications, one per board entry: a ticket, else the run or PR with no ticket. They
+ * come when an agent stops, or when a new signal on the entry needs you. They replace the pi
+ * extension that asked macOS for a notification, so they fire only while this page is open.
+ * `looking` is the entry that you look at now: it gets no notification, and looking clears it.
+ */
+export function useWaitNotifications(data: Dashboard | null, looking: string | null) {
   const supported = typeof Notification !== "undefined";
   const [permission, setPermission] = useState(supported ? Notification.permission : "denied");
   const [muted, setMuted] = useState(() => localStorage.getItem(MUTE_KEY) === "1");
   const seen = useRef<Map<string, Seen> | null>(null);
+  const signals = useRef<ReturnType<typeof needSignals> | null>(null);
   const pending = useRef(new Map<string, Pending>());
+  const groups = useRef(new Map<string, Group>());
+  const shown = useRef(new Map<string, Notification>());
   const latest = useRef(data);
+  const lookingRef = useRef(looking);
+  lookingRef.current = looking;
+
+  const notify = useCallback(
+    (d: Dashboard, id: string, u: Update) => {
+      if (id === lookingRef.current) return;
+      // A snoozed ticket is off the board until its time, so it stays quiet too.
+      const until = id.startsWith("t:") ? d.snoozedUntil[id.slice(2)] : undefined;
+      if (until && Date.parse(until) > Date.now()) return;
+      const { group, alert } = addUpdate(groups.current, id, entryLabel(d, id), u);
+      if (!supported || muted || Notification.permission !== "granted") return;
+      const { title, body } = groupNotification(group);
+      // The tag makes this replace the entry's earlier notification, also one from a second dash tab.
+      const n = new Notification(title, { body, tag: id, silent: !alert, renotify: false } as NotificationOptions);
+      shown.current.set(id, n);
+      n.onclick = () => {
+        window.focus();
+        location.hash = `#/${encodeURIComponent(id)}`;
+        n.close();
+      };
+    },
+    [muted, supported],
+  );
 
   const release = useCallback(() => {
     const d = latest.current;
     if (!d) return;
     const { send, keep } = releasePending(pending.current, runsOf(d), d.conversationSummaries, Date.now());
     pending.current = keep;
-    if (!supported || muted || Notification.permission !== "granted") return;
-    for (const r of send) {
-      const { title, body } = notificationFor(r, d.conversationSummaries[r.sessionId]);
-      // The tag makes a second open dash tab replace this notification instead of adding one.
-      const n = new Notification(title, { body, tag: r.sessionId });
-      n.onclick = () => {
-        window.focus();
-        location.hash = boardHash(r);
-        n.close();
-      };
-    }
-  }, [muted, supported]);
+    for (const r of send) notify(d, entryOf(r), runUpdate(r, d.conversationSummaries[r.sessionId]));
+  }, [notify]);
 
   useEffect(() => {
     if (!data) return;
@@ -181,14 +275,25 @@ export function useWaitNotifications(data: Dashboard | null) {
     const runs = runsOf(data);
     for (const r of newlyWaiting(seen.current, runs)) pending.current.set(r.sessionId, { since: r.statusSince, heldAt: Date.now() });
     seen.current = snapshot(runs);
+    const now = needSignals(data.attention);
+    for (const a of newSignals(signals.current, now)) notify(data, entryOfSignal(a), signalUpdate(a));
+    signals.current = now;
     release();
-  }, [data, release]);
+  }, [data, release, notify]);
 
   // The time limit passes with no new data, so check it on a timer too.
   useEffect(() => {
     const id = setInterval(release, 5000);
     return () => clearInterval(id);
   }, [release]);
+
+  // You looked at the entry: its updates are read, and its notification goes.
+  useEffect(() => {
+    if (!looking) return;
+    groups.current.delete(looking);
+    shown.current.get(looking)?.close();
+    shown.current.delete(looking);
+  }, [looking]);
 
   const state: NotifyState = !supported ? "unsupported" : permission === "denied" ? "blocked" : permission === "default" ? "ask" : muted ? "muted" : "on";
   const setMute = (m: boolean) => {
@@ -204,7 +309,7 @@ export function useWaitNotifications(data: Dashboard | null) {
       setPermission(p);
       if (p !== "granted") return;
       setMute(false);
-      new Notification("agent-dash notifications are on", { body: "You get one when an agent starts to wait for you.", tag: "agent-dash-test" });
+      new Notification("agent-dash notifications are on", { body: "You get one per ticket when something on it needs you.", tag: "agent-dash-test" });
     },
     mute: () => setMute(true),
   };
