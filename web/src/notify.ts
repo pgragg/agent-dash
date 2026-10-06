@@ -6,8 +6,7 @@ import type { ConversationSummary, Dashboard, Run, RunStatus } from "../../share
  *
  * A run is announced when the page sees it go from working to waiting for you. Short runs
  * do not count: when a reply comes that fast, you are most likely still at that tab. A reply
- * you stopped with Esc does not count either, because then you are at the tab already. The
- * notification then waits for the run's summary (see `releasePending`).
+ * you stopped with Esc does not count either, because then you are at the tab already.
  */
 
 export const MIN_RUN_MS = 45_000;
@@ -48,28 +47,25 @@ export function boardHash(r: Run): string {
 
 // ---- summaries ----------------------------------------------------------------------
 
-/** A summary of the run as it is now: drafted after its last message, not an older one. */
+/** Only a summary of the run's current state counts; an older one describes another stop. */
 export function readySummary(s: ConversationSummary | undefined): (ConversationSummary & { latest: string }) | null {
   return s && s.status === "done" && !s.stale && s.latest ? (s as ConversationSummary & { latest: string }) : null;
 }
 
-/** The run stopped, and its summary of this stop says it needs nothing from Piper. Without a ready summary, it is not finished. */
+/** Without a ready summary we do not guess: the run counts as waiting. */
 export function agentFinished(run: Run | undefined, s: ConversationSummary | undefined): boolean {
   const ready = readySummary(s);
   return !!run && !!ready && run.status === "awaiting_input" && !run.dialog && needsNothing(ready.needs);
 }
 
-/** What the agent said last, then what it needs, when it needs something. Null until the summary is ready. */
+/** The need goes on its own line, so a notification shows it apart. */
 export function summaryText(s: ConversationSummary | undefined): string | null {
   const ready = readySummary(s);
   if (!ready) return null;
   return needsNothing(ready.needs) ? ready.latest : `${ready.latest}\nNeeds from you: ${ready.needs}`;
 }
 
-/**
- * How long a notification waits for the run's summary. The cheap model answers in seconds; past
- * this, the notification goes out with the agent's last reply, so a broken summary never hides it.
- */
+/** The model answers in seconds; past this, a broken summary must not hide the notification. */
 export const SUMMARY_WAIT_MS = 2 * 60_000;
 
 /** A notification held until its run's summary is ready. */
@@ -79,10 +75,7 @@ export interface Pending {
   heldAt: number;
 }
 
-/**
- * The held notifications to send now, and the ones to keep holding. A run that moved on (it works
- * again, or it is gone) drops its notification. A ready or failed summary sends it, and so does the time limit.
- */
+/** A run that moved on drops its notification: you no longer need to act on that stop. */
 export function releasePending(pending: Map<string, Pending>, runs: Run[], summaries: Record<string, ConversationSummary>, now: number, waitMs = SUMMARY_WAIT_MS): { send: Run[]; keep: Map<string, Pending> } {
   const byId = new Map(runs.map((r) => [r.sessionId, r]));
   const send: Run[] = [];
@@ -97,7 +90,7 @@ export function releasePending(pending: Map<string, Pending>, runs: Run[], summa
   return { send, keep };
 }
 
-/** The notification's title and body: "Agent finished" or "Agent is waiting on you", with the summary, else the last reply. */
+/** Without a ready summary, the last reply is the best text we have. */
 export function notificationFor(r: Run, s: ConversationSummary | undefined): { title: string; body: string } {
   const name = r.name ?? r.firstPrompt;
   const head = `${agentFinished(r, s) ? "Agent finished" : "Agent is waiting on you"}: ${name}`;

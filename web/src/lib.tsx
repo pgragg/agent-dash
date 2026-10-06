@@ -148,7 +148,6 @@ export type NotifyState = "unsupported" | "ask" | "on" | "muted" | "blocked";
 /**
  * Browser notifications for runs that start to wait for you. They replace the pi extension
  * that asked macOS for a notification, so they fire only while this page is open in a tab.
- * Each one waits for the run's summary, so it can say "Agent finished" and show what happened.
  */
 export function useWaitNotifications(data: Dashboard | null) {
   const supported = typeof Notification !== "undefined";

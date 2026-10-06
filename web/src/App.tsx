@@ -54,7 +54,7 @@ interface Subject {
 
 /** A signal, with the summary of its agent's conversation when it has one. */
 interface Item extends AttentionItem {
-  /** The text for the notification: what the agent said last, and what it needs. Null until the summary is ready. */
+  /** The summary for the notification. Null until it is ready, so nothing old shows. */
   gist: string | null;
   /** The agent stopped, and its summary says it needs nothing from you. */
   finished: boolean;
@@ -132,7 +132,7 @@ function lead(s: Subject): Item | undefined {
   return s.items.find((a) => !a.info) ?? s.items[0];
 }
 
-/** The other kinds of signal on the subject, for tags next to the lead: one tag per label. */
+/** One tag per label: two runs that both wait make one tag. */
 function otherTags(s: Subject): { short: string; tone: string }[] {
   const top = lead(s);
   const tags = new Map(s.items.map((a) => [look(a).short, look(a).tone]));
@@ -1218,7 +1218,7 @@ function firstStep(data: Dashboard, s: Subject): NextStep | null {
   return shown?.steps[0] ?? null;
 }
 
-/** The entries behind "N notifications", in queue order: what each is, its ticket, and where to act in agent-dash. */
+/** The entries behind "N notifications", in queue order, each with where to act. */
 function NeedsView({ queue, hidden, data, now }: { queue: Subject[]; hidden: number; data: Dashboard; now: number }) {
   return (
     <article className="workspace">
