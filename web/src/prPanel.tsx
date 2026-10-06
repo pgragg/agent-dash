@@ -3,7 +3,7 @@ import { verbFor } from "../../shared/prVerbs.ts";
 import { prRef } from "../../shared/refs.ts";
 import type { AttentionItem, AttentionKind, Dashboard, PrCheck, PrDetail } from "../../shared/types.ts";
 import { age, api, Markdown, plural, prName, runTitle } from "./lib.tsx";
-import { openerRun, panelTarget, verbStart } from "./prView.ts";
+import { type FeedbackEntry, type FeedbackState, feedback, feedbackCounts, openerRun, panelTarget, verbStart } from "./prView.ts";
 import { href } from "./routes.ts";
 
 /**
@@ -147,6 +147,116 @@ const stripHtml = (body: string) =>
     .replace(/&(ensp|emsp|nbsp);/g, " ")
     .trim();
 
+const FEEDBACK_TAG: Record<FeedbackState, [string, string]> = {
+  to_address: ["to address", "warn"],
+  replied: ["replied", "muted"],
+  outdated: ["outdated", "muted"],
+  addressed: ["marked addressed", "muted"],
+};
+
+/** The first line with words in it, for a bot's closed summary. */
+const firstLine = (body: string) => stripHtml(body).split("\n").map((l) => l.replace(/^[#>*\s-]+/, "").trim()).find(Boolean) ?? "";
+
+function FeedbackItem({ e, now, onMark }: { e: FeedbackEntry; now: number; onMark: (key: string, addressed: boolean) => Promise<string | null> }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const mark = async (addressed: boolean) => {
+    setBusy(true);
+    setError(await onMark(e.key, addressed));
+    setBusy(false);
+  };
+  const [word, tone] = FEEDBACK_TAG[e.state];
+  const body = e.body ? stripHtml(e.body) : "";
+  return (
+    <li className={e.state === "to_address" ? "" : "fb-muted"}>
+      <div className="pr-thread-head fb-head">
+        <Dot tone={tone} />
+        <span className={`tag tone-${tone}`}>{word}</span>
+        <b>{e.author}</b>
+        {e.bot && <span className="tag tone-muted">bot</span>}
+        {e.kind === "review" && <span className="meta">{e.reviewState!.toLowerCase().replace(/_/g, " ")}</span>}
+        {e.kind === "comment" && <span className="meta">commented</span>}
+        {e.thread && (
+          <span className="mono">
+            {e.thread.path}
+            {e.thread.line != null && `:${e.thread.line}`}
+          </span>
+        )}
+        <span className="meta">{age(e.at, now)} ago</span>
+        {e.state === "to_address" && e.commitSince && <span className="meta" title="A commit can fix it with no reply. Read the diff, then mark it addressed.">· a commit came after it</span>}
+        <span className="grow" />
+        {e.state === "to_address" && (
+          <button className="btn ghost small" disabled={busy} onClick={() => mark(true)} title="Saved in agent-dash only. Nothing goes to GitHub.">
+            Mark addressed
+          </button>
+        )}
+        {e.state === "addressed" && (
+          <button className="btn ghost small" disabled={busy} onClick={() => mark(false)}>
+            Undo
+          </button>
+        )}
+        <a className="ext-link" href={e.thread ? e.thread.comments[0].url : e.key} target="_blank" rel="noreferrer" title="Open on GitHub" aria-label="Open on GitHub">
+          ↗
+        </a>
+      </div>
+      {error && <div className="tone-text-bad">{error}</div>}
+      {body &&
+        (e.bot ? (
+          <details className="pr-comment">
+            <summary>{firstLine(body)}</summary>
+            <Markdown text={body} />
+          </details>
+        ) : (
+          <div className="pr-comment">
+            <Markdown text={body} />
+          </div>
+        ))}
+      {e.thread?.comments.map((c, j) => (
+        <div key={j} className="pr-comment">
+          <div className="turn-head">
+            <b>{c.author}</b>
+            <span className="meta">{age(c.createdAt, now)} ago</span>
+            {c.url && (
+              <a className="ext-link" href={c.url} target="_blank" rel="noreferrer" title="Open on GitHub" aria-label="Open on GitHub">
+                ↗
+              </a>
+            )}
+          </div>
+          <Markdown text={stripHtml(c.body)} />
+        </div>
+      ))}
+    </li>
+  );
+}
+
+/** Review bodies, conversation comments, and unresolved threads, with what still needs an answer. */
+function Feedback({ detail, review, now, onMark }: { detail: PrDetail; review?: [string, string]; now: number; onMark: (key: string, addressed: boolean) => Promise<string | null> }) {
+  const entries = feedback(detail);
+  return (
+    <section className="card">
+      <header className="card-head">
+        <h3>Feedback</h3>
+        {review && <span className={`tag tone-${review[1]}`}>{review[0]}</span>}
+        {entries.length > 0 && <span className="meta">{feedbackCounts(entries)}</span>}
+        <span className="grow" />
+        <span className="meta">
+          {detail.reviewers.map((r) => `${r.login}: ${r.state.toLowerCase().replace(/_/g, " ")}`).join(" · ")}
+          {detail.requestedReviewers.length > 0 && ` · waiting on ${detail.requestedReviewers.join(", ")}`}
+        </span>
+      </header>
+      {entries.length === 0 ? (
+        <p className="meta">No review text, comments, or unresolved threads.</p>
+      ) : (
+        <ol className="pr-threads">
+          {entries.map((e) => (
+            <FeedbackItem key={e.key} e={e} now={now} onMark={onMark} />
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
+
 export function PrPanel({ refId, data, now }: { refId: string; data: Dashboard; now: number }) {
   const target = panelTarget(refId);
   if (!target) {
@@ -196,6 +306,15 @@ function Panel({ refId, path, url, data, now }: { refId: string; path: string; u
   const review = REVIEW[detail?.reviewDecision ?? pr?.reviewDecision ?? ""];
   const title = detail?.title ?? pr?.title ?? prName(url);
   const body = detail ? stripHtml(detail.body) : "";
+  const mark = async (key: string, addressed: boolean) => {
+    try {
+      const keys = await api.markAddressed(path, key, addressed);
+      setDetail((d) => (d ? { ...d, addressed: keys } : d));
+      return null;
+    } catch (err) {
+      return (err as Error).message;
+    }
+  };
 
   return (
     <article className="workspace pr-panel" id={refId}>
@@ -239,6 +358,8 @@ function Panel({ refId, path, url, data, now }: { refId: string; path: string; u
       {error && <div className="toast">{error}</div>}
       {!pr && <p className="meta">This PR is not one of your open PRs from the last 14 days, so it has no signals or verbs here.</p>}
 
+      {detail ? <Feedback detail={detail} review={review} now={now} onMark={mark} /> : !error && <span className="shimmer wide" />}
+
       <section className="card">
         <header className="card-head">
           <h3>Tickets and runs</h3>
@@ -269,51 +390,8 @@ function Panel({ refId, path, url, data, now }: { refId: string; path: string; u
         )}
       </section>
 
-      {!detail && !error && <span className="shimmer wide" />}
-
       {detail && (
         <>
-          <section className="card">
-            <header className="card-head">
-              <h3>Review</h3>
-              {review && <span className={`tag tone-${review[1]}`}>{review[0]}</span>}
-              <span className="grow" />
-              <span className="meta">
-                {detail.reviewers.map((r) => `${r.login}: ${r.state.toLowerCase().replace(/_/g, " ")}`).join(" · ")}
-                {detail.requestedReviewers.length > 0 && ` · waiting on ${detail.requestedReviewers.join(", ")}`}
-              </span>
-            </header>
-            {detail.threads.length === 0 ? (
-              <p className="meta">No unresolved review threads.</p>
-            ) : (
-              <ol className="pr-threads">
-                {detail.threads.map((t, i) => (
-                  <li key={i}>
-                    <div className="pr-thread-head mono">
-                      {t.path}
-                      {t.line != null && `:${t.line}`}
-                      {t.isOutdated && <span className="tag tone-muted">outdated</span>}
-                    </div>
-                    {t.comments.map((c, j) => (
-                      <div key={j} className="pr-comment">
-                        <div className="turn-head">
-                          <b>{c.author}</b>
-                          <span className="meta">{age(c.createdAt, now)} ago</span>
-                          {c.url && (
-                            <a className="ext-link" href={c.url} target="_blank" rel="noreferrer" title="Open on GitHub" aria-label="Open on GitHub">
-                              ↗
-                            </a>
-                          )}
-                        </div>
-                        <Markdown text={stripHtml(c.body)} />
-                      </div>
-                    ))}
-                  </li>
-                ))}
-              </ol>
-            )}
-          </section>
-
           <section className="card">
             <header className="card-head">
               <h3>Checks</h3>

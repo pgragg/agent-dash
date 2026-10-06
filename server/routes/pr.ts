@@ -5,8 +5,12 @@ import type { PrCheck, PrDetail } from "../../shared/types.ts";
 import { config } from "../config.ts";
 import { checkState, contextName, contextState } from "../sources/github.ts";
 import { extractTickets } from "../sources/sessions.ts";
+import * as db from "../summaries/db.ts";
 
-/** GET /api/pr?ref=owner/repo/number: one PR in full, for the PR panel. Read-only, through the `gh` login. */
+/**
+ * GET /api/pr?ref=owner/repo/number: one PR in full, for the PR panel. Read-only, through the `gh` login.
+ * POST /api/pr/addressed?ref=… with `{key, addressed}`: marks one feedback entry addressed, in SQLite only.
+ */
 
 const run = promisify(execFile);
 
@@ -19,8 +23,10 @@ const QUERY = `query($owner: String!, $name: String!, $number: Int!) {
       reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } ... on Team { name } } } }
       latestReviews(first: 20) { nodes { author { login } state } }
       files(first: 100) { nodes { path additions deletions } }
-      reviewThreads(first: 100) { nodes { isResolved isOutdated path line originalLine comments(first: 30) { nodes { author { login } body createdAt url } } } }
-      commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes {
+      reviews(last: 50) { nodes { author { login __typename } state body submittedAt url } }
+      comments(last: 50) { nodes { author { login __typename } body createdAt url } }
+      reviewThreads(first: 100) { nodes { isResolved isOutdated path line originalLine comments(first: 30) { nodes { author { login __typename } body createdAt url } } } }
+      commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state contexts(first: 100) { nodes {
         ... on CheckRun { name status conclusion detailsUrl databaseId checkSuite { app { slug } } }
         ... on StatusContext { context state targetUrl }
       } } } } } }
@@ -62,12 +68,16 @@ export function logTail(text: string, maxLines = TAIL_LINES, maxChars = TAIL_CHA
   return tail.length > maxChars ? `…${tail.slice(-maxChars)}` : tail;
 }
 
+/** nitpickybot is a plain user account, so the login counts too. */
+const isBot = (author: any) => author?.__typename === "Bot" || /bot(\[bot\])?$/i.test(author?.login ?? "");
+
 /** An Actions check run's id is its job id, which the log endpoint takes. Stays on the server. */
 type CheckWithJob = PrCheck & { jobId?: number };
 
 /** The GraphQL answer as the panel needs it. Resolved review threads are left out. */
-export function toDetail(pr: any, ticketPattern: RegExp, now = new Date()): Omit<PrDetail, "checkRuns"> & { checkRuns: CheckWithJob[] } {
-  const rollup = pr.commits?.nodes?.[0]?.commit?.statusCheckRollup;
+export function toDetail(pr: any, ticketPattern: RegExp, now = new Date()): Omit<PrDetail, "checkRuns" | "addressed"> & { checkRuns: CheckWithJob[] } {
+  const head = pr.commits?.nodes?.[0]?.commit;
+  const rollup = head?.statusCheckRollup;
   const checkRuns: CheckWithJob[] = (rollup?.contexts?.nodes ?? [])
     .filter((c: any) => c && (c.name || c.context))
     .map((c: any) => ({
@@ -97,9 +107,16 @@ export function toDetail(pr: any, ticketPattern: RegExp, now = new Date()): Omit
         path: t.path,
         line: t.line ?? t.originalLine ?? null,
         isOutdated: !!t.isOutdated,
-        comments: (t.comments?.nodes ?? []).map((c: any) => ({ author: c.author?.login ?? "ghost", body: c.body ?? "", createdAt: c.createdAt, url: c.url })),
+        comments: (t.comments?.nodes ?? []).map((c: any) => ({ author: c.author?.login ?? "ghost", bot: isBot(c.author), body: c.body ?? "", createdAt: c.createdAt, url: c.url })),
       })),
     reviewers: (pr.latestReviews?.nodes ?? []).map((r: any) => ({ login: r.author?.login ?? "ghost", state: r.state })),
+    reviews: (pr.reviews?.nodes ?? [])
+      .filter(Boolean)
+      .map((r: any) => ({ author: r.author?.login ?? "ghost", bot: isBot(r.author), state: r.state, body: r.body ?? "", submittedAt: r.submittedAt, url: r.url })),
+    comments: (pr.comments?.nodes ?? [])
+      .filter(Boolean)
+      .map((c: any) => ({ author: c.author?.login ?? "ghost", bot: isBot(c.author), body: c.body ?? "", createdAt: c.createdAt, url: c.url })),
+    lastCommitAt: head?.committedDate ?? null,
     requestedReviewers: (pr.reviewRequests?.nodes ?? []).map((r: any) => r.requestedReviewer?.login ?? r.requestedReviewer?.name).filter(Boolean),
     additions: pr.additions,
     deletions: pr.deletions,
@@ -141,7 +158,7 @@ function fetchLogTail(repo: string, jobId: number): Promise<string | undefined> 
   });
 }
 
-async function fetchPrDetail(ref: { owner: string; name: string; number: number }): Promise<PrDetail> {
+async function fetchPrDetail(ref: { owner: string; name: string; number: number }): Promise<Omit<PrDetail, "addressed">> {
   const { stdout } = await run(
     "gh",
     ["api", "graphql", "-f", `query=${QUERY}`, "-f", `owner=${ref.owner}`, "-f", `name=${ref.name}`, "-F", `number=${ref.number}`],
@@ -156,9 +173,9 @@ async function fetchPrDetail(ref: { owner: string; name: string; number: number 
 }
 
 const TTL_MS = 60_000;
-const cache = new Map<string, { at: number; value: Promise<PrDetail> }>();
+const cache = new Map<string, { at: number; value: Promise<Omit<PrDetail, "addressed">> }>();
 
-function cached(key: string, ref: NonNullable<ReturnType<typeof parseRef>>, force: boolean): Promise<PrDetail> {
+function cached(key: string, ref: NonNullable<ReturnType<typeof parseRef>>, force: boolean): Promise<Omit<PrDetail, "addressed">> {
   const hit = cache.get(key);
   if (hit && !force && Date.now() - hit.at < TTL_MS) return hit.value;
   for (const [k, v] of cache) if (Date.now() - v.at >= TTL_MS) cache.delete(k);
@@ -169,8 +186,24 @@ function cached(key: string, ref: NonNullable<ReturnType<typeof parseRef>>, forc
   return value;
 }
 
+function readBody(req: IncomingMessage, max: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > max) {
+        reject(new Error("request body too large"));
+        req.destroy();
+      }
+    });
+    req.on("end", () => resolve(body));
+    req.on("error", reject);
+  });
+}
+
 export async function handle(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
-  if (url.pathname !== "/api/pr" || req.method !== "GET") return false;
+  const marking = url.pathname === "/api/pr/addressed" && req.method === "POST";
+  if (!marking && (url.pathname !== "/api/pr" || req.method !== "GET")) return false;
   // Same guard as the POST routes: each request runs gh with your login, so another site must not trigger it.
   if (req.headers["x-agent-dash"] !== "1") {
     res.writeHead(403).end();
@@ -183,8 +216,23 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
     json(400, { error: `not a PR ref (owner/repo/number): ${raw.slice(0, 200)}` });
     return true;
   }
+  const key = raw.toLowerCase();
+  if (marking) {
+    let body: { key?: unknown; addressed?: unknown } = {};
+    try {
+      body = JSON.parse((await readBody(req, 4_000)) || "{}") ?? {};
+    } catch {}
+    // A key is the GitHub URL of a review, comment, or thread comment.
+    if (typeof body.key !== "string" || body.key.length > 500 || !body.key.startsWith("https://github.com/")) {
+      json(400, { error: "the key must be the GitHub URL of the feedback" });
+      return true;
+    }
+    db.setAddressed(key, body.key, body.addressed === true);
+    json(200, { ok: true, addressed: db.addressedKeys(key) });
+    return true;
+  }
   try {
-    json(200, await cached(raw.toLowerCase(), ref, url.searchParams.has("refresh")));
+    json(200, { ...(await cached(key, ref, url.searchParams.has("refresh"))), addressed: db.addressedKeys(key) });
   } catch (err) {
     // gh's own message is in stderr; the error message repeats the whole command line.
     const e = err as Error & { stderr?: string };

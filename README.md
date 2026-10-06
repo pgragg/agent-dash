@@ -77,8 +77,12 @@ Your open PRs, grouped by ticket. A PR links to a ticket as on the board, so a P
 `#/pr:<owner>/<repo>/<number>` shows one PR without GitHub. It shows:
 
 - The title, state, author, branches, review decision, and the PR's signals, each with its [verb button](#pr-verbs).
+- **Feedback**, at the top: each review with text (of the last 50), each conversation comment (of the last 50), and each unresolved review thread (of the first 100), except the PR author's own. People come before bots, and each group is newest first. A bot's review summary is closed, with its first line showing. The header counts the states, for example "2 to address · 1 replied". Each entry has one state:
+  - **to address**: a thread whose last comment is not by the PR author, or a review text or comment with no later conversation comment or review text by the PR author. A commit does not count as an answer, because an approval often asks for one more change. The entry says "a commit came after it" when one did.
+  - **replied**: a thread whose last comment is by the PR author, or a review text or comment that the PR author answered later in the conversation. Muted.
+  - **outdated**: a thread on code that changed. Muted.
+  - **marked addressed**: you clicked **Mark addressed** on it. Muted, with **Undo**. The mark is saved in SQLite (`pr_feedback_addressed`), never on GitHub. A thread's mark is on its newest comment, so a new reply makes it **to address** again. `POST /api/pr/addressed?ref=<owner>/<repo>/<number>` with `{key, addressed}` sets it; the key is the GitHub URL of the review or comment.
 - The tickets in the title or branch (each opens `#/t:KEY`), and the run that opened the PR with `gh pr create`.
-- Each unresolved review thread (of the first 100): the file and line, and each comment with its author.
 - Each check run and status context (the first 100) with its state, failures first. A failed GitHub Actions check shows the end of its job log, up to the last `##[error]` line (at most 40 lines, 4,000 characters, 3 logs).
 - The description (as markdown), the diffstat, and the changed files with their `+`/`−` counts (the first 100).
 
