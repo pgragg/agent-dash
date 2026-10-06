@@ -152,6 +152,7 @@ async function dashboard(force: boolean) {
     starred: summaryDb.starredTickets(),
     threads: summaryDb.currentThreadStatuses(),
     parked: new Set(summaryDb.activeParked().map((p) => p.sessionId)),
+    folderExists: existsSync,
     jiraServer: config.jira.server,
   });
 

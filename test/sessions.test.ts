@@ -88,6 +88,7 @@ test("heuristic: a finished turn waits for input for a few hours, then counts as
   const s = parse(jsonl(header(), user("go"), reply("done?")), 30);
   assert.equal(heuristicStatus(s, NOW).status, "awaiting_input");
   assert.equal(heuristicStatus({ ...s, lastActivityAt: minutesAgo(5 * 60) }, NOW).status, "finished");
+  assert.equal(heuristicStatus(s, NOW, () => false).status, "finished", "its folder is gone");
 });
 
 test("tickets named after a report skill starts do not link the session", () => {

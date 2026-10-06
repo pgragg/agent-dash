@@ -343,7 +343,7 @@ PRs link to tickets by the key in their title or branch. Then two rules cross th
 | Status | With the extension | Without it (guess) |
 |---|---|---|
 | working | `agent_start` fired and the pi process is alive | The log ends mid-run and changed in the last 10 min |
-| awaiting input | `agent_settled` fired, or an extension dialog is open, and the pi process is alive | The log ends on a finished reply less than 4 h old |
+| awaiting input | `agent_settled` fired, or an extension dialog is open, and the pi process is alive | The log ends on a finished reply less than 4 h old, and its folder still exists |
 | finished | `session_shutdown` fired, or the pid is gone | Everything else |
 
 The extension writes its status file on `agent_settled`, not on `agent_end`, because pi can still retry or run queued messages after `agent_end`.

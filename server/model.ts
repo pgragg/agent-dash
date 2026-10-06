@@ -22,15 +22,17 @@ export interface ModelInput {
   /** Runs that agent-dash parked. A parked run that ended is no signal, also not for an API error. */
   parked?: Set<string>;
   isAlive?: (pid: number) => boolean;
+  /** For a run with no status file: a run whose folder is gone is not live. */
+  folderExists?: (dir: string) => boolean;
   jiraServer: string;
 }
 
-export function toRuns(sessions: ParsedSession[], reported: Map<string, ReportedStatus>, now: number, isAlive?: (pid: number) => boolean): Run[] {
+export function toRuns(sessions: ParsedSession[], reported: Map<string, ReportedStatus>, now: number, isAlive?: (pid: number) => boolean, folderExists?: (dir: string) => boolean): Run[] {
   return sessions
     .filter((s) => s.userMessageCount > 0) // A tab that was opened and never used.
     .map((s) => {
       const r = reported.get(s.sessionId);
-      const { status, since } = r ? resolveReported(r, isAlive) : heuristicStatus(s, now);
+      const { status, since } = r ? resolveReported(r, isAlive) : heuristicStatus(s, now, folderExists);
       return {
         sessionId: s.sessionId,
         sessionFile: s.sessionFile,
@@ -175,7 +177,7 @@ const CATEGORY_ORDER: Record<Ticket["statusCategory"], number> = { indeterminate
 
 export function buildDashboard(input: ModelInput): Dashboard {
   const { now, recentDays } = input;
-  const runs = toRuns(input.sessions, input.reported, now, input.isAlive);
+  const runs = toRuns(input.sessions, input.reported, now, input.isAlive, input.folderExists);
   const prs = input.prs.map((p) => ({ ...p, tickets: [...p.tickets] }));
   const threads = threadMap(input.threads ?? []);
   linkRuns(runs, prs, threads);
