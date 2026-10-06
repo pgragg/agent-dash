@@ -135,6 +135,8 @@ export interface SettingsState {
   /** The config file, which may not exist yet. */
   file: string;
   exists: boolean;
+  /** The main checkout's file, seen from a worktree server: Save is off. */
+  readOnly: boolean;
   /** The file's values, with defaults for what it leaves out. */
   saved: Settings;
   /** Fields that an env var sets now, with the var's name. The file value waits until the var is gone. */
