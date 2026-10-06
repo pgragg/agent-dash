@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { verbFor } from "../../shared/prVerbs.ts";
+import { type FeedbackNote, mergeVerbs, type PrVerb, REVIEW_AND_MERGE, verbFor } from "../../shared/prVerbs.ts";
 import { prRef } from "../../shared/refs.ts";
-import type { AttentionItem, AttentionKind, Dashboard, PrCheck, PrDetail } from "../../shared/types.ts";
+import type { AttentionItem, AttentionKind, Dashboard, PrCheck, PrDetail, PullRequest } from "../../shared/types.ts";
 import { age, api, Markdown, plural, prName, runTitle } from "./lib.tsx";
 import { type FeedbackEntry, type FeedbackState, feedback, feedbackCounts, openerRun, panelTarget, verbStart } from "./prView.ts";
 import { href } from "./routes.ts";
@@ -23,13 +23,29 @@ const Dot = ({ tone }: { tone: string }) => <span className={`dot tone-${tone}`}
 
 type StartState = { s: "idle" } | { s: "confirm" } | { s: "starting" } | { s: "started"; conversation: string | null } | { s: "error"; error: string };
 
-/** One verb for one PR signal. Null when the signal has no verb. The click is the approval. */
+/**
+ * One verb for one PR signal. Null when the signal has no verb. The click is the approval. A PR
+ * that is ready to merge gets a link to its panel instead: an approval can carry a request for a
+ * change, so the merge is only on the panel, under the feedback.
+ */
 export function PrVerbButton({ item, data }: { item: AttentionItem; data: Dashboard }) {
-  const [state, setState] = useState<StartState>({ s: "idle" });
   const pr = item.prUrl ? data.prs.find((p) => p.url === item.prUrl) : undefined;
   const verb = pr ? verbFor(item, pr) : null;
   if (!pr || !verb) return null;
-  const { ticket, cwd } = verbStart(data, pr, item.ticketKey);
+  const ref = prRef(pr.url);
+  if (verb.id === "merge" && ref) {
+    return (
+      <a className="btn small verb" href={href(ref)} title="Read the feedback on the PR panel, then merge there">
+        {REVIEW_AND_MERGE}
+      </a>
+    );
+  }
+  return <VerbButton verb={verb} pr={pr} data={data} ticketKey={item.ticketKey} />;
+}
+
+function VerbButton({ verb, pr, data, ticketKey, quiet = false }: { verb: PrVerb; pr: PullRequest; data: Dashboard; ticketKey: string | null; quiet?: boolean }) {
+  const [state, setState] = useState<StartState>({ s: "idle" });
+  const { ticket, cwd } = verbStart(data, pr, ticketKey);
   const start = async () => {
     setState({ s: "starting" });
     if (ticket) {
@@ -68,7 +84,7 @@ export function PrVerbButton({ item, data }: { item: AttentionItem; data: Dashbo
   }
   return (
     <span className="verb-wrap">
-      <button className="btn small verb" disabled={state.s === "starting"} title={`Start an agent ${where}:\n\n${verb.message}`} onClick={() => (verb.confirm ? setState({ s: "confirm" }) : start())}>
+      <button className={`btn small verb ${quiet ? "ghost" : ""}`} disabled={state.s === "starting"} title={`Start an agent ${where}:\n\n${verb.message}`} onClick={() => (verb.confirm ? setState({ s: "confirm" }) : start())}>
         {state.s === "starting" ? "Starting…" : verb.label}
       </button>
       {state.s === "error" && <span className="tone-text-bad verb-error">{state.error}</span>}
@@ -229,8 +245,27 @@ function FeedbackItem({ e, now, onMark }: { e: FeedbackEntry; now: number; onMar
   );
 }
 
+/** What the Address feedback agent reads about an entry. */
+function note(e: FeedbackEntry): FeedbackNote {
+  const last = e.thread?.comments.at(-1);
+  return { author: e.author, url: e.key, text: e.thread ? `${e.thread.path}: ${last?.body ?? ""}` : (e.body ?? "") };
+}
+
+/** The merge, at the end of the feedback, so it is read first. With feedback to address, that comes first. */
+function MergeVerbs({ pr, entries, data }: { pr: PullRequest; entries: FeedbackEntry[]; data: Dashboard }) {
+  const open = entries.filter((e) => e.state === "to_address").map(note);
+  const item = data.attention.find((a) => a.prUrl === pr.url && a.kind === "ready_to_merge");
+  return (
+    <div className="pr-merge">
+      {mergeVerbs(pr, open).map((v, i) => (
+        <VerbButton key={v.label} verb={v} pr={pr} data={data} ticketKey={item?.ticketKey ?? null} quiet={i > 0} />
+      ))}
+    </div>
+  );
+}
+
 /** Review bodies, conversation comments, and unresolved threads, with what still needs an answer. */
-function Feedback({ detail, review, now, onMark }: { detail: PrDetail; review?: [string, string]; now: number; onMark: (key: string, addressed: boolean) => Promise<string | null> }) {
+function Feedback({ detail, review, now, onMark, merge }: { detail: PrDetail; review?: [string, string]; now: number; onMark: (key: string, addressed: boolean) => Promise<string | null>; merge?: { pr: PullRequest; data: Dashboard } }) {
   const entries = feedback(detail);
   return (
     <section className="card">
@@ -253,6 +288,7 @@ function Feedback({ detail, review, now, onMark }: { detail: PrDetail; review?: 
           ))}
         </ol>
       )}
+      {merge && <MergeVerbs pr={merge.pr} entries={entries} data={merge.data} />}
     </section>
   );
 }
@@ -348,7 +384,8 @@ function Panel({ refId, path, url, data, now }: { refId: string; path: string; u
               <li key={a.kind}>
                 <Dot tone={TONE[a.kind] ?? "muted"} />
                 <span>{a.reason}</span>
-                <PrVerbButton item={a} data={data} />
+                {/* The merge is at the end of the Feedback section. */}
+                {a.kind !== "ready_to_merge" && <PrVerbButton item={a} data={data} />}
               </li>
             ))}
           </ul>
@@ -358,7 +395,7 @@ function Panel({ refId, path, url, data, now }: { refId: string; path: string; u
       {error && <div className="toast">{error}</div>}
       {!pr && <p className="meta">This PR is not one of your open PRs from the last 14 days, so it has no signals or verbs here.</p>}
 
-      {detail ? <Feedback detail={detail} review={review} now={now} onMark={mark} /> : !error && <span className="shimmer wide" />}
+      {detail ? <Feedback detail={detail} review={review} now={now} onMark={mark} merge={pr && items.some((a) => a.kind === "ready_to_merge") ? { pr, data } : undefined} /> : !error && <span className="shimmer wide" />}
 
       <section className="card">
         <header className="card-head">

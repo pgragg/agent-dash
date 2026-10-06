@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { splitSummary } from "../../shared/nextSteps.ts";
 import { prRef } from "../../shared/refs.ts";
+import { REVIEW_AND_MERGE } from "../../shared/prVerbs.ts";
 import type { Action, ActionKind, AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState } from "../../shared/types.ts";
 import { conversationHash, launchAgent, ResumeHere, resuming } from "./agents.tsx";
 import { filterHistory, groupByDay } from "./history.ts";
@@ -1221,7 +1222,7 @@ function ActionRow({ a, now }: { a: Action; now: number }) {
         {humanAge(a.createdAt, now) === "just now" ? "added just now" : `added ${humanAge(a.createdAt, now)} ago`}
       </a>
       <a className="btn small" href={href(a.target)}>
-        {targetLabel(a.target)} →
+        {a.kind === "ready_to_merge" ? REVIEW_AND_MERGE : targetLabel(a.target)} →
       </a>
     </li>
   );
