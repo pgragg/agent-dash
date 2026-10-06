@@ -1,4 +1,5 @@
-import { REVIEW_CHANNEL } from "./reviewRequest.ts";
+import { reviewChannel } from "./reviewRequest.ts";
+import { team, User, user } from "./team.ts";
 import type { PullRequest, SdlcEnvironment, SdlcEvent, Ticket } from "./types.ts";
 
 /**
@@ -73,25 +74,23 @@ const STAGE_ENVS: Record<"local" | "beta" | "prod", SdlcEnvironment[]> = {
 };
 
 /** A PR in one of these repos deploys a chart version; its base branch picks the stage, so the repo does too. */
-export const DEPLOY_REPOS: Record<"beta" | "prod", string> = {
-  beta: "postman-eng/cloud9-parcels-deployments",
-  prod: "postman-eng/cloud9-parcels-production-deployments",
-};
+export const deployRepo = (stage: "beta" | "prod"): string => (stage === "beta" ? team.deployRepoBeta : team.deployRepoProd);
 
 export function deployStageOf(pr: PullRequest): "beta" | "prod" | null {
-  if (pr.repo === DEPLOY_REPOS.beta) return "beta";
-  if (pr.repo === DEPLOY_REPOS.prod) return "prod";
+  if (team.deployRepoBeta && pr.repo === team.deployRepoBeta) return "beta";
+  if (team.deployRepoProd && pr.repo === team.deployRepoProd) return "prod";
   return null;
 }
 
 const AUTO_ACCEPT = "A plan that changes no Beta or Prod state is accepted at once.";
 
-const HINTS: Record<StageId, string> = {
+/** A function, not a constant: the review channel comes from the settings after this module loads. */
+const hints = (): Record<StageId, string> => ({
   ideation: "",
   pr: "Open a PR for the change.",
   local_smoketest_plan: `Plan a smoketest on localhost before you ask for a PR review. ${AUTO_ACCEPT}`,
   local_smoketest: "Run the confirmed plan of the local smoketest.",
-  review_requested: `Ask for a review in #${REVIEW_CHANNEL.name}: the PRs view has a drafted message for each open PR.`,
+  review_requested: reviewChannel() ? `Ask for a review in #${reviewChannel()!.name}: the PRs view has a drafted message for each open PR.` : "Ask for a review of each open PR.",
   in_beta: "Deploy to Postman Beta (merge the PR, then the us-beta deploy PR), and confirm the deploy in Argo.",
   beta_smoketest_plan: `Plan a smoketest on Postman Beta before you open the prod chart version update PR. ${AUTO_ACCEPT}`,
   beta_smoketest: "Run the confirmed plan of the Beta smoketest.",
@@ -99,7 +98,7 @@ const HINTS: Record<StageId, string> = {
   prod_smoketest_plan: `Plan a smoketest on Postman Prod. ${AUTO_ACCEPT}`,
   prod_smoketest: "Run the confirmed plan of the Prod smoketest.",
   done: "Move the ticket to Done in Jira.",
-};
+});
 
 export const STAGE_LABELS: Record<StageId, string> = {
   ideation: "Ideation",
@@ -184,7 +183,7 @@ function prLabel(url: string): string {
 function reviewStage(events: SdlcEvent[]): Omit<Stage, "label"> {
   const found = newestFirst(events.filter((e) => e.eventType === "review_request"));
   const last = found[0];
-  if (!last) return { id: "review_requested", state: "todo", detail: `No review request posted to #${REVIEW_CHANNEL.name} yet`, events: [] };
+  if (!last) return { id: "review_requested", state: "todo", detail: reviewChannel() ? `No review request posted to #${reviewChannel()!.name} yet` : "No review request posted from agent-dash", events: [] };
   const prs = [...new Set(found.map((e) => e.prUrl).filter((u): u is string => !!u))];
   const more = prs.length > 1 ? ` and ${prs.length - 1} more PR${prs.length > 2 ? "s" : ""}` : "";
   return { id: "review_requested", state: "done", detail: `Review requested for ${last.prUrl ? prLabel(last.prUrl) : "a PR"}${more} on ${last.startedAt.slice(0, 10)}`, events: found };
@@ -225,7 +224,7 @@ export function sdlcProgress({ ticket, prs, events }: { ticket: Ticket; prs: Pul
   const current = stages.reduce((at, s, i) => (s.state === "done" || s.state === "skipped" ? i : at), 0);
   for (const s of stages.slice(0, current)) if (s.state === "todo") s.state = "skipped";
   const next = stages[current + 1] ?? null;
-  let hint = next ? HINTS[next.id] : null;
+  let hint = next ? hints()[next.id] : null;
   if (next?.state === "failed") hint = `The newest ${next.label.toLowerCase()} failed. Fix it, then run it again.`;
   if (next?.state === "blocked") hint = `The newest ${next.label.toLowerCase()} was blocked. Remove the blocker, then run it again, or skip it.`;
   if (next?.state === "waiting") hint = isPlanStage(next.id) ? `${next.detail}. Read it, refine it in its conversation, then confirm it.` : `${next.detail}.`;
@@ -279,9 +278,12 @@ const LANES: { id: SmoketestLane["id"]; label: string; plan: StageId; run: Stage
 export function smoketestLanes(p: SdlcProgress, events: SdlcEvent[]): SmoketestLane[] {
   const nextAt = p.next ? p.stages.indexOf(p.next) : p.stages.length;
   return LANES.map((l) => {
-    const envs = STAGE_ENVS[l.id];
+    const all = STAGE_ENVS[l.id];
+    // The picker offers the enabled environments; old events on the others still show.
+    const on = all.filter((x) => team.environments.includes(x));
+    const envs = on.length ? on : all;
     const at = p.stages.findIndex((s) => s.id === l.plan);
-    const mine = newestFirst(events.filter((e) => (e.eventType === "smoketest_plan" || e.eventType === "smoketest_execution") && e.environments.some((x) => envs.includes(x))));
+    const mine = newestFirst(events.filter((e) => (e.eventType === "smoketest_plan" || e.eventType === "smoketest_execution") && e.environments.some((x) => all.includes(x))));
     const emphasis = p.next?.id === l.plan || p.next?.id === l.run ? "next" : at > nextAt ? "later" : "none";
     return {
       id: l.id,
@@ -291,7 +293,7 @@ export function smoketestLanes(p: SdlcProgress, events: SdlcEvent[]): SmoketestL
       run: p.stages[at + 1],
       events: mine,
       runs: mine.filter((e) => e.eventType === "smoketest_execution").reverse(),
-      env: mine[0]?.environments.find((x) => envs.includes(x)) ?? envs[0],
+      env: mine[0]?.environments.find((x) => all.includes(x)) ?? envs[0],
       emphasis,
     };
   });
@@ -316,15 +318,23 @@ function recordCommand(script: string, key: string, type: "deploy", env: SdlcEnv
   return `node ${script} ${type} --ticket ${key} --env ${env}`;
 }
 
-/** The environments where a smoketest needs Piper's confirmation before it changes state. */
-export const SHARED_ENVS = "Postman Beta, Postman Prod, Fern Dev and Fern Prod";
+/** The environments where a smoketest needs the user's confirmation before it changes state, in words. */
+export function sharedEnvs(): string {
+  const order: SdlcEnvironment[] = ["postman_beta", "postman_prod", "fern_dev", "fern_prod"];
+  const labels = order.filter((e) => team.environments.includes(e)).map((e) => ENV_LABEL[e]);
+  if (!labels.length) return "a shared environment";
+  return labels.length > 1 ? `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}` : labels[0];
+}
+
+/** The environments that a smoketest can be planned or recorded on now. */
+export const enabledEnvironments = () => ENVIRONMENTS.filter((e) => team.environments.includes(e.id));
 
 function envNotes(env: SdlcEnvironment, guide: string): string {
   const label = ENV_LABEL[env];
-  if (env === "localhost") return `${guide ? `Read ${guide} first, and pick` : "Pick"} the local stack that exercises this change. The skill smoketest-happy-path-local scripts the publish-docs flow.`;
+  if (env === "localhost") return `${guide ? `Read ${guide} first, and pick` : "Pick"} the local stack that exercises this change.`;
   if (env === "fern_dev") return `${label} is shared team infrastructure. The skill smoketest-happy-path-dev scripts the publish-docs flow.`;
   const what = env === "postman_beta" ? "is shared team infrastructure" : "carries real customer traffic";
-  return `${label} ${what}. Find the deployed version first (the argocd skill, read-only), so you know what you test.`;
+  return `${label} ${what}. Find the deployed version first (read-only, for example in Argo CD), so you know what you test.`;
 }
 
 /**
@@ -338,13 +348,13 @@ export function planMessage(key: string, env: SdlcEnvironment, script: string, p
 
 Work out from the context what the change does, and plan a test that shows that it works on ${label} from a user's point of view: the stack, URLs and versions, the steps, what you expect to see, and the evidence you will keep. ${envNotes(env, guide)}
 
-While you plan, change no state on ${SHARED_ENVS}: use read-only requests only. If the test must change state there (create or edit data, change a setting, deploy, sync), write each change in a state changes file: one line per change, with the system and the exact command or request. A change to local state only (a local database, local files) is not one of them.
+While you plan, change no state on ${sharedEnvs()}: use read-only requests only. If the test must change state there (create or edit data, change a setting, deploy, sync), write each change in a state changes file: one line per change, with the system and the exact command or request. A change to local state only (a local database, local files) is not one of them.
 
 agent-dash shows this plan as in progress (SDLC event ${planId}) until you record it, with one of these:
 node ${script} plan --id ${planId} --summary "<plan summary>" --plan-file <file> --state-changes none
 node ${script} plan --id ${planId} --summary "<plan summary>" --writes-summary "<writes summary>" --plan-file <file> --state-changes-file <file>
-Piper reads the two summaries first, at the top of the plan. The plan summary is one or two short sentences: what the test does and what it shows. The writes summary says, per environment, what the test writes there, in a few words, for example "Postman Beta: create one test project, then delete it". The files hold the details.
-Use the first command only when the test changes no state on ${SHARED_ENVS}. agent-dash then accepts the plan at once, and the script tells you how to run it: run it in this turn. After the second command, Piper must confirm the plan in agent-dash first: reply with a short summary of the plan and its state changes, and stop. Piper can ask for changes in this conversation; record each new version with the same command. Piper's confirmation comes as a message, and it is the approval to make the state changes that the plan lists.`;
+${User()} reads the two summaries first, at the top of the plan. The plan summary is one or two short sentences: what the test does and what it shows. The writes summary says, per environment, what the test writes there, in a few words, for example "Postman Beta: create one test project, then delete it". The files hold the details.
+Use the first command only when the test changes no state on ${sharedEnvs()}. agent-dash then accepts the plan at once, and the script tells you how to run it: run it in this turn. After the second command, ${user()} must confirm the plan in agent-dash first: reply with a short summary of the plan and its state changes, and stop. ${User()} can ask for changes in this conversation; record each new version with the same command. ${User()}'s confirmation comes as a message, and it is the approval to make the state changes that the plan lists.`;
 }
 
 /**
@@ -356,11 +366,11 @@ export function executeMessage(key: string, env: SdlcEnvironment, script: string
   const label = ENV_LABEL[env];
   const byPiper = plan.confirmedBy === "piper";
   const approval = byPiper
-    ? `Piper confirmed the smoketest plan of ${key} on ${label} (SDLC event ${plan.id}, the version recorded at ${plan.plannedAt}). This confirmation is Piper's approval to make the state changes that the plan lists, and only those:
+    ? `${User()} confirmed the smoketest plan of ${key} on ${label} (SDLC event ${plan.id}, the version recorded at ${plan.plannedAt}). This confirmation is ${user()}'s approval to make the state changes that the plan lists, and only those:
 ${plan.stateChanges ?? "(none)"}
 
-If the test needs another state change on ${SHARED_ENVS}, do not make it: record the smoketest as blocked, and say which change you need.`
-    : `agent-dash accepted the smoketest plan of ${key} on ${label} (SDLC event ${plan.id}), because it changes no state on ${SHARED_ENVS}. Change no state there. If the test needs a change after all, do not make it: record the smoketest as blocked, and say which change you need.`;
+If the test needs another state change on ${sharedEnvs()}, do not make it: record the smoketest as blocked, and say which change you need.`
+    : `agent-dash accepted the smoketest plan of ${key} on ${label} (SDLC event ${plan.id}), because it changes no state on ${sharedEnvs()}. Change no state there. If the test needs a change after all, do not make it: record the smoketest as blocked, and say which change you need.`;
   const planText = byPiper ? `
 
 The plan:
@@ -373,19 +383,19 @@ Run the plan now.${planText}
 
 agent-dash shows this smoketest as running (SDLC event ${executionId}) until you record the result:
 node ${script} finish --id ${executionId} --outcome passed|failed|blocked --summary "<one line>" --details-file <file> --results-file <file>
-Write the summary after the test is done: one line of at most 120 characters that says what the test showed, for example "Publish flow works end to end" or "Docs page 500s after publish: missing FDR token". The page shows only the outcome and this line until Piper clicks it. Use blocked, not failed, when you could not run the test or could not see the result (no access, no test data, the environment is down): failed means the change does not work. The details file says what you tested and how (stack, commands, URLs, versions). The results file says what you saw, with the evidence, or what blocked you. Then reply with the outcome and a short summary.`;
+Write the summary after the test is done: one line of at most 120 characters that says what the test showed, for example "Publish flow works end to end" or "Docs page 500s after publish: missing FDR token". The page shows only the outcome and this line until ${user()} clicks it. Use blocked, not failed, when you could not run the test or could not see the result (no access, no test data, the environment is down): failed means the change does not work. The details file says what you tested and how (stack, commands, URLs, versions). The results file says what you saw, with the evidence, or what blocked you. Then reply with the outcome and a short summary.`;
 }
 
 /** The first message of an agent that confirms a deploy in Argo, read-only, and records it. */
 export function confirmDeployMessage(key: string, stage: "beta" | "prod", prUrls: string[], script: string): string {
   const env: SdlcEnvironment = stage === "beta" ? "postman_beta" : "postman_prod";
   const label = ENV_LABEL[env];
-  const prs = prUrls.length ? `The deploy PRs for ${key}: ${prUrls.map(clean).join(", ")}.` : `Find the deploy PR for ${key} in ${DEPLOY_REPOS[stage]}.`;
+  const prs = prUrls.length ? `The deploy PRs for ${key}: ${prUrls.map(clean).join(", ")}.` : `Find the deploy PR for ${key} in ${deployRepo(stage)}.`;
   return `Confirm that the change for ${key} is deployed to ${label}.
 
-${prs} Use the argocd skill, read-only: find the Argo app that the deploy PR changes, and check that it is Synced and Healthy and runs the chart version or image from the PR. Do not sync, roll back, or change anything.
+${prs} Use Argo CD, read-only (the argocd CLI, or an argocd skill if you have one): find the Argo app that the deploy PR changes, and check that it is Synced and Healthy and runs the chart version or image from the PR. Do not sync, roll back, or change anything.
 
 If the deploy is confirmed, record it:
 ${recordCommand(script, key, "deploy", env)} --details "<Argo app>: Synced, Healthy, <version>"
-If it is not, record nothing, and tell Piper what you found.`;
+If it is not, record nothing, and tell ${user()} what you found.`;
 }

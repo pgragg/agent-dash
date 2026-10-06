@@ -26,6 +26,7 @@ import { parseArgs } from "node:util";
 import { config } from "../server/config.ts";
 import { startExecution, validateSdlcEvent, validateSdlcFinish, validateSdlcPlan } from "../server/sdlc.ts";
 import * as db from "../server/summaries/db.ts";
+import { user } from "../shared/team.ts";
 
 const USAGE = `usage: node scripts/sdlc-event.ts smoketest|deploy --ticket KEY [--ticket KEY] --env ENV [--env ENV] [--started ISO] [--finished ISO] [--outcome passed|failed|blocked] [--summary TEXT] [--details TEXT | --details-file F] [--results TEXT | --results-file F]
        node scripts/sdlc-event.ts plan --id N --summary TEXT (--plan TEXT | --plan-file F) (--state-changes none | (--state-changes TEXT | --state-changes-file F) --writes-summary TEXT)
@@ -57,9 +58,9 @@ try {
   if (positionals[0] === "plan") {
     const id = Number(values.id);
     const planned = db.recordPlan(id, validateSdlcPlan({ plan: read(values["plan-file"], values.plan), stateChanges: read(values["state-changes-file"], values["state-changes"]), summary: values.summary, writesSummary: values["writes-summary"] }));
-    if (!planned) throw new Error(`no plan with --id ${values.id ?? ""} that is still open: a confirmed plan cannot change. Ask Piper to start a new plan.`);
+    if (!planned) throw new Error(`no plan with --id ${values.id ?? ""} that is still open: a confirmed plan cannot change. Ask ${user()} to start a new plan.`);
     if (!planned.confirmedAt) {
-      console.log(`Recorded the plan (SDLC event ${id}). It changes Beta or Prod state, so it waits for Piper's confirmation in agent-dash. Reply with a short summary of the plan, and stop.`);
+      console.log(`Recorded the plan (SDLC event ${id}). It changes Beta or Prod state, so it waits for ${user()}'s confirmation in agent-dash. Reply with a short summary of the plan, and stop.`);
       process.exit(0);
     }
     const { message } = startExecution(planned, planned.sessionId, new URL(import.meta.url).pathname);

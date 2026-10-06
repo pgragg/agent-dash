@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { DEFAULT_SETTINGS, SETTING_FIELDS, type SettingKey, type Settings, splitList, validateSettings } from "../shared/settings.ts";
+import { setTeam } from "../shared/team.ts";
 
 const home = homedir();
 const env = process.env;
@@ -95,6 +96,10 @@ export function buildConfig(s: Settings) {
 }
 
 export const config = buildConfig(effectiveSettings(readSettingsFile().settings));
+setTeam(config.settings);
+
+/** Jira is asked only with a server and a login; without them it is off, not down. */
+export const jiraConfigured = (c: Pick<ReturnType<typeof buildConfig>, "jira"> = config): boolean => !!(c.jira.server && c.jira.login);
 
 /** What a new user still has to set before the board works, in words for the setup banner. */
 export function setupNeeded(c: Pick<ReturnType<typeof buildConfig>, "jira" | "settings"> = config, e: NodeJS.ProcessEnv = env): string[] {
@@ -105,5 +110,6 @@ export function setupNeeded(c: Pick<ReturnType<typeof buildConfig>, "jira" | "se
     if (!c.jira.tokenFile && !e.JIRA_API_TOKEN) out.push("a Jira token file");
   }
   if (!c.settings.ticketProjects.length) out.push("your ticket projects");
+  if (!c.settings.userName) out.push("your first name");
   return out;
 }

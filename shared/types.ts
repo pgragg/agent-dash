@@ -1,3 +1,4 @@
+import type { Team } from "./team.ts";
 /** Data contract between the server and the web page. */
 
 export type RunStatus = "working" | "awaiting_input" | "finished";
@@ -478,6 +479,8 @@ export interface Dashboard {
   extensionInstalled: boolean;
   /** Settings that a new user still has to set, in words. Empty when the board can work. */
   setup?: string[];
+  /** The team settings that shared code reads; the page sets them from here. */
+  team?: Team;
 }
 
 /** One Jira comment, with its body as markdown. */

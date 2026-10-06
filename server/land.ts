@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { WorkLane } from "../shared/types.ts";
 import { git } from "./lanes.ts";
+import { user } from "../shared/team.ts";
 
 const exec = promisify(execFile);
 
@@ -105,7 +106,7 @@ export function landFailureMessage(l: Pick<WorkLane, "lane" | "branch" | "integr
       "",
       `Conflicting files: ${out.files.map((f) => `\`${f}\``).join(", ") || "(git named none)"}.`,
       "",
-      `Run \`git rebase ${l.integrationBranch}\` in this worktree, resolve the conflicts so that both changes stay, run the checks, and commit. Then stop, so that Piper can land the lane again.`,
+      `Run \`git rebase ${l.integrationBranch}\` in this worktree, resolve the conflicts so that both changes stay, run the checks, and commit. Then stop, so that ${user()} can land the lane again.`,
     ].join("\n");
   }
   return [
@@ -117,6 +118,6 @@ export function landFailureMessage(l: Pick<WorkLane, "lane" | "branch" | "integr
     out.output,
     "```",
     "",
-    "Fix the cause on this branch, commit, and stop, so that Piper can land the lane again.",
+    `Fix the cause on this branch, commit, and stop, so that ${user()} can land the lane again.`,
   ].join("\n");
 }

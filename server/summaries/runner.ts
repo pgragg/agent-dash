@@ -11,6 +11,7 @@ import { isLocalKey } from "../sources/localTickets.ts";
 import { digestSession } from "../sources/sessions.ts";
 import { isAlive } from "../sources/status.ts";
 import * as db from "./db.ts";
+import { User, user } from "../../shared/team.ts";
 
 /** After this, a request counts as stuck: the page offers a re-request, and the run is stopped. */
 export const STALE_MS = 30 * 60_000;
@@ -56,10 +57,10 @@ export async function buildContext({ ticket, runs: allRuns, prs, notes = [], thr
     "",
     ticket.file ? `- Ticket file: ${ticket.file}` : `- Jira: ${ticket.url}`,
     `- Status: ${ticket.status} · Priority: ${ticket.priority ?? "-"} · Due: ${ticket.dueDate ?? "-"} · Updated: ${ticket.updatedAt || "-"}`,
-    `- Assigned to Piper: ${ticket.assignedToMe ? "yes" : "no"}`,
+    `- Assigned to ${user()}: ${ticket.assignedToMe ? "yes" : "no"}`,
     "",
     // Piper's notes come first: they hold decisions and context that no other source has.
-    `## Piper's private notes on ${ticket.key} (oldest first)`,
+    `## ${User()}'s private notes on ${ticket.key} (oldest first)`,
     ...(notes.length ? notes.map((n) => `- [${n.createdAt}] ${n.body.replace(/\n/g, "\n  ")}`) : ["- none"]),
     "",
     `## PRs linked to ${ticket.key} (GitHub, updated in the last 14 days)`,
@@ -89,7 +90,7 @@ export async function buildContext({ ticket, runs: allRuns, prs, notes = [], thr
     left -= d.length;
   }
   if (resolved.length) {
-    out.push("", `## Threads Piper marked resolved for ${ticket.key} (no longer relevant; do not plan from them)`);
+    out.push("", `## Threads ${user()} marked resolved for ${ticket.key} (no longer relevant; do not plan from them)`);
     for (const r of resolved) {
       const t = threads[r.sessionId];
       out.push(`- ${r.name ?? r.firstPrompt.slice(0, 80)} (resolved ${t.createdAt}${t.reason ? `: ${t.reason}` : ""})`);
@@ -117,16 +118,16 @@ export function buildPrompt(key: string, id: number, workDir: string): string {
     ? `2. ${key} is a local ticket, not a Jira issue. Read its file, named as "Ticket file" in the context file.`
     : `2. Jira body and comments:
    ${config.jira.tokenFile ? `set -a; source '${config.jira.tokenFile.replace(/'/g, "'\\''")}'; set +a; ` : ""}jira issue view ${key} --comments 20 --plain`;
-  return `Write a next-steps summary for ticket ${key}. Piper oversees several coding agents at once and reads it in a dashboard, so keep it very short.
+  return `Write a next-steps summary for ticket ${key}. ${User()} oversees several coding agents at once and reads it in a dashboard, so keep it very short.
 
 RULES
 - Read-only. Do not write to Jira, GitHub, Slack, or any repo: no comments, transitions, reviews, messages, reactions, commits, or pushes.
 - Spend at most 10 minutes. If a source fails, skip it and note it under "Gaps".
-- Piper's private notes (in the context file) are the most trusted source: when a newer note disagrees with an older source, follow the note. They are private, so never copy them anywhere outside the summary.
-- Follow the SDLC order in the context file's "SDLC progress": PR, local test plan, local smoketest, review requested, in Beta, Beta test plan, Beta smoketest, in Prod, Prod test plan, Prod smoketest, Done. A local smoketest comes before a PR review request, and a Beta smoketest comes before the prod chart version update deploy PR. Each smoketest starts with a plan: an agent that Piper starts from agent-dash writes it, and a plan that changes Beta or Prod state waits for Piper to confirm it in agent-dash. When the next stage is the review request, one step must say that Piper posts the drafted review request from agent-dash's PRs view. When the next stage is a test plan, one step must say to plan a smoketest from agent-dash and name the environment (localhost, Postman Beta, or Postman Prod). When the next stage is a test plan that waits, one step must say that Piper reads the plan and confirms it in agent-dash. When the next stage is a blocked smoketest, one step must say what blocks it and how to remove the blocker. Piper can skip a stage: never plan a step for a stage that shows as skipped.
+- ${User()}'s private notes (in the context file) are the most trusted source: when a newer note disagrees with an older source, follow the note. They are private, so never copy them anywhere outside the summary.
+- Follow the SDLC order in the context file's "SDLC progress": PR, local test plan, local smoketest, review requested, in Beta, Beta test plan, Beta smoketest, in Prod, Prod test plan, Prod smoketest, Done. A local smoketest comes before a PR review request, and a Beta smoketest comes before the prod chart version update deploy PR. Each smoketest starts with a plan: an agent that ${user()} starts from agent-dash writes it, and a plan that changes Beta or Prod state waits for ${user()} to confirm it in agent-dash. When the next stage is the review request, one step must say that ${user()} posts the drafted review request from agent-dash's PRs view. When the next stage is a test plan, one step must say to plan a smoketest from agent-dash and name the environment (localhost, Postman Beta, or Postman Prod). When the next stage is a test plan that waits, one step must say that ${user()} reads the plan and confirms it in agent-dash. When the next stage is a blocked smoketest, one step must say what blocks it and how to remove the blocker. ${User()} can skip a stage: never plan a step for a stage that shows as skipped.
 
 STEPS
-1. Read ${contextFile}. agent-dash already put Piper's private notes, the ticket fields, linked PRs, and digests of the pi sessions about ${key} in it.
+1. Read ${contextFile}. agent-dash already put ${user()}'s private notes, the ticket fields, linked PRs, and digests of the pi sessions about ${key} in it.
 ${ticketStep}
 3. For each open PR, and each PR merged in the last 7 days, read CI and review comments:
    gh pr view <url> --comments
@@ -138,8 +139,8 @@ ${ticketStep}
 OUTPUT (at most 120 words, markdown):
 **State:** one sentence.
 **Next steps:**
-1. The most important step first. Start each step with who acts: Piper, an agent, or a named person.
-   A Jira status move is a step of its own, worded "Piper moves the ticket to <status>". agent-dash puts a Move button on it, so no agent is needed.
+1. The most important step first. Start each step with who acts: ${User()}, an agent, or a named person.
+   A Jira status move is a step of its own, worded "${User()} moves the ticket to <status>". agent-dash puts a Move button on it, so no agent is needed.
 (1 to 4 steps)
 **Blockers:** one line, or "none".
 **Gaps:** one line, only if a source failed.

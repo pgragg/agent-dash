@@ -11,12 +11,15 @@ import { DEFAULT_SETTINGS, validateSettings } from "../shared/settings.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "agent-dash-settings-"));
 
-test("a fresh clone has no Jira, no Slack, no local tickets, and links no ticket keys", () => {
+test("a fresh clone has the company's Jira and Slack, but no login, paths, review channel or ticket keys", () => {
   const { settings, exists } = readSettingsFile(join(dir, "missing.json"));
   assert.equal(exists, false);
   assert.deepEqual(settings, DEFAULT_SETTINGS);
   const c = buildConfig(settings);
-  assert.equal(c.jira.server, "");
+  assert.equal(c.jira.server, "https://postmanlabs.atlassian.net");
+  assert.equal(c.jira.login, "");
+  assert.equal(c.settings.reviewChannelId, "");
+  assert.deepEqual(c.settings.environments, ["localhost", "postman_beta", "postman_prod"]);
   assert.equal(c.localTicketsDir, "");
   assert.equal(c.slack.stateFile, "");
   assert.equal("FSDK-12 ABC-1".match(c.ticketPattern), null);
@@ -49,10 +52,10 @@ test("ticket patterns escape nothing surprising and skip ignored keys in any pos
 
 test("the setup banner names what a new user still has to set", () => {
   const set = (over: object) => buildConfig({ ...DEFAULT_SETTINGS, ...over });
-  assert.deepEqual(setupNeeded(set({ jiraServer: "" }), {}), ["the Jira server", "your ticket projects"]);
-  assert.deepEqual(setupNeeded(set({ jiraServer: "https://x.atlassian.net" }), {}), ["your Jira login", "a Jira token file", "your ticket projects"]);
+  assert.deepEqual(setupNeeded(set({ jiraServer: "" }), {}), ["the Jira server", "your ticket projects", "your first name"]);
+  assert.deepEqual(setupNeeded(set({}), {}), ["your Jira login", "a Jira token file", "your ticket projects", "your first name"]);
   // The token can come from the env instead of a file.
-  assert.deepEqual(setupNeeded(set({ jiraServer: "https://x.atlassian.net", jiraLogin: "me@x.com", ticketProjects: ["ABC"] }), { JIRA_API_TOKEN: "t" }), []);
+  assert.deepEqual(setupNeeded(set({ jiraLogin: "me@x.com", ticketProjects: ["ABC"], userName: "Sam" }), { JIRA_API_TOKEN: "t" }), []);
 });
 
 const file = join(dir, "route.json");
@@ -81,4 +84,25 @@ test("Save needs the header, refuses a bad value without writing, and writes the
   const written = JSON.parse(readFileSync(file, "utf8"));
   assert.equal(written.jiraServer, "https://x.atlassian.net");
   assert.equal(written.port, 7777);
+});
+
+test("team settings: no name says the user, no channel turns review requests off, and only enabled environments are offered", async () => {
+  const { gistPrompt } = await import("../shared/conversationSummary.ts");
+  const { wantsReviewRequest } = await import("../shared/reviewRequest.ts");
+  const { deployStageOf, enabledEnvironments, sharedEnvs } = await import("../shared/sdlc.ts");
+  const { DEFAULT_TEAM, setTeam, team } = await import("../shared/team.ts");
+  const saved = { ...team };
+  try {
+    setTeam({ ...DEFAULT_TEAM, deployRepoBeta: "acme/deploy-beta" });
+    assert.match(gistPrompt("awaiting_input", "…"), /between the user \(USER\).*waits for the user\./s);
+    assert.equal(wantsReviewRequest({ repo: "a/b", state: "open" }), false);
+    assert.equal(sharedEnvs(), "Postman Beta and Postman Prod");
+    assert.deepEqual(enabledEnvironments().map((e) => e.id), ["localhost", "postman_beta", "postman_prod"]);
+    assert.equal(deployStageOf({ repo: "acme/deploy-beta" } as never), "beta");
+    setTeam({ ...DEFAULT_TEAM, userName: "Sam", reviewChannelId: "C0123ABCD", reviewChannelName: "reviews" });
+    assert.match(gistPrompt("awaiting_input", "…"), /between Sam \(USER\)/);
+    assert.equal(wantsReviewRequest({ repo: "a/b", state: "open" }), true);
+  } finally {
+    setTeam(saved);
+  }
 });

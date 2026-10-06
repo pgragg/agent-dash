@@ -1,5 +1,6 @@
 import { Fragment, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { Dashboard, DiagramWithSource, HistoryRun, PrDetail, ThreadStatus, Transcript } from "../../shared/types.ts";
+import { setTeam } from "../../shared/team.ts";
 import { internalHref, JIRA_BROWSE, splitTrailing } from "./links.ts";
 import { EmbeddedImage, MermaidFence, setKnownDiagrams } from "./mermaid.tsx";
 import { addUpdate, entryOf, entryOfSignal, type Group, groupNotification, needSignals, newlyWaiting, newSignals, type Pending, pruneSeen, releasePending, runsOf, runUpdate, type Seen, type SeenAt, signalUpdate, snapshot, type Update } from "./notify.ts";
@@ -118,6 +119,8 @@ export function useDashboard() {
       const body: Dashboard = await res.json();
       if (seq < applied.current) return;
       applied.current = seq;
+      // Before setData: shared code reads the team settings while the page renders.
+      if (body.team) setTeam(body.team);
       knownTickets = new Set([...body.myTickets, ...body.otherTickets].map((g) => g.ticket.key));
       setKnownDiagrams(body.diagrams);
       setData(body);

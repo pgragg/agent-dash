@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { REVIEW_CHANNEL } from "../../shared/reviewRequest.ts";
+import { reviewChannel } from "../../shared/reviewRequest.ts";
 import type { PullRequest } from "../../shared/types.ts";
 import { requestReviewDrafts } from "../reviewDrafts.ts";
 import * as db from "../summaries/db.ts";
@@ -95,6 +95,8 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
 async function sendReviewRequest(req: IncomingMessage, prs: PullRequest[], deps: Deps, json: (code: number, body: unknown) => void): Promise<void> {
   try {
     const body = JSON.parse((await readBody(req, 16_000)) || "{}") as { prUrl?: unknown; text?: unknown };
+    const channel = reviewChannel();
+    if (!channel) return json(409, { error: "review requests are off: set the review channel on the Settings page" });
     const pr = prs.find((p) => p.url === body.prUrl);
     if (!pr) return json(404, { error: "not one of your PRs" });
     const text = typeof body.text === "string" ? body.text.trim() : "";
@@ -104,7 +106,7 @@ async function sendReviewRequest(req: IncomingMessage, prs: PullRequest[], deps:
     let posted: Posted;
     sending.add(pr.url);
     try {
-      posted = await (deps.post ?? postToSlack)(REVIEW_CHANNEL.id, text);
+      posted = await (deps.post ?? postToSlack)(channel.id, text);
     } catch (err) {
       return json(502, { error: (err as Error).message });
     } finally {
@@ -119,7 +121,7 @@ async function sendReviewRequest(req: IncomingMessage, prs: PullRequest[], deps:
       environments: [],
       tickets: pr.tickets,
       prUrl: pr.url,
-      channel: REVIEW_CHANNEL.id,
+      channel: channel.id,
       message: text,
       messageUrl: posted.permalink,
     });

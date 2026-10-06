@@ -1,5 +1,6 @@
 import { progressLines, sdlcProgress } from "../shared/sdlc.ts";
 import type { Note, ParkedRun, PullRequest, Run, SdlcEvent, TicketGroup, TicketSummaryState } from "../shared/types.ts";
+import { User, user } from "../shared/team.ts";
 
 /**
  * The context a new agent starts with: what the ticket's page shows. It goes into the first
@@ -68,14 +69,14 @@ export function buildHandoff({ group, notes, summary, events = [], parked = [], 
   const t = group.ticket;
   const out: string[] = [
     HANDOFF_START(t.key),
-    `Piper started this agent from agent-dash at ${now.toISOString()}, with what the dashboard knows about ${t.key}.`,
-    "Treat it as background: Piper's message after this context says what to do. Notes are Piper's own and the most trusted source.",
+    `${User()} started this agent from agent-dash at ${now.toISOString()}, with what the dashboard knows about ${t.key}.`,
+    `Treat it as background: ${User()}'s message after this context says what to do. Notes are ${user()}'s own and the most trusted source.`,
     "",
     `# ${t.key}: ${t.summary}`,
     t.file ? `- Ticket file: ${t.file}` : `- Jira: ${t.url}`,
     `- Status: ${t.status} · Priority: ${t.priority ?? "-"} · Due: ${t.dueDate ?? "-"}`,
     "",
-    "## Piper's notes (oldest first)",
+    `## ${User()}'s notes (oldest first)`,
     ...(notes.length ? notes.map((n) => `- [${n.createdAt}] ${n.body.replace(/\n/g, "\n  ")}`) : ["- none"]),
     "",
   ];
@@ -98,7 +99,7 @@ export function buildHandoff({ group, notes, summary, events = [], parked = [], 
   }
 
   if (parked.length) {
-    out.push("", "## Parked agents (stopped while they waited for Piper; each ask can still be open)");
+    out.push("", `## Parked agents (stopped while they waited for ${user()}; each ask can still be open)`);
     for (const p of parked) out.push(`- ${p.name ?? p.sessionId} · parked ${p.parkedAt} · needs: ${p.needs ?? p.lastMessage.slice(-300).replace(/\s+/g, " ")}`);
   }
 
@@ -106,7 +107,7 @@ export function buildHandoff({ group, notes, summary, events = [], parked = [], 
   if (group.runs.length === 0) out.push("- none");
   for (const r of group.runs) {
     const th = group.threads[r.sessionId];
-    const resolution = th?.status === "resolved" ? `resolved by Piper ${th.createdAt}${th.reason ? `: ${th.reason}` : ""}` : "relevant";
+    const resolution = th?.status === "resolved" ? `resolved by ${user()} ${th.createdAt}${th.reason ? `: ${th.reason}` : ""}` : "relevant";
     out.push(`- ${r.name ?? r.firstPrompt.slice(0, 80)} · started ${r.startedAt} · ${r.userMessageCount} prompts · ${status(r)} · ${resolution} · log ${r.sessionFile}`);
   }
   out.push("", HANDOFF_END);
