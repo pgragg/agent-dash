@@ -151,33 +151,24 @@ const OUTCOME_TONE: Record<SmoketestOutcome, string> = { passed: "tone-good", fa
 
 const STATE_TEXT: Record<StageState, string> = { done: "done", failed: "failed", blocked: "blocked", running: "running", waiting: "waiting", skipped: "skipped", todo: "to do" };
 
-/**
- * A smoketest agent's row in the why list: the smoketest and its one action. Confirm is the
- * bar's Confirm, so it sends the same plan version.
- */
-export function SmoketestWhyRow({ row, runs, cwd, onError }: { row: SmoketestRow; runs: Run[]; cwd: string; onError: (m: string | null) => void }) {
+/** A smoketest row's name in the why list: a link to its event on the Smoketests card. */
+export function SmoketestName({ row }: { row: SmoketestRow }) {
   const id = `sdlc:${row.event.id}`;
   return (
-    <>
-      <span className="why-main">
-        <span className="row-head">
-          <span className="tag type-chip">Smoketest</span>
-          <span className={`tag tone-${row.tone}`}>{row.status}</span>
-          <a className="row-name" href={`#${id}`} onClick={scrollTo(id)} title="Show it on the Smoketests card">
-            {row.title}
-          </a>
-        </span>
-        {row.detail && <span className="why-gist">{row.detail}</span>}
-      </span>
-      {row.action === "confirm" && row.plan && <RunPlan plan={row.plan} cwd={cwd} onError={onError} />}
-      {row.action === "run_again" && row.plan && <RunPlan plan={row.plan} cwd={cwd} onError={onError} primary={false} />}
-      {row.action === "reply" && row.event.sessionId && (
-        <a className="btn small" href={agentHref(row.event.sessionId, runs)}>
-          Reply
-        </a>
-      )}
-    </>
+    <a className="row-name" href={`#${id}`} onClick={scrollTo(id)} title="Show it on the Smoketests card">
+      {row.title}
+    </a>
   );
+}
+
+/**
+ * A smoketest row's button in the why list, except Reply, which the list draws for every agent.
+ * Confirm is the bar's Confirm, so it sends the same plan version.
+ */
+export function SmoketestAction({ row, cwd, onError }: { row: SmoketestRow; cwd: string; onError: (m: string | null) => void }) {
+  if (row.action === "confirm" && row.plan) return <RunPlan plan={row.plan} cwd={cwd} onError={onError} />;
+  if (row.action === "run_again" && row.plan) return <RunPlan plan={row.plan} cwd={cwd} onError={onError} primary={false} />;
+  return null;
 }
 
 /** Its card in the ticket view; its page until pi writes the log. */

@@ -674,3 +674,22 @@ a.btn.verb { text-decoration: none; }
 
 /* The merge sits under the feedback, so it is read first. */
 .pr-merge { display: flex; justify-content: flex-end; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+
+/* The ticket header's why list: Needs you, then Updates, one line a row. A click opens the row. */
+.why-group { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-top: 2px; }
+.why-group ~ .why-group { margin-top: 6px; }
+.why-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.why li.why-row { display: block; cursor: pointer; padding: 3px 6px; margin: 0 -6px; border-radius: 8px; }
+.why li.why-row:hover, .why li.why-row.open { background: var(--hover); }
+.why-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.why-line:has(.verb-confirm) { flex-wrap: wrap; }
+/* The name is already cut at a word; the need line gives up its room first. */
+.why-line .row-head { flex: 0 0 auto; flex-wrap: nowrap; min-width: 0; max-width: 72%; }
+.why-line .row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.why-need { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12.5px; }
+.why-line .grow { flex: 1 0 0; }
+.why-age { flex: none; font-size: 12px; }
+.why-line > .btn, .why-line > .verb, .why-line > .verb-wrap, .why-line > .verb-done { flex: none; margin-left: 0; }
+.why-row.update .row-name, .why-row.update .why-need { color: var(--muted); }
+.why-detail { white-space: pre-line; color: var(--ink-2); font-size: 12.5px; padding: 4px 0 4px 2px; cursor: auto; }
+.why-more { align-self: flex-start; }
