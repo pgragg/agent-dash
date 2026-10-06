@@ -28,7 +28,8 @@ export function useLoad<T>(load: () => Promise<T>, key: unknown): { value: T | n
   return { value, error };
 }
 
-export function Chat({ sessionId, refreshKey }: { sessionId: string; refreshKey: unknown }) {
+/** `firstPrompt` closes the chat's first message under that label: a prompt that agent-dash wrote is for the agent, not for Piper. */
+export function Chat({ sessionId, refreshKey, firstPrompt }: { sessionId: string; refreshKey: unknown; firstPrompt?: string }) {
   const { value, error } = useLoad(() => api.transcript(sessionId), `${sessionId} ${refreshKey}`);
   const [all, setAll] = useState(false);
   if (error && !value) return <p className="meta chat-note">{error}</p>;
@@ -44,15 +45,22 @@ export function Chat({ sessionId, refreshKey }: { sessionId: string; refreshKey:
           </button>
         )}
         {shown.length === 0 && <p className="meta">This chat has no text yet.</p>}
-        {shown.map((t, i) => (
-          <div key={turns.length - shown.length + i} className={`turn ${t.role}`}>
-            <div className="turn-head">
-              <b>{t.role === "user" ? "You" : "Agent"}</b>
-              {t.at && <span className="meta">{stamp(t.at)}</span>}
+        {shown.map((t, i) =>
+          firstPrompt && t.role === "user" && turns.length === shown.length && i === 0 ? (
+            <details key={0} className="smoke-results chat-prompt">
+              <summary>{firstPrompt}</summary>
+              <Markdown text={t.text} />
+            </details>
+          ) : (
+            <div key={turns.length - shown.length + i} className={`turn ${t.role}`}>
+              <div className="turn-head">
+                <b>{t.role === "user" ? "You" : "Agent"}</b>
+                {t.at && <span className="meta">{stamp(t.at)}</span>}
+              </div>
+              <Markdown text={t.text} />
             </div>
-            <Markdown text={t.text} />
-          </div>
-        ))}
+          ),
+        )}
       </div>
     </SessionScope>
   );

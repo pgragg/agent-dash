@@ -607,6 +607,8 @@ a.btn.verb { text-decoration: none; }
 .smoke-item > summary .smoke-summary { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--ink); }
 .smoke-item > summary .meta { flex-shrink: 0; font-size: 12px; }
 .smoke-full { margin-top: 8px; }
+/* A plan summary can be a paragraph; its closed row is a reminder, and opening it shows the whole text. */
+.plan-row .smoke-item > summary .smoke-summary { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .smoketests select, .smoke-form select, .smoke-form input[type="datetime-local"] { height: 26px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--bg); font: 12.5px var(--sans); color: var(--ink); }
 
 /* ---- kanban: the board's entries in one column per SDLC stage ---- */
