@@ -1,10 +1,12 @@
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
+import { claudeInterruptLine, claudeUserLine } from "../agent.ts";
 import { config } from "../config.ts";
-import { newestOpenDialog, readLogTail, sameDialog, type UiAnswer, uiResponse, writeFifoLine } from "../rpc.ts";
+import { fifoOf } from "../conversations.ts";
+import { claudeResponse, newestOpenClaudeRequest, newestOpenDialog, readLogTail, sameDialog, type UiAnswer, uiResponse, writeFifoLine } from "../rpc.ts";
 import type { RunDialog } from "../../shared/types.ts";
-import { isAlive, readReportedStatuses, takesControls } from "../sources/status.ts";
+import { isAlive, patchReportedStatus, readReportedStatus, readReportedStatuses, type ReportedStatus, takesControls, takesSteer } from "../sources/status.ts";
 
 /** Talk to a live session from the page: reply, steer, stop, and answer an extension dialog. */
 
@@ -31,9 +33,21 @@ function readBody(req: IncomingMessage, max: number): Promise<string> {
   });
 }
 
-/** Drop a file in the session's inbox; the rename makes it appear whole to the extension. */
-export function writeInbox(sessionId: string, suffix: "txt" | "steer" | "abort", text: string): void {
+/**
+ * Send a reply, a steer or a Stop to a live session. pi's extension reads them from the session's
+ * inbox; a headless Claude Code reads them on its stdin.
+ */
+export function deliver(sessionId: string, suffix: "txt" | "steer" | "abort", text: string, status: ReportedStatus | undefined = readReportedStatus(config.statusDir, sessionId)): void {
   if (!SESSION_ID.test(sessionId)) throw new Error("not a session id");
+  if (status?.agent !== "claude") return writeInbox(sessionId, suffix, text);
+  if (suffix !== "abort") return writeFifoLine(fifoOf(sessionId), claudeUserLine(text));
+  writeFifoLine(fifoOf(sessionId), claudeInterruptLine());
+  // An interrupt also closes an open permission request.
+  patchReportedStatus(config.statusDir, sessionId, { state: "awaiting_input", since: new Date().toISOString(), activity: null, dialog: null });
+}
+
+/** Drop a file in the session's inbox; the rename makes it appear whole to the extension. */
+function writeInbox(sessionId: string, suffix: "txt" | "steer" | "abort", text: string): void {
   const dir = join(config.inboxDir, sessionId);
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `${Date.now()}-${process.pid}.${suffix}`);
@@ -66,17 +80,25 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
     const reply = await body<{ text?: string; steer?: boolean }>(64_000);
     if (!reply?.text?.trim()) return done(400, { error: "empty reply" });
     // An older extension reads *.txt only, and would never see a *.steer file.
-    if (reply.steer && !takesControls(status)) return done(409, { error: "type /reload in the session to steer from here" });
-    writeInbox(sessionId, reply.steer ? "steer" : "txt", reply.text.trim());
+    if (reply.steer && !takesSteer(status)) return done(409, { error: status.agent === "claude" ? "Claude Code cannot take a steer: queue the message, or stop the agent first" : "type /reload in the session to steer from here" });
+    try {
+      deliver(sessionId, reply.steer ? "steer" : "txt", reply.text.trim(), status);
+    } catch {
+      return done(409, { error: "the session no longer reads its input" });
+    }
     return done(202, { ok: true });
   }
 
   if (url.pathname === "/api/stop") {
     if (!takesControls(status)) return done(409, { error: "type /reload in the session to stop it from here" });
-    writeInbox(sessionId, "abort", "");
+    try {
+      deliver(sessionId, "abort", "", status);
+    } catch {
+      return done(409, { error: "the session no longer reads its input" });
+    }
     // An editor dialog takes no abort signal, so Stop cannot close it from the extension.
     if (status.dialog?.method !== "editor") return done(202, { ok: true });
-    if (status.mode === "rpc" && (await answerOpenDialog(sessionId, status.dialog, { cancelled: true })) === null) return done(202, { ok: true });
+    if (status.mode === "rpc" && (await answerOpenDialog(sessionId, status.dialog, { cancelled: true }, false)) === null) return done(202, { ok: true });
     return done(202, { ok: true, note: "The agent stops when the editor dialog closes. Close it in the session's tab." });
   }
 
@@ -86,23 +108,26 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   // The cap keeps an answer far below the pipe buffer, so the FIFO write never waits.
   const answer = await body<UiAnswer>(32_000);
   if (!answer) return done(400, { error: "the answer is not JSON" });
-  const err = await answerOpenDialog(sessionId, status.dialog, answer);
+  const err = await answerOpenDialog(sessionId, status.dialog, answer, status.agent === "claude");
   return err ? done(err.code, { error: err.error }) : done(202, { ok: true });
 }
 
 /** Write the answer to the dialog that the status file names. Returns null on success. */
-async function answerOpenDialog(sessionId: string, open: RunDialog, answer: UiAnswer): Promise<{ code: number; error: string } | null> {
+async function answerOpenDialog(sessionId: string, open: RunDialog, answer: UiAnswer, claude: boolean): Promise<{ code: number; error: string } | null> {
   const log = await readLogTail(join(config.conversationsDir, `${sessionId}.log`)).catch(() => "");
-  const request = newestOpenDialog(log, answered);
+  const claudeRequest = claude ? newestOpenClaudeRequest(log, answered) : null;
+  const request = claude ? claudeRequest : newestOpenDialog(log, answered);
   // Never answer a different dialog than the one the status file says is open.
   if (!request || !sameDialog(request, open)) return { code: 409, error: "the dialog is gone" };
-  const out = uiResponse(request, answer);
+  const out = claudeRequest ? claudeResponse(claudeRequest, answer) : uiResponse(request, answer);
   if ("error" in out) return { code: 400, error: out.error };
   try {
-    writeFifoLine(join(config.conversationsDir, `${sessionId}.in`), out.line);
+    writeFifoLine(fifoOf(sessionId), out.line);
   } catch {
     return { code: 409, error: "the session no longer reads its input" };
   }
+  // No hook fires on a denied request, so the dialog would stay on the page.
+  if (claude) patchReportedStatus(config.statusDir, sessionId, { dialog: null });
   answered.add(request.id);
   if (answered.size > 200) answered.delete(answered.values().next().value!);
   return null;

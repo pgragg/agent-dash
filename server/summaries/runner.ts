@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { mergePrs, progressLines, sdlcProgress } from "../../shared/sdlc.ts";
 import type { Note, PullRequest, Run, SdlcEvent, ThreadStatusChange, Ticket } from "../../shared/types.ts";
+import { summaryCommand } from "../agent.ts";
 import { config } from "../config.ts";
 import { fetchTicketPrs } from "../sources/github.ts";
 import { isLocalKey } from "../sources/localTickets.ts";
@@ -96,8 +97,8 @@ export async function buildContext({ ticket, runs: allRuns, prs, notes = [], thr
       out.push(`- ${r.name ?? r.firstPrompt.slice(0, 80)} (resolved ${t.createdAt}${t.reason ? `: ${t.reason}` : ""})`);
     }
   }
-  out.push("", `## pi sessions about ${ticket.key} (${runs.length}, oldest first)`);
-  if (runs.length === 0) out.push("", "No pi session names this ticket.");
+  out.push("", `## Agent sessions about ${ticket.key} (${runs.length}, oldest first)`);
+  if (runs.length === 0) out.push("", "No agent session names this ticket.");
   for (const r of [...runs].sort((a, b) => a.startedAt.localeCompare(b.startedAt))) {
     out.push(
       "",
@@ -127,7 +128,7 @@ RULES
 - Follow the SDLC order in the context file's "SDLC progress": PR, local test plan, local smoketest, review requested, in Beta, Beta test plan, Beta smoketest, in Prod, Prod test plan, Prod smoketest, Done. A local smoketest comes before a PR review request, and a Beta smoketest comes before the prod chart version update deploy PR. Each smoketest starts with a plan: an agent that ${user()} starts from agent-dash writes it, and a plan that changes Beta or Prod state waits for ${user()} to confirm it in agent-dash. When the next stage is the review request, one step must say that ${user()} posts the drafted review request from agent-dash's PRs view. When the next stage is a test plan, one step must say to plan a smoketest from agent-dash and name the environment (localhost, Postman Beta, or Postman Prod). When the next stage is a test plan that waits, one step must say that ${user()} reads the plan and confirms it in agent-dash. When the next stage is a blocked smoketest, one step must say what blocks it and how to remove the blocker. ${User()} can skip a stage: never plan a step for a stage that shows as skipped.
 
 STEPS
-1. Read ${contextFile}. agent-dash already put ${user()}'s private notes, the ticket fields, linked PRs, and digests of the pi sessions about ${key} in it.
+1. Read ${contextFile}. agent-dash already put ${user()}'s private notes, the ticket fields, linked PRs, and digests of the agent sessions about ${key} in it.
 ${ticketStep}
 3. For each open PR, and each PR merged in the last 7 days, read CI and review comments:
    gh pr view <url> --comments
@@ -169,7 +170,7 @@ export function finish(id: number, exitCode: number | null): void {
     db.markDone(id, text);
   } else {
     const tail = stripAnsi(read("err.log")).trim().split("\n").slice(-5).join("\n");
-    db.markFailed(id, `pi exited${exitCode === null ? "" : ` with code ${exitCode}`} without a summary${tail ? `: ${tail}` : ""}`);
+    db.markFailed(id, `the agent exited${exitCode === null ? "" : ` with code ${exitCode}`} without a summary${tail ? `: ${tail}` : ""}`);
   }
 }
 
@@ -214,21 +215,16 @@ export async function requestSummary(input: SummaryInput, opts: { force?: boolea
   const prompt = buildPrompt(key, rec.id, workDir);
   writeFileSync(join(workDir, "prompt.md"), prompt);
 
-  const args = ["-p", "--no-extensions", "--tools", "read,bash", "--session-dir", SESSION_DIR, "--name", `agent-dash summary ${key}`];
-  if (process.env.AGENT_DASH_SUMMARY_MODEL) args.push("--model", process.env.AGENT_DASH_SUMMARY_MODEL);
-  if (process.env.AGENT_DASH_SUMMARY_THINKING) args.push("--thinking", process.env.AGENT_DASH_SUMMARY_THINKING);
-  args.push(prompt);
-
+  const { cmd, args, env } = summaryCommand(config.agent, prompt, { name: `agent-dash summary ${key}`, sessionDir: SESSION_DIR });
   const out = openSync(join(workDir, "out.log"), "w");
   const err = openSync(join(workDir, "err.log"), "w");
-  const child = spawn("pi", args, {
+  const child = spawn(cmd, args, {
     cwd: workDir,
     // Detached, with output in files, so a server restart does not kill the run.
     detached: true,
     stdio: ["ignore", out, err],
-    // The `pi` shell alias sets this; a spawned pi does not get the alias.
     // AGENT_DASH_SLACK_HITS: slack-search.ts saves its matches there, for the page's quotes.
-    env: { ...process.env, SSL_CERT_FILE: process.env.SSL_CERT_FILE ?? "/etc/ssl/cert.pem", AGENT_DASH_SLACK_HITS: join(workDir, SLACK_HITS) },
+    env: { ...env, AGENT_DASH_SLACK_HITS: join(workDir, SLACK_HITS) },
   });
   closeSync(out);
   closeSync(err);
@@ -246,7 +242,7 @@ export async function requestSummary(input: SummaryInput, opts: { force?: boolea
   };
   child.on("exit", (code) => done(code));
   child.on("error", (e) => {
-    db.markFailed(rec.id, `could not start pi: ${e.message}`);
+    db.markFailed(rec.id, `could not start ${cmd}: ${e.message}`);
     done(1);
   });
   return db.get(rec.id)!;

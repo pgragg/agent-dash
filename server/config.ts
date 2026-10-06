@@ -67,6 +67,10 @@ export function effectiveSettings(fileSettings: Settings, e: NodeJS.ProcessEnv =
   for (const f of SETTING_FIELDS) {
     const v = f.env ? e[f.env] : undefined;
     if (v === undefined) continue;
+    if (f.kind === "choice" && !f.options!.some((o) => o.value === v)) {
+      console.warn(`agent-dash: ${f.env}=${v} is not one of ${f.options!.map((o) => o.value).join(", ")}; ignoring it`);
+      continue;
+    }
     out[f.key] = f.kind === "number" ? Number(v) : f.kind === "list" ? splitList(v) : v;
   }
   return out as unknown as Settings;
@@ -85,8 +89,10 @@ export function buildConfig(s: Settings) {
   return {
     settings: s,
     port: s.port,
-    sessionsDir: expandPath(s.sessionsDir),
-    /** The pi extension writes one status file per session here. */
+    agent: s.agent,
+    /** The session logs of the agent that the board shows. */
+    sessionsDir: expandPath(s.agent === "claude" ? s.claudeProjectsDir : s.sessionsDir),
+    /** The pi extension and the Claude Code hook write one status file per session here. */
     statusDir: env.AGENT_DASH_STATUS_DIR ?? join(home, ".agent-dash/status"),
     /** Replies typed in the dash go here, one folder per session; the extension delivers them. */
     inboxDir: env.AGENT_DASH_INBOX_DIR ?? join(home, ".agent-dash/inbox"),

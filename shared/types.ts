@@ -1,4 +1,4 @@
-import type { Team } from "./team.ts";
+import type { AgentKind, Team } from "./team.ts";
 /** Data contract between the server and the web page. */
 
 export type RunStatus = "working" | "awaiting_input" | "finished";
@@ -7,6 +7,8 @@ export type RunStatus = "working" | "awaiting_input" | "finished";
 export type StatusSource = "extension" | "heuristic";
 
 export interface Run {
+  /** The agent that runs it. */
+  agent: AgentKind;
   sessionId: string;
   sessionFile: string;
   cwd: string;
@@ -48,6 +50,8 @@ export interface Run {
   dialog?: RunDialog | null;
   /** The live session's extension takes Stop and Steer. Without it, the page asks for /reload. */
   canControl?: boolean;
+  /** It takes Steer too. Claude Code takes Stop only. */
+  canSteer?: boolean;
 }
 
 /** One tool call in progress, as the status extension reports it. */

@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { RunActivity, RunDialog, RunStatus } from "../../shared/types.ts";
@@ -11,8 +11,10 @@ export interface ReportedStatus {
   itermSessionId?: string | null;
   /** The extension watches ~/.agent-dash/inbox/<sessionId>/ for replies typed in the dash. */
   inbox?: boolean;
-  /** pi's mode: "rpc" is a headless conversation that the dash started. */
+  /** "rpc" is a headless conversation that the dash started. */
   mode?: string;
+  /** Set by the Claude Code hook. A file without it comes from the pi extension. */
+  agent?: "claude";
   state: "working" | "awaiting_input" | "closed";
   since: string;
   /** 2 and later: the extension reads *.steer and *.abort files, and reports activity and dialogs. */
@@ -24,6 +26,31 @@ export interface ReportedStatus {
 /** The extension of this session acts on Stop and Steer files. An older one reads only *.txt. */
 export function takesControls(s: ReportedStatus | undefined): boolean {
   return Boolean(s?.inbox) && (s?.version ?? 1) >= 2;
+}
+
+/** Claude Code has no steer: a message waits until the current turn ends. */
+export function takesSteer(s: ReportedStatus | undefined): boolean {
+  return takesControls(s) && s?.agent !== "claude";
+}
+
+export function readReportedStatus(dir: string, sessionId: string): ReportedStatus | undefined {
+  try {
+    return JSON.parse(readFileSync(join(dir, `${sessionId}.json`), "utf8")) as ReportedStatus;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Change a status file that the hooks own, for what no hook reports: Claude Code runs no Stop
+ * hook after an interrupt, and no hook when the server answers a permission request.
+ */
+export function patchReportedStatus(dir: string, sessionId: string, patch: Partial<ReportedStatus>): void {
+  const old = readReportedStatus(dir, sessionId);
+  if (!old) return;
+  const file = join(dir, `${sessionId}.json`);
+  writeFileSync(`${file}.${process.pid}.tmp`, JSON.stringify({ ...old, ...patch }));
+  renameSync(`${file}.${process.pid}.tmp`, file);
 }
 
 export async function readReportedStatuses(dir: string): Promise<Map<string, ReportedStatus>> {

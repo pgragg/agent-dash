@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { agentLabel } from "../../shared/team.ts";
 import { type MoveTarget, moveStepTarget, moveTargets } from "../../shared/jiraVerbs.ts";
 import { splitSummary } from "../../shared/nextSteps.ts";
 import { awaitsOwner, ownerWaitText } from "../../shared/ownerApproval.ts";
@@ -678,7 +679,7 @@ function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd:
     <section className="card start-agent">
       <header className="card-head">
         <h3>Start a new agent</h3>
-        <span className="meta">starts pi with this page as context; you talk to it here</span>
+        <span className="meta">starts {agentLabel()} with this page as context; you talk to it here</span>
       </header>
       <div className="composer">
         <textarea
@@ -709,7 +710,7 @@ function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd:
             <input type="checkbox" checked={parallel} onChange={(e) => setParallel(e.target.checked)} /> parallel lanes
           </label>
           {!parallel && (
-            <label className="meta" title="Open pi in a new iTerm tab instead of on this page">
+            <label className="meta" title={`Open ${agentLabel()} in a new iTerm tab instead of on this page`}>
               <input type="checkbox" checked={terminal} onChange={(e) => setTerminal(e.target.checked)} /> in iTerm
             </label>
           )}
@@ -721,7 +722,7 @@ function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd:
       </div>
       {started && Date.now() - started.at < 30_000 && (
         <p className="meta started">
-          {started.lanes ? "Started. Each lane shows under Parallel lanes, with its own worktree and agent." : started.sessionId ? <>Started. It shows under Agents once pi saves the first message, or <a href={conversationHash(started.sessionId)}>open its page</a>.</> : "Started in a new iTerm tab. It shows under Agents once it is running."}
+          {started.lanes ? "Started. Each lane shows under Parallel lanes, with its own worktree and agent." : started.sessionId ? <>Started. It shows under Agents once {agentLabel()} saves the first message, or <a href={conversationHash(started.sessionId)}>open its page</a>.</> : "Started in a new iTerm tab. It shows under Agents once it is running."}
         </p>
       )}
       <details
@@ -1610,7 +1611,7 @@ function NewConversationForm() {
     <article className="workspace">
       <header className="ws-head">
         <h1>New conversation</h1>
-        <span className="meta">A plain pi with no ticket context. It runs without a terminal, and you talk to it on this page.</span>
+        <span className="meta">A plain {agentLabel()} with no ticket context. It runs without a terminal, and you talk to it on this page.</span>
       </header>
       {error && <div className="toast">{error}</div>}
       <div className="composer">
@@ -1665,7 +1666,7 @@ function ConversationView({ sessionId, data, now }: { sessionId: string; data: D
                 {statusText(run, now)} · {dirLabel(run.cwd)} · {plural(run.userMessageCount, "prompt")}
               </span>
               {run.headless ? (
-                <button className="btn ghost small" title="Stop this pi process. Resume here continues it later." onClick={async () => setError(await api.endConversation(sessionId))}>
+                <button className="btn ghost small" title={`Stop this ${agentLabel()} process. Resume here continues it later.`} onClick={async () => setError(await api.endConversation(sessionId))}>
                   End conversation
                 </button>
               ) : (
@@ -1675,7 +1676,7 @@ function ConversationView({ sessionId, data, now }: { sessionId: string; data: D
           ) : old.value ? (
             <span className="meta">An older conversation, from its log</span>
           ) : (
-            <span className="meta">Starting pi…</span>
+            <span className="meta">Starting {agentLabel()}…</span>
           )}
         </div>
       </header>
@@ -1692,7 +1693,7 @@ function ConversationView({ sessionId, data, now }: { sessionId: string; data: D
       {!run && old.value && <Chat sessionId={sessionId} refreshKey="old" />}
       {run && <LivePanel run={run} now={now} onError={setError} working="The agent is working…" />}
       {run && run.status !== "finished" && <Composer run={run} onError={setError} focusSignal={0} />}
-      {run?.status === "finished" && <p className="meta">{resuming(sessionId) ? "Starting pi…" : "This conversation ended. Resume here (at the top) continues it on this page, and Copy resume in a terminal."}</p>}
+      {run?.status === "finished" && <p className="meta">{resuming(sessionId) ? `Starting ${agentLabel()}…` : "This conversation ended. Resume here (at the top) continues it on this page, and Copy resume in a terminal."}</p>}
       <div ref={end} />
     </article>
   );
@@ -1712,7 +1713,7 @@ const KEYS: [string, string][] = [
   ["S", "Draft next steps"],
   ["N", "Add a note"],
   ["A", "Start a new agent with this ticket's context"],
-  ["C", "Start a new conversation with pi on its own page, with no context"],
+  ["C", "Start a new conversation with the agent on its own page, with no context"],
   ["V", "Switch the board between the queue and the kanban"],
   ["↵", "On the kanban: open the selected card's workspace"],
   ["/", "On the kanban: search the cards (ticket keys rank first)"],
@@ -1896,7 +1897,15 @@ export function App() {
     <>
       {!data.extensionInstalled && (
         <p className="banner">
-          Run <code>pnpm install-extension</code> to get exact statuses and replies from here.
+          {data.team?.agent === "claude" ? (
+            <>
+              Run <code>pnpm install-extension</code> to get exact statuses from Claude Code sessions that agent-dash did not start.
+            </>
+          ) : (
+            <>
+              Run <code>pnpm install-extension</code> to get exact statuses and replies from here.
+            </>
+          )}
         </p>
       )}
       {boardRef && !target && (
@@ -1927,7 +1936,7 @@ export function App() {
     </>
   );
   const newConversation = (
-    <a className="btn" href="#/c" title="Start a plain pi with no ticket context, and talk to it on its own page">
+    <a className="btn" href="#/c" title={`Start a plain ${agentLabel()} with no ticket context, and talk to it on its own page`}>
       + New conversation <Kbd>C</Kbd>
     </a>
   );
@@ -1977,7 +1986,7 @@ export function App() {
         </div>
         <span className="grow" />
         <span className={`sources ${down.length ? "bad" : ""}`} title={sources.map(([n, h]) => `${n}: ${h.off ? "off (not set up)" : h.ok ? "ok" : h.error}`).join("\n")}>
-          {down.length ? `${down.map(([n]) => n).join(", ")} down` : data.sources.jira.off ? "Jira off · GitHub · pi" : "Jira · GitHub · pi"}
+          {down.length ? `${down.map(([n]) => n).join(", ")} down` : data.sources.jira.off ? `Jira off · GitHub · ${agentLabel()}` : `Jira · GitHub · ${agentLabel()}`}
           <Dot tone={down.length ? "bad" : "good"} />
         </span>
         <FixLogin sources={data.sources} onFixed={refresh} />

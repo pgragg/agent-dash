@@ -3,6 +3,7 @@ import { existsSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { ENV_LABEL, isSmoketestRunning } from "../../shared/sdlc.ts";
+import type { AgentKind } from "../../shared/team.ts";
 import { config } from "../config.ts";
 import { isRunning, startConversation } from "../conversations.ts";
 import { agentMessage, agentName } from "../handoff.ts";
@@ -10,7 +11,7 @@ import { startExecution } from "../sdlc.ts";
 import type { SessionIndex } from "../sources/sessions.ts";
 import { isAlive, readReportedStatuses } from "../sources/status.ts";
 import * as db from "../summaries/db.ts";
-import { writeInbox } from "./liveControl.ts";
+import { deliver } from "./liveControl.ts";
 import { resumeBlocker } from "./resume.ts";
 
 export interface PlanDeps {
@@ -40,14 +41,14 @@ function readBody(req: IncomingMessage, max: number): Promise<string> {
 }
 
 /** Where the run message goes: the planning agent, if it can still take a message, else a new agent. */
-type Target = { kind: "inbox"; sessionId: string } | { kind: "resume"; sessionId: string; cwd: string; sessionFile: string } | { kind: "new"; sessionId: string };
+type Target = { kind: "inbox"; sessionId: string } | { kind: "resume"; sessionId: string; cwd: string; sessionFile: string; agent: AgentKind } | { kind: "new"; sessionId: string };
 
 async function pickTarget(sessionId: string | null, sessions: SessionIndex): Promise<Target> {
   if (sessionId) {
     const status = (await readReportedStatuses(config.statusDir)).get(sessionId);
     if (status?.inbox && status.state !== "closed" && isAlive(status.pid)) return { kind: "inbox", sessionId };
     const parsed = (await sessions.scan()).find((p) => p.sessionId === sessionId);
-    if (parsed && !resumeBlocker(parsed, status, { running: isRunning(sessionId) })) return { kind: "resume", sessionId, cwd: parsed.cwd, sessionFile: parsed.sessionFile };
+    if (parsed && !resumeBlocker(parsed, status, { running: isRunning(sessionId) })) return { kind: "resume", sessionId, cwd: parsed.cwd, sessionFile: parsed.sessionFile, agent: parsed.agent };
   }
   return { kind: "new", sessionId: randomUUID() };
 }
@@ -102,8 +103,8 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
     const { execution, message } = startExecution(plan, target.sessionId, deps.script);
     executionId = execution.id;
     const key = plan.tickets[0];
-    if (target.kind === "inbox") writeInbox(target.sessionId, "txt", message);
-    else if (target.kind === "resume") startConversation({ cwd: target.cwd, message, resume: { sessionId: target.sessionId, sessionFile: target.sessionFile } });
+    if (target.kind === "inbox") deliver(target.sessionId, "txt", message);
+    else if (target.kind === "resume") startConversation({ cwd: target.cwd, message, resume: { sessionId: target.sessionId, sessionFile: target.sessionFile }, agent: target.agent });
     else startConversation({ cwd: dir, message: agentMessage(context!, message), name: agentName(key, `Run the smoketest plan on ${ENV_LABEL[plan.environments[0]]}`), sessionId: target.sessionId });
     deps.onChange();
     return json(201, { ok: true, sessionId: target.sessionId, execution });

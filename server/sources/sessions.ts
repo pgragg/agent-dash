@@ -1,11 +1,14 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import type { AgentKind } from "../../shared/team.ts";
 import type { RunStatus, Turn } from "../../shared/types.ts";
 import { type Found, findInReply, findInWrite } from "../diagrams.ts";
 import { stripHandoff } from "../handoff.ts";
 
-/** Everything the log says about one pi session. Status is decided later, in status.ts. */
+/** Everything the log says about one agent session. Status is decided later, in status.ts. */
 export interface ParsedSession {
+  /** The agent that wrote the log. */
+  agent: AgentKind;
   sessionId: string;
   sessionFile: string;
   cwd: string;
@@ -48,8 +51,9 @@ const MAX_TICKETS = 3;
  * one starts links the session: otherwise it shows up on every ticket it listed.
  */
 const REPORT_SKILLS = ["daily-progress-report", "standup-daily-summary", "itemize-invoice", "pi-usage-report", "pi-usage-invoice"];
-// `/skill:x` puts `<skill name="x"` in the user message; an agent that picks the skill reads its SKILL.md.
-const REPORT_SKILL_INVOKED = new RegExp(`<skill name="(?:${REPORT_SKILLS.join("|")})"`);
+// pi's `/skill:x` puts `<skill name="x"` in the user message, and Claude Code's `/x` puts
+// `<command-name>/x</command-name>`. An agent that picks the skill reads its SKILL.md, or calls Skill.
+const REPORT_SKILL_INVOKED = new RegExp(`<skill name="(?:${REPORT_SKILLS.join("|")})"|<command-name>/(?:${REPORT_SKILLS.join("|")})</command-name>`);
 const REPORT_SKILL_READ = new RegExp(`/skills/(?:${REPORT_SKILLS.join("|")})/SKILL\\.md`);
 const LAST_MESSAGE_MAX = 6_000;
 
@@ -109,7 +113,68 @@ export function pickTickets(scores: Map<string, number>): string[] {
     .map(([key]) => key);
 }
 
-export function parseSession(raw: string, sessionFile: string, mtime: Date, ticketPattern: RegExp): ParsedSession | null {
+/** Claude Code's tool names and stop reasons, as pi has them, so one parser reads both logs. */
+const CLAUDE_TOOLS: Record<string, string> = { Bash: "bash", Read: "read", Write: "write", Edit: "edit", MultiEdit: "edit", Grep: "grep", Glob: "find", LS: "ls" };
+const CLAUDE_STOPS: Record<string, string> = { end_turn: "stop", tool_use: "toolUse", max_tokens: "length", stop_sequence: "stop" };
+const INTERRUPTED = "[Request interrupted by user";
+
+/**
+ * A Claude Code transcript in pi's log shape: a session header, the name, and one message per
+ * prompt, reply and tool result. Claude Code writes each block of a reply as its own line with
+ * the same message id; they become one message. A pi log comes back as it is.
+ */
+export function asPiLog(raw: string): { agent: AgentKind; raw: string } {
+  // pi's first line is its session header; Claude Code has none.
+  if (raw.startsWith('{"type":"session"')) return { agent: "pi", raw };
+  const out: unknown[] = [];
+  let header = false;
+  let reply: { id: string; message: { content: unknown[]; stopReason: string | null } } | null = null;
+  for (const line of raw.split("\n")) {
+    if (!line) continue;
+    let e: any;
+    try {
+      e = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    // A subagent's turns are not the conversation.
+    if (e.isSidechain) continue;
+    if (e.type === "custom-title" && typeof e.customTitle === "string") out.push({ type: "session_info", name: e.customTitle });
+    if (e.type !== "user" && e.type !== "assistant") continue;
+    if (!header && e.sessionId) {
+      out.push({ type: "session", id: e.sessionId, cwd: e.cwd ?? "", timestamp: e.timestamp });
+      header = true;
+    }
+    const msg = e.message ?? {};
+    const parts: any[] = typeof msg.content === "string" ? [{ type: "text", text: msg.content }] : Array.isArray(msg.content) ? msg.content : [];
+    if (e.type === "assistant") {
+      const content: unknown[] = parts.flatMap((p): unknown[] =>
+        p?.type === "text" ? [{ type: "text", text: p.text }] : p?.type === "tool_use" ? [{ type: "toolCall", id: p.id, name: CLAUDE_TOOLS[p.name] ?? p.name, arguments: { ...p.input, ...(p.input?.file_path ? { path: p.input.file_path } : {}) } }] : [],
+      );
+      const stopReason = CLAUDE_STOPS[msg.stop_reason] ?? msg.stop_reason ?? null;
+      if (reply && reply.id === msg.id) {
+        reply.message.content.push(...content);
+        reply.message.stopReason = stopReason;
+        continue;
+      }
+      reply = { id: msg.id, message: { content, stopReason } };
+      out.push({ type: "message", timestamp: e.timestamp, message: { role: "assistant", model: msg.model, ...reply.message } });
+      continue;
+    }
+    reply = null;
+    if (e.isMeta) continue;
+    for (const p of parts) if (p?.type === "tool_result") out.push({ type: "message", timestamp: e.timestamp, message: { role: "toolResult", toolCallId: p.tool_use_id, content: p.content, isError: !!p.is_error } });
+    const texts = parts.filter((p) => p?.type === "text" && typeof p.text === "string");
+    if (!texts.length) continue;
+    // Esc writes this as a user line; pi logs the stop on the reply instead.
+    if (texts[0].text.startsWith(INTERRUPTED)) out.push({ type: "message", timestamp: e.timestamp, message: { role: "assistant", content: [], stopReason: "aborted" } });
+    else out.push({ type: "message", timestamp: e.timestamp, message: { role: "user", content: texts } });
+  }
+  return { agent: "claude", raw: out.map((o) => JSON.stringify(o)).join("\n") };
+}
+
+export function parseSession(log: string, sessionFile: string, mtime: Date, ticketPattern: RegExp): ParsedSession | null {
+  const { agent, raw } = asPiLog(log);
   let header: { id?: string; cwd?: string; timestamp?: string } | null = null;
   let name: string | null = null;
   let firstPrompt = "";
@@ -174,6 +239,7 @@ export function parseSession(raw: string, sessionFile: string, mtime: Date, tick
           if (part?.type !== "toolCall") continue;
           const args = JSON.stringify(part.arguments ?? {});
           if (part.name === "read" && REPORT_SKILL_READ.test(args)) usedReportSkill = true;
+          if (part.name === "Skill" && REPORT_SKILLS.includes(String((part.arguments as { skill?: unknown } | undefined)?.skill))) usedReportSkill = true;
           score(toolCallIntent(part.name, part.arguments), "toolCall");
           mention(args);
           if (part.name === "bash" && args.includes("gh pr create") && part.id) prCreateCalls.add(part.id);
@@ -201,6 +267,7 @@ export function parseSession(raw: string, sessionFile: string, mtime: Date, tick
 
   const replyLines = nonEmptyLines(lastReplyText);
   return {
+    agent,
     sessionId: header.id,
     sessionFile,
     cwd: header.cwd ?? "",
@@ -226,9 +293,9 @@ export function parseSession(raw: string, sessionFile: string, mtime: Date, tick
 const TURN_MAX = 20_000;
 
 /** Your prompts and the agent's replies, in order, without tool traffic. */
-export function transcriptTurns(raw: string, maxTurnChars = TURN_MAX): Turn[] {
+export function transcriptTurns(log: string, maxTurnChars = TURN_MAX): Turn[] {
   const turns: Turn[] = [];
-  for (const line of raw.split("\n")) {
+  for (const line of asPiLog(log).raw.split("\n")) {
     if (!line) continue;
     let entry: any;
     try {

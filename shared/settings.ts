@@ -1,4 +1,4 @@
-import { DEFAULT_TEAM, type Team } from "./team.ts";
+import { AGENT_LABEL, DEFAULT_TEAM, type Team } from "./team.ts";
 
 /**
  * The per-user settings in `agent-dash.config.json`. One list of fields drives the server's
@@ -8,6 +8,7 @@ import { DEFAULT_TEAM, type Team } from "./team.ts";
 export interface Settings extends Team {
   port: number;
   sessionsDir: string;
+  claudeProjectsDir: string;
   recentDays: number;
   jiraServer: string;
   jiraLogin: string;
@@ -28,9 +29,11 @@ export type SettingKey = keyof Settings;
 
 export interface SettingField {
   key: SettingKey;
-  group: "You" | "Server" | "Jira" | "Tickets" | "Reviews" | "Deploys" | "Logins" | "Slack" | "Smoketests";
+  group: "Agent" | "You" | "Server" | "Jira" | "Tickets" | "Reviews" | "Deploys" | "Logins" | "Slack" | "Smoketests";
   label: string;
-  kind: "number" | "text" | "path" | "url" | "list";
+  kind: "number" | "text" | "path" | "url" | "list" | "choice";
+  /** The values of a choice, with their labels. */
+  options?: { value: string; label: string }[];
   /** A list value must match this; a text value too, when it is not empty. */
   pattern?: RegExp;
   /** An env var that wins over the file, for a test server or a one-off run. */
@@ -46,6 +49,7 @@ export const DEFAULT_SETTINGS: Settings = {
   ...DEFAULT_TEAM,
   port: 7777,
   sessionsDir: "~/.pi/agent/sessions",
+  claudeProjectsDir: "~/.claude/projects",
   recentDays: 14,
   jiraServer: "https://postmanlabs.atlassian.net",
   jiraLogin: "",
@@ -66,9 +70,11 @@ const PROJECT = /^[A-Z][A-Z0-9]*$/;
 const REPO = /^[\w.-]+\/[\w.-]+$/;
 
 export const SETTING_FIELDS: SettingField[] = [
+  { key: "agent", group: "Agent", label: "Agent", kind: "choice", options: Object.entries(AGENT_LABEL).map(([value, label]) => ({ value, label })), env: "AGENT_DASH_AGENT", help: "The coding agent that agent-dash starts for runs, summaries and drafts, and whose session logs the board shows." },
   { key: "userName", group: "You", label: "Your first name", kind: "text", pattern: /^[^\s"'`]{1,40}$/, help: "Agents call you by this name in the prompts that agent-dash writes. Empty: \"the user\"." },
   { key: "port", group: "Server", label: "Port", kind: "number", env: "AGENT_DASH_PORT", help: "The dashboard listens on 127.0.0.1 at this port." },
-  { key: "sessionsDir", group: "Server", label: "pi sessions folder", kind: "path", env: "AGENT_DASH_SESSIONS_DIR", help: "Where pi writes its session logs." },
+  { key: "sessionsDir", group: "Server", label: "pi sessions folder", kind: "path", env: "AGENT_DASH_SESSIONS_DIR", help: "Where pi writes its session logs. Used when the agent is pi." },
+  { key: "claudeProjectsDir", group: "Server", label: "Claude Code projects folder", kind: "path", env: "AGENT_DASH_CLAUDE_PROJECTS_DIR", help: "Where Claude Code writes its session logs. Used when the agent is Claude Code." },
   { key: "recentDays", group: "Server", label: "Recent days", kind: "number", env: "AGENT_DASH_RECENT_DAYS", help: "Runs and PRs older than this do not make groups of their own." },
   { key: "jiraServer", group: "Jira", label: "Jira server", kind: "url", env: "JIRA_SERVER", help: "For example https://your-company.atlassian.net. Empty turns Jira off." },
   { key: "jiraLogin", group: "Jira", label: "Jira login", kind: "text", env: "JIRA_LOGIN", help: "The email of your Atlassian account." },
@@ -118,6 +124,9 @@ export function validateSettings(input: unknown): { settings: Settings; errors: 
         if (bad) errors[f.key] = `"${bad}" does not look right`;
         else settings[f.key] = items;
       }
+    } else if (f.kind === "choice") {
+      if (!f.options!.some((o) => o.value === v)) errors[f.key] = `must be one of ${f.options!.map((o) => o.value).join(", ")}`;
+      else settings[f.key] = v;
     } else if (typeof v !== "string" || v.length > 1_000 || /[\r\n]/.test(v)) {
       errors[f.key] = "must be one line of text";
     } else {

@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
-import { rpcArgs } from "../server/conversations.ts";
+import { headlessCommand } from "../server/agent.ts";
 import { agentMessage, agentName, HANDOFF_END, HANDOFF_START } from "../server/handoff.ts";
 import { resumeBlocker } from "../server/routes/resume.ts";
 import { parseSession, transcriptTurns } from "../server/sources/sessions.ts";
 import type { ReportedStatus } from "../server/sources/status.ts";
 import { header, jsonl, minutesAgo, name, NOW, PATTERN, reply, user } from "./helpers.ts";
+
+const rpcArgs = (id: string, opts: Parameters<typeof headlessCommand>[2]) => headlessCommand("pi", id, opts).args;
 
 test("a new headless run gets the server's id and its name; a resumed one opens its file", () => {
   assert.deepEqual(rpcArgs("id-1", { name: "FSDK-5: say hi" }), ["--mode", "rpc", "--session-id", "id-1", "--name", "FSDK-5: say hi"]);

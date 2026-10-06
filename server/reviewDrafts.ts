@@ -2,13 +2,13 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { cleanSummary, draftPrompt, fallbackMessage, reviewMessage, wantsReviewRequest } from "../shared/reviewRequest.ts";
 import type { PullRequest } from "../shared/types.ts";
+import { draftCommand } from "./agent.ts";
+import { config } from "./config.ts";
 import * as db from "./summaries/db.ts";
 
 const run = promisify(execFile);
 
-/** A draft is one short line, so a small, fast model is enough. */
-const MODEL = process.env.AGENT_DASH_DRAFT_MODEL ?? "anthropic/claude-haiku-4-5";
-/** Each draft is its own pi process; more than this at once only slows the machine. */
+/** Each draft is its own agent process; more than this at once only slows the machine. */
 const PARALLEL = 6;
 /** A failed or stuck draft is tried again on a page load after this. */
 const RETRY_MS = 5 * 60_000;
@@ -24,18 +24,15 @@ async function prText(url: string): Promise<{ body: string; files: string[] }> {
   }
 }
 
-/** One draft: the PR's text from gh, then one tool-less pi turn with the cheap model. */
+/** One draft: the PR's text from gh, then one tool-less agent turn with the cheap model. */
 export async function draftOne(pr: PullRequest): Promise<string> {
   const { body, files } = await prText(pr.url);
-  const args = ["-p", "--no-session", "--no-tools", "--no-extensions", "--no-skills", "--no-context-files", "--no-prompt-templates", "--model", MODEL, "--thinking", "off"];
-  const pi = run("pi", [...args, draftPrompt({ repo: pr.repo, title: pr.title, body, files })], {
-    timeout: 90_000,
-    // The `pi` shell alias sets this; a spawned pi does not get the alias.
-    env: { ...process.env, SSL_CERT_FILE: process.env.SSL_CERT_FILE ?? "/etc/ssl/cert.pem" },
-  });
-  // pi -p waits for stdin to close before it starts.
-  pi.child.stdin?.end();
-  const { stdout } = await pi;
+  // One short line: the cheap model is enough.
+  const { cmd, args, env } = draftCommand(config.agent, draftPrompt({ repo: pr.repo, title: pr.title, body, files }));
+  const agent = run(cmd, args, { timeout: 90_000, env });
+  // `-p` waits for stdin to close before it starts.
+  agent.child.stdin?.end();
+  const { stdout } = await agent;
   const summary = cleanSummary(stdout.replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, "").replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, ""));
   return summary ? reviewMessage(summary, pr.url) : fallbackMessage(pr.title, pr.url);
 }
