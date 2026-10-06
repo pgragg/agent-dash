@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, normalize } from "node:path";
 import type { Dashboard, PullRequest, SourceHealth, Ticket } from "../shared/types.ts";
-import { config } from "./config.ts";
+import { config, setupNeeded } from "./config.ts";
 import { startConversation } from "./conversations.ts";
 import { recordExit, wroteRecently } from "./exits.ts";
 import { focusItermSession, piCommand, runInNewItermTab } from "./iterm.ts";
@@ -84,7 +84,9 @@ class Cached<T> {
 }
 
 const sessions = new SessionIndex(config.sessionsDir, config.ticketPattern);
-const myTickets = new Cached<Ticket[]>([], fetchMyTickets);
+/** With no Jira server, Jira is off: no requests, and no "Jira down". */
+const JIRA_ON = !!config.jira.server;
+const myTickets = new Cached<Ticket[]>([], JIRA_ON ? fetchMyTickets : async () => []);
 const prs = new Cached<PullWithFeedback[]>([], () => fetchMyPrs(config.recentDays, config.ticketPattern));
 const others = new Map<string, Ticket>();
 let othersHealth: SourceHealth = { ok: true };
@@ -119,7 +121,7 @@ async function dashboard(force: boolean) {
   const otherKeys = otherTicketKeys(parsed, pulls, new Set(mine.map((t) => t.key)), now, config.recentDays);
   const otherLocal = otherKeys.flatMap((k) => local.get(k) ?? []);
   // Tickets outside my open list are looked up once and kept; their summaries rarely change.
-  const missing = otherKeys.filter((k) => !isLocalKey(k) && (force || !others.has(k)));
+  const missing = JIRA_ON ? otherKeys.filter((k) => !isLocalKey(k) && (force || !others.has(k))) : [];
   if (missing.length) {
     try {
       for (const t of await fetchTickets(missing)) others.set(t.key, t);
@@ -137,7 +139,7 @@ async function dashboard(force: boolean) {
     summaries[key] = { latest: pub(latest), lastDone: lastDone ? pub(lastDone) : null };
   }
 
-  const jira = !myTickets.health.ok ? myTickets.health : othersHealth.ok ? myTickets.health : othersHealth;
+  const jira = !JIRA_ON ? { ok: true, off: true } : !myTickets.health.ok ? myTickets.health : othersHealth.ok ? myTickets.health : othersHealth;
   const d = buildDashboard({
     sessions: parsed,
     reported,
@@ -178,6 +180,7 @@ async function dashboard(force: boolean) {
   if (sweepParks({ runs, summaries: d.conversationSummaries, done, threads: summaryDb.currentThreadStatuses(), laneSessions, now }, reported)) broadcast();
   const keepFrom = new Date(now - config.recentDays * 86_400_000).toISOString();
   d.parked = summaryDb.activeParked().filter((p) => p.parkedAt >= keepFrom);
+  d.setup = setupNeeded();
   return d;
 }
 

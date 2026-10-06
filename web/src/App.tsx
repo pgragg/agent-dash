@@ -7,7 +7,7 @@ import { READ_FEEDBACK, REVIEW_AND_MERGE } from "../../shared/prVerbs.ts";
 import type { AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, LaneMode, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState } from "../../shared/types.ts";
 import { conversationHash, launchAgent, ResumeHere, resuming } from "./agents.tsx";
 import { ParkedView } from "./parked.tsx";
-import { SettingsView } from "./settings.tsx";
+import { SettingsView, SetupBanner } from "./settings.tsx";
 import { FIRST_LANES, type LaneDraft, LanesCard, LanesEditor, type LaneRun, WorktreesView } from "./lanes.tsx";
 import { filterHistory, groupByDay } from "./history.ts";
 import { PrPanel, PrVerbButton } from "./prPanel.tsx";
@@ -1976,8 +1976,8 @@ export function App() {
           )}
         </div>
         <span className="grow" />
-        <span className={`sources ${down.length ? "bad" : ""}`} title={sources.map(([n, h]) => `${n}: ${h.ok ? "ok" : h.error}`).join("\n")}>
-          {down.length ? `${down.map(([n]) => n).join(", ")} down` : "Jira · GitHub · pi"}
+        <span className={`sources ${down.length ? "bad" : ""}`} title={sources.map(([n, h]) => `${n}: ${h.off ? "off (not set up)" : h.ok ? "ok" : h.error}`).join("\n")}>
+          {down.length ? `${down.map(([n]) => n).join(", ")} down` : data.sources.jira.off ? "Jira off · GitHub · pi" : "Jira · GitHub · pi"}
           <Dot tone={down.length ? "bad" : "good"} />
         </span>
         <FixLogin sources={data.sources} onFixed={refresh} />
@@ -1990,6 +1990,7 @@ export function App() {
           <Kbd>?</Kbd>
         </button>
       </header>
+      {route.view !== "settings" && <SetupBanner setup={data.setup ?? []} />}
 
       {route.view === "needs" ? (
         <main className="main">

@@ -95,3 +95,15 @@ export function buildConfig(s: Settings) {
 }
 
 export const config = buildConfig(effectiveSettings(readSettingsFile().settings));
+
+/** What a new user still has to set before the board works, in words for the setup banner. */
+export function setupNeeded(c: Pick<ReturnType<typeof buildConfig>, "jira" | "settings"> = config, e: NodeJS.ProcessEnv = env): string[] {
+  const out: string[] = [];
+  if (!c.jira.server) out.push("the Jira server");
+  else {
+    if (!c.jira.login) out.push("your Jira login");
+    if (!c.jira.tokenFile && !e.JIRA_API_TOKEN) out.push("a Jira token file");
+  }
+  if (!c.settings.ticketProjects.length) out.push("your ticket projects");
+  return out;
+}

@@ -11,15 +11,38 @@ The dashboard writes two things to Jira itself: a due date and a status move, fr
 
 ## Run it
 
+You need macOS, and these on your `PATH`:
+
+| Tool | For | Check |
+|---|---|---|
+| Node 24 or later, and pnpm | the server; Node runs the TypeScript directly | `node -v` |
+| [pi](https://github.com/badlogic/pi-mono) | the agents that the dash reads and starts | `pi --version` |
+| `gh`, logged in | your PRs, CI and reviews | `gh auth status` |
+| A Jira API token | your tickets ([make one](https://id.atlassian.com/manage-profile/security/api-tokens)), in a file with a `JIRA_API_TOKEN=…` line | |
+
+Optional: `jira` ([jira-cli](https://github.com/ankitpokhrel/jira-cli)), which next-steps summaries use to read comments; `agent-browser` and a saved Slack login, for Slack search in summaries; pi-mcp-adapter with a `slack` server, to post review requests; iTerm2, for **Open in iTerm**.
+
 ```bash
+git clone git@github.com:pgragg/agent-dash.git && cd agent-dash
 pnpm install
 pnpm install-extension   # once: exact run status and replies (see below)
 pnpm build && pnpm start # http://127.0.0.1:7777
 ```
 
-Then open **Settings** (`#/settings`) and set your Jira server, login and token file, your ticket projects, and the other paths that you use. They go in `agent-dash.config.json`, which git ignores. See [Configuration](#configuration).
+Then open **Settings** (`#/settings`) and set your Jira login and token file, your ticket projects, and the other paths that you use, and restart. They go in `agent-dash.config.json`, which git ignores. See [Configuration](#configuration). Until they are set, a banner on every view says what is missing, and the top bar says **Jira off**, not **Jira down**.
 
-`dash` (in `~/.zshrc`) does the same, and opens Chrome. `pnpm dev` runs the server with `--watch` and Vite on http://127.0.0.1:7778.
+To start it and open the page with one command, add this to `~/.zshrc` (change the folder to your clone):
+
+```bash
+dash() {
+  local url="http://127.0.0.1:7777"
+  curl -s -o /dev/null --max-time 2 "$url/" && { open "$url"; return; }
+  ( until curl -s -o /dev/null --max-time 1 "$url/"; do sleep 0.5; done; open "$url" ) &!
+  ( cd ~/agent-dash && pnpm start )
+}
+```
+
+`pnpm dev` runs the server with `--watch` and Vite on http://127.0.0.1:7778.
 
 ## The page
 

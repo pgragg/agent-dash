@@ -434,6 +434,8 @@ export interface ConversationSummary {
 
 export interface SourceHealth {
   ok: boolean;
+  /** Not set up, so never asked: not a failure. */
+  off?: boolean;
   error?: string;
   fetchedAt?: string;
 }
@@ -474,6 +476,8 @@ export interface Dashboard {
   parked: ParkedRun[];
   sources: { jira: SourceHealth; github: SourceHealth; sessions: SourceHealth };
   extensionInstalled: boolean;
+  /** Settings that a new user still has to set, in words. Empty when the board can work. */
+  setup?: string[];
 }
 
 /** One Jira comment, with its body as markdown. */
