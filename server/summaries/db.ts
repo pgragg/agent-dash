@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { splitSummary } from "../../shared/nextSteps.ts";
-import type { ConversationSummary, Diagram, DiagramKind, NextStep, Note, ReviewDraft, SdlcEnvironment, SdlcEvent, SdlcEventType, SmoketestOutcome, ThreadStatus, ThreadStatusChange, TicketSummary } from "../../shared/types.ts";
+import type { ConversationSummary, Diagram, DiagramKind, NextStep, Note, ReviewDraft, SdlcEnvironment, SdlcEvent, SdlcEventType, SmoketestOutcome, ThreadStatus, ThreadStatusChange, TicketSummary, WorkLane } from "../../shared/types.ts";
 
 export const DB_PATH = process.env.AGENT_DASH_DB ?? join(homedir(), ".agent-dash/agent-dash.db");
 
@@ -160,6 +160,26 @@ CREATE TABLE IF NOT EXISTS pr_feedback_addressed (
   addressed_at TEXT NOT NULL,
   PRIMARY KEY (pr_ref, key)
 );
+
+-- Parallel lanes: N agents on one ticket, each in its own git worktree. The server writes a row
+-- when it makes the worktree, so every worktree has an owner from the start.
+CREATE TABLE IF NOT EXISTS lanes (
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket               TEXT NOT NULL,
+  repo                 TEXT NOT NULL,
+  lane                 TEXT NOT NULL,
+  mode                 TEXT NOT NULL CHECK (mode IN ('land', 'pr')),
+  base                 TEXT NOT NULL,
+  branch               TEXT NOT NULL,
+  worktree             TEXT NOT NULL,
+  integration_branch   TEXT,
+  integration_worktree TEXT,
+  session_id           TEXT,
+  goal                 TEXT NOT NULL,
+  state                TEXT NOT NULL DEFAULT 'working',
+  created_at           TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS lanes_by_ticket ON lanes (ticket, id);
 
 -- One drafted Slack review request per PR, written by a cheap model. Piper can edit it before it is sent.
 CREATE TABLE IF NOT EXISTS review_drafts (
@@ -412,6 +432,34 @@ export function setStarred(ticket: string, starred: boolean): void {
 /** Starred ticket keys, first starred first. */
 export function starredTickets(): string[] {
   return (open().prepare("SELECT key FROM tickets WHERE starred_at IS NOT NULL ORDER BY starred_at").all() as { key: string }[]).map((r) => r.key);
+}
+
+// ---- Parallel lanes ----------------------------------------------------------------------
+
+const LANE_COLUMNS = `id, ticket, repo, lane, mode, base, branch, worktree, integration_branch AS integrationBranch,
+  integration_worktree AS integrationWorktree, session_id AS sessionId, goal, state, created_at AS createdAt`;
+
+export type LaneRecord = Omit<WorkLane, "git">;
+
+export function addLane(l: Omit<LaneRecord, "id" | "state" | "createdAt">): LaneRecord {
+  const createdAt = new Date().toISOString();
+  const { lastInsertRowid } = open()
+    .prepare("INSERT INTO lanes (ticket, repo, lane, mode, base, branch, worktree, integration_branch, integration_worktree, session_id, goal, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(l.ticket, l.repo, l.lane, l.mode, l.base, l.branch, l.worktree, l.integrationBranch, l.integrationWorktree, l.sessionId, l.goal, createdAt);
+  return { ...l, id: Number(lastInsertRowid), state: "working", createdAt };
+}
+
+/** Lanes that are not removed, by ticket key, oldest first. */
+export function activeLanes(): LaneRecord[] {
+  return open().prepare(`SELECT ${LANE_COLUMNS} FROM lanes WHERE state != 'removed' ORDER BY id`).all() as unknown as LaneRecord[];
+}
+
+export function getLane(id: number): LaneRecord | null {
+  return (open().prepare(`SELECT ${LANE_COLUMNS} FROM lanes WHERE id = ?`).get(id) as unknown as LaneRecord | undefined) ?? null;
+}
+
+export function setLaneState(id: number, state: LaneRecord["state"]): void {
+  open().prepare("UPDATE lanes SET state = ? WHERE id = ?").run(state, id);
 }
 
 // ---- PR feedback: what Piper marked addressed on the PR panel -------------------------

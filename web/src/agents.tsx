@@ -18,6 +18,10 @@ export interface LaunchBody {
   terminal?: boolean;
   /** An SDLC verb; the server writes its message, because the message names the server's script path. */
   sdlc?: { kind: "smoketest_plan"; env: string } | { kind: "confirm_deploy"; stage: "beta" | "prod" };
+  /** Parallel lanes: one worktree and one agent each. `message` is then a brief for all of them. */
+  lanes?: { name: string; message: string }[];
+  laneMode?: "land" | "pr";
+  base?: string;
 }
 
 /** Starts an agent on a ticket. Resolves to its session id (null in iTerm, which picks its own), or throws the reason. */

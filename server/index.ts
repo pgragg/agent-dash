@@ -23,6 +23,7 @@ import * as diagramRoute from "./routes/diagrams.ts";
 import * as sdlcRoute from "./routes/sdlc.ts";
 import * as smoketestPlanRoute from "./routes/smoketestPlan.ts";
 import * as reviewRoute from "./routes/reviewRequests.ts";
+import * as lanesRoute from "./routes/lanes.ts";
 import { confirmDeployMessage, deployStageOf, parseEnvironment, planMessage } from "../shared/sdlc.ts";
 import { requestConversationSummaries, summariesFor } from "./conversationSummaries.ts";
 import { syncDiagrams } from "./diagramSync.ts";
@@ -162,6 +163,7 @@ async function dashboard(force: boolean) {
   d.sdlcEvents = summaryDb.sdlcEventsByTicket();
   d.reviewDrafts = summaryDb.reviewDrafts();
   d.reviewRequests = summaryDb.reviewRequestsByPr();
+  d.lanes = await lanesRoute.lanesByTicket();
   redraftAfterNewEvents([...d.myTickets, ...d.otherTickets], broadcast);
   // Each live agent card opens on its summary, so draft it before Piper looks.
   const boardRuns = [...d.myTickets, ...d.otherTickets].flatMap((g) => g.runs).concat(d.unlinkedRuns);
@@ -326,7 +328,7 @@ const server = createServer(async (req, res) => {
       const context = buildHandoff({ group, notes: d.notes[key] ?? [], summary: d.summaries[key], events: d.sdlcEvents[key] ?? [], now: new Date() });
       if (url.pathname === "/api/agents/context") return void res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8" }).end(context);
 
-      const body = JSON.parse((await readBody(req, 64_000)) || "{}") as { message?: string; step?: number; cwd?: string; terminal?: boolean; sdlc?: { kind?: string; env?: string; stage?: string } };
+      const body = JSON.parse((await readBody(req, 64_000)) || "{}") as { message?: string; step?: number; cwd?: string; terminal?: boolean; sdlc?: { kind?: string; env?: string; stage?: string }; lanes?: unknown; laneMode?: unknown; base?: unknown };
       const cwd = body.cwd ?? homedir();
       // A step is read from the database, so the button starts the step that the page shows.
       const step = body.step === undefined ? null : summaryDb.getStep(Number(body.step));
@@ -335,9 +337,15 @@ const server = createServer(async (req, res) => {
       const env = body.sdlc?.kind === "smoketest_plan" ? parseEnvironment(body.sdlc.env ?? "") : null;
       const stage = body.sdlc?.kind === "confirm_deploy" && (body.sdlc.stage === "beta" || body.sdlc.stage === "prod") ? body.sdlc.stage : null;
       if (body.sdlc && !env && !stage) return json(400, { error: "unknown SDLC verb" });
-      if (!step && !body.sdlc && !body.message?.trim()) return json(400, { error: "write the first message" });
       const dir = cwd.replace(/^~(?=\/|$)/, homedir());
       if (!dir.startsWith("/") || !existsSync(dir) || !statSync(dir).isDirectory()) return json(400, { error: `not a folder: ${cwd}` });
+      if (body.lanes !== undefined) {
+        // Lanes are headless: each one is a row on the ticket page, and iTerm would open N tabs.
+        const out = await lanesRoute.startLanes({ key, context, cwd: dir, lanes: body.lanes, mode: body.laneMode, base: body.base, brief: body.message });
+        if (out.status === 201) broadcast();
+        return json(out.status, out.body);
+      }
+      if (!step && !body.sdlc && !body.message?.trim()) return json(400, { error: "write the first message" });
       // Picked here, so a smoketest plan's event can link to its agent before pi starts.
       const sessionId = randomUUID();
       // Saved before pi starts, so the stage is yellow from the click.
