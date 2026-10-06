@@ -430,6 +430,9 @@ a.pr-group-title:hover { text-decoration: underline; text-underline-offset: 3px;
 .action-meta > * { flex: none; }
 .action-meta .action-ticket { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .need > .q-rank { align-self: flex-start; }
+/* The agent's summary under a notification: what it said last, and what it needs. */
+.why-gist, .need-gist { display: block; white-space: pre-line; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.need-gist { margin-top: 4px; }
 .need-step-body { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
 .action-age { flex: none; text-decoration: none; white-space: nowrap; }
 .action-age:hover { text-decoration: underline; }
