@@ -693,3 +693,9 @@ a.btn.verb { text-decoration: none; }
 .why-row.update .row-name, .why-row.update .why-need { color: var(--muted); }
 .why-detail { white-space: pre-line; color: var(--ink-2); font-size: 12.5px; padding: 4px 0 4px 2px; cursor: auto; }
 .why-more { align-self: flex-start; }
+/* New since your last look at the ticket: a blue edge and a chip. Muted update rows still read as news. */
+.why li.why-row.new { box-shadow: inset 3px 0 0 var(--working); background: var(--working-bg); }
+.why li.why-row.new:hover, .why li.why-row.new.open { background: color-mix(in srgb, var(--working-bg) 80%, var(--working) 8%); }
+.why-row.update.new .row-name { color: var(--ink-2); }
+.tag.why-new { flex: none; color: var(--working); background: #fff; border: 1px solid var(--working); font-weight: 600; text-transform: lowercase; }
+.why-new-count { color: var(--working); }
