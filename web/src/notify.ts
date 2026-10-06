@@ -75,7 +75,7 @@ export interface Pending {
   heldAt: number;
 }
 
-/** A run that moved on drops its notification: you no longer need to act on that stop. */
+/** A run that moved on drops its notification: that stop no longer needs you. */
 export function releasePending(pending: Map<string, Pending>, runs: Run[], summaries: Record<string, ConversationSummary>, now: number, waitMs = SUMMARY_WAIT_MS): { send: Run[]; keep: Map<string, Pending> } {
   const byId = new Map(runs.map((r) => [r.sessionId, r]));
   const send: Run[] = [];
