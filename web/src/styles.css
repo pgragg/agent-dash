@@ -518,7 +518,8 @@ a.btn.verb { text-decoration: none; }
 .login-toast { position: fixed; top: 64px; right: 24px; z-index: 20; max-width: 460px; }
 
 /* Diagrams: mermaid in messages, the cards on the board, and the diagram page. */
-.mermaid { overflow-x: auto; text-align: center; }
+/* Mermaid sizes its labels without .md's overflow-wrap, which would wrap them again and clip them. */
+.mermaid { overflow-x: auto; text-align: center; overflow-wrap: normal; }
 .mermaid svg { max-width: 100%; height: auto; }
 .mermaid.loading { min-height: 80px; display: grid; place-items: center; }
 .mermaid-error pre { margin-top: 6px; }
