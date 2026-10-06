@@ -11,14 +11,16 @@ import { countPrs, groupOpenPrs } from "./prs.ts";
 import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, resumeCommand, runTitle, shortDate, stamp, useDashboard, useFlash, useNow, useWaitNotifications } from "./lib.tsx";
 import { Composer, LivePanel } from "./liveControl.tsx";
 import { needStep } from "./needs.ts";
-import { agentFinished, runsOf, summaryText } from "./notify.ts";
+import { agentFinished, readySummary, runsOf, summaryText } from "./notify.ts";
+import { needsNothing } from "../../shared/conversationSummary.ts";
 import { href, humanAge, parseHash, resolveBoardRef, type Route } from "./routes.ts";
 import { FixLogin } from "./fixLogin.tsx";
 import { rowKey } from "./rowNav.ts";
 import { ReviewRequest, useReviewDrafts } from "./reviewRequest.tsx";
 import { wantsReviewRequest } from "../../shared/reviewRequest.ts";
-import { SdlcBar, Smoketests, SmoketestWhyRow } from "./sdlc.tsx";
-import { smoketestRow } from "./smoketestRow.ts";
+import { SdlcBar, SmoketestAction, SmoketestName, Smoketests } from "./sdlc.tsx";
+import { type SmoketestRow, smoketestRow } from "./smoketestRow.ts";
+import { groupWhy, statusWord, UPDATES_SHOWN } from "./whyGroups.ts";
 import { Chat, useLoad } from "./chat.tsx";
 import { ConversationGist } from "./gist.tsx";
 import { SlackQuotes } from "./slackQuotes.tsx";
@@ -209,12 +211,12 @@ function Dot({ tone, pulse }: { tone: string; pulse?: boolean }) {
 }
 
 /** "Agent · waiting 13h · <name>": what the row is, its state, and a link to it. */
-function RowHead({ a, summary, pageTicket }: { a: Item; summary?: ConversationSummary; pageTicket?: string | null }) {
+function RowHead({ a, summary, pageTicket, status = a.status }: { a: Item; summary?: ConversationSummary; pageTicket?: string | null; status?: string }) {
   const name = rowName(a, summary, pageTicket);
   return (
     <span className="row-head">
       <TypeChip kind={a.kind} />
-      <span className={`tag tone-${look(a).tone}`}>{a.status}</span>
+      <span className={`tag tone-${look(a).tone}`}>{status}</span>
       {name &&
         (name.ref ? (
           <a className="row-name" href={href(name.ref)} title={name.full}>
@@ -468,7 +470,7 @@ function NextSteps({ s, state, notes, now, cwd, onError }: { s: Subject; state: 
   const outdated = shown?.generatedAt && lastActivity && Date.parse(lastActivity) - Date.parse(shown.generatedAt) > 60_000;
 
   return (
-    <section className="card next-steps">
+    <section className="card next-steps" id="next-steps">
       <header className="card-head">
         <h3>
           <span className="spark">✦</span> Next steps
@@ -926,6 +928,148 @@ function SnoozeControl({ ticket, until, now, signal, onSnoozed, onError }: { tic
   );
 }
 
+/** Scrolls to the agent's card and puts the cursor in its reply box, as R does for the primary run. */
+function ReplyButton({ sessionId, label = "Reply" }: { sessionId: string; label?: string }) {
+  return (
+    <a
+      className="btn small"
+      href={href(`r:${sessionId}`)}
+      onClick={(e) => {
+        const card = document.getElementById(`r:${sessionId}`);
+        if (!card) return;
+        e.preventDefault();
+        card.scrollIntoView({ behavior: "smooth", block: "center" });
+        card.querySelector<HTMLTextAreaElement>("textarea")?.focus({ preventScroll: true });
+      }}
+    >
+      {label}
+    </a>
+  );
+}
+
+interface WhyRow {
+  key: string;
+  item: Item;
+  finished: boolean;
+  smoke: SmoketestRow | null;
+  smoketestNeedsYou?: boolean;
+  summary?: ConversationSummary;
+}
+
+/** The one button of a Needs-you row. It acts on that row's object. */
+function WhyAction({ r, ticket, cwd, data, onError }: { r: WhyRow; ticket: TicketGroup["ticket"] | undefined; cwd: string; data: Dashboard; onError: (m: string | null) => void }) {
+  const a = r.item;
+  if (r.smoke) return r.smoke.action === "reply" && a.sessionId ? <ReplyButton sessionId={a.sessionId} /> : <SmoketestAction row={r.smoke} cwd={cwd} onError={onError} />;
+  if (a.kind === "awaiting_input" && a.sessionId) return <ReplyButton sessionId={a.sessionId} />;
+  if (a.kind === "run_error" && a.sessionId) return <ReplyButton sessionId={a.sessionId} label="Open" />;
+  if (ticket && (a.kind === "overdue" || a.kind === "due_soon")) return <DueDateVerb ticket={ticket} onError={onError} compact />;
+  if (a.kind === "stalled") {
+    return (
+      <a className="btn small" href="#next-steps" onClick={(e) => (e.preventDefault(), document.getElementById("next-steps")?.scrollIntoView({ behavior: "smooth" }))}>
+        Next steps
+      </a>
+    );
+  }
+  return <PrVerbButton item={a} data={data} />;
+}
+
+/** One line of what the row needs, or of what happened. */
+function whyLine(r: WhyRow, needs: boolean): string | null {
+  if (r.smoke) return r.smoke.detail;
+  const ready = readySummary(r.summary);
+  if (!ready) return null;
+  if (needs) return needsNothing(ready.needs) ? null : ready.needs;
+  return ready.latest;
+}
+
+/**
+ * The ticket header: what needs you, then news, newest first in each, one line a row. A click on
+ * a row opens its full summary under it.
+ */
+function WhyList({ s, data, now, cwd, onError }: { s: Subject; data: Dashboard; now: number; cwd: string; onError: (m: string | null) => void }) {
+  const t = s.ticket?.ticket;
+  const [open, setOpen] = useState<string | null>(null);
+  const [all, setAll] = useState(false);
+  useEffect(() => {
+    setOpen(null);
+    setAll(false);
+  }, [s.id]);
+  const events = t ? (data.sdlcEvents[t.key] ?? []) : [];
+  const rows: WhyRow[] = s.items.map((a, i) => {
+    const smoke = t && a.kind === "awaiting_input" ? smoketestRow(a.sessionId, events, { asked: !!a.run?.askedQuestion, finished: a.finished }) : null;
+    const agent = a.kind === "awaiting_input" || a.kind === "run_error";
+    return {
+      // A stable key: the verb button keeps its "Started" state when the list changes order.
+      key: `${a.kind}:${a.prUrl ?? a.sessionId ?? a.ticketKey ?? i}`,
+      item: a,
+      finished: a.finished,
+      smoke,
+      smoketestNeedsYou: smoke?.needsYou,
+      summary: agent && a.sessionId ? data.conversationSummaries[a.sessionId] : undefined,
+    };
+  });
+  const { needs, updates } = groupWhy(rows);
+  const shown = all ? updates : updates.slice(0, UPDATES_SHOWN);
+
+  const row = (r: WhyRow, need: boolean) => {
+    const a = r.item;
+    const line = whyLine(r, need);
+    const isOpen = open === r.key;
+    const date = a.kind === "overdue" || a.kind === "due_soon";
+    const detail = r.smoke ? [r.smoke.detail, a.gist].filter(Boolean).join("\n") : (a.gist ?? a.reason);
+    return (
+      <li
+        key={r.key}
+        className={`why-row ${need ? "" : "update"} ${isOpen ? "open" : ""}`}
+        onClick={(e) => {
+          if ((e.target as HTMLElement).closest("a, button, input, select, textarea") || window.getSelection()?.toString()) return;
+          setOpen(isOpen ? null : r.key);
+        }}
+        title={isOpen ? undefined : "Show the full summary"}
+      >
+        <div className="why-line">
+          {r.smoke ? (
+            <span className="row-head">
+              <span className="tag type-chip">Smoketest</span>
+              <span className={`tag tone-${r.smoke.tone}`}>{r.smoke.status}</span>
+              <SmoketestName row={r.smoke} />
+            </span>
+          ) : (
+            <RowHead a={a} summary={r.summary} pageTicket={t?.key} status={statusWord(a.status)} />
+          )}
+          {line && <span className="why-need">{line}</span>}
+          <span className="grow" />
+          {!date && <span className="meta why-age" title={stamp(a.since)}>{age(a.since, now)}</span>}
+          {need ? <WhyAction r={r} ticket={t} cwd={cwd} data={data} onError={onError} /> : <PrVerbButton item={a} data={data} />}
+        </div>
+        {isOpen && <div className="why-detail">{detail}</div>}
+      </li>
+    );
+  };
+
+  return (
+    <div className="why">
+      {needs.length > 0 && (
+        <>
+          <div className="why-group">Needs you · {needs.length}</div>
+          <ul className="why-rows">{needs.map((r) => row(r, true))}</ul>
+        </>
+      )}
+      {updates.length > 0 && (
+        <>
+          <div className="why-group">Updates · {updates.length}</div>
+          <ul className="why-rows">{shown.map((r) => row(r, false))}</ul>
+          {updates.length > shown.length && (
+            <button className="btn ghost small why-more" onClick={() => setAll(true)}>
+              Show {updates.length - shown.length} more
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, onSnoozed, focusSignal, noteSignal, agentSignal, snoozeSignal, anchor }: {
   s: Subject;
   data: Dashboard;
@@ -1020,32 +1164,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
             ))}
         </div>
         {s.ticket && <SdlcBar group={s.ticket} events={data.sdlcEvents[s.ticket.ticket.key] ?? []} cwd={cwd} onError={setError} />}
-        {s.items.length > 0 && (
-          <ul className="why">
-            {s.items.map((a, i) => {
-              // A stable key: the verb button keeps its "Started" state when the list changes order.
-              const key = `${a.kind}:${a.prUrl ?? a.sessionId ?? a.ticketKey ?? i}`;
-              const smoke = t && a.kind === "awaiting_input" ? smoketestRow(a.sessionId, data.sdlcEvents[t.key] ?? [], { asked: !!a.run?.askedQuestion, finished: a.finished }) : null;
-              if (smoke) {
-                return (
-                  <li key={key}>
-                    <SmoketestWhyRow row={smoke} runs={runs} cwd={cwd} onError={setError} />
-                  </li>
-                );
-              }
-              return (
-                <li key={key}>
-                  <span className="why-main" title={a.reason}>
-                    <RowHead a={a} summary={a.sessionId ? data.conversationSummaries[a.sessionId] : undefined} pageTicket={t?.key} />
-                    {a.gist && <span className="why-gist">{a.gist}</span>}
-                  </span>
-                  <PrVerbButton item={a} data={data} />
-                  {t && (a.kind === "overdue" || a.kind === "due_soon") && <DueDateVerb ticket={t} onError={setError} compact />}
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        {s.items.length > 0 && <WhyList s={s} data={data} now={now} cwd={cwd} onError={setError} />}
       </header>
 
       {t && <TicketPanel key={t.key} ticket={t} cwd={cwd} onError={setError} />}
