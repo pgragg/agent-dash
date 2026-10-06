@@ -389,6 +389,7 @@ a.pr-group-title:hover { text-decoration: underline; text-underline-offset: 3px;
 
 /* misc */
 .toast { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-radius: 12px; background: var(--bad-bg); color: var(--bad); font-size: 13px; }
+.toast.success { background: var(--good-bg); color: var(--good); }
 .banner { margin: 16px 40px 0; padding: 10px 14px; border-radius: 12px; background: var(--warn-bg); color: var(--warn); font-size: 13px; }
 .empty-note { text-align: center; padding: 20px; }
 .loading { height: 100%; display: grid; place-items: center; }

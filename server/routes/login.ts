@@ -35,21 +35,30 @@ function run(cmd: string, args: string[], timeout: number): Promise<{ code: numb
 
 const running = new Set<string>();
 
+/** Callback to refresh GitHub data after successful login. Set by index.ts to avoid circular imports. */
+let onGitHubLogin: (() => void) | null = null;
+export function setOnGitHubLogin(cb: () => void) { onGitHubLogin = cb; }
+
 /**
  * Handle GitHub auth via `gh` CLI.
  * 1. Check if already authenticated with `gh auth status`
- * 2. If so, extract token with `gh auth token` and save it for other tools
- * 3. If not, tell user to run `gh auth login` manually
+ * 2. If not, run `gh auth login --web` to initiate browser-based login
+ * 3. Extract token with `gh auth token` and save it for other tools
  */
 async function handleGitHub(): Promise<{ code: number; error?: string; output?: string }> {
   // Check auth status first
   const status = await run(GH_CLI, ["auth", "status"], 10_000);
   if (status.code !== 0) {
-    return {
-      code: 401,
-      error: `GitHub CLI not authenticated. ${MANUAL.github}`,
-      output: status.output,
-    };
+    // Not authenticated - initiate browser login flow
+    // gh auth login --web opens the browser for OAuth, with 5 min timeout
+    const login = await run(GH_CLI, ["auth", "login", "--web"], 300_000);
+    if (login.code !== 0) {
+      return {
+        code: 401,
+        error: `GitHub login failed. ${MANUAL.github}`,
+        output: login.output,
+      };
+    }
   }
 
   // Get the token and save it for tools that don't use `gh`
@@ -103,7 +112,11 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   running.add(source);
   try {
     const result = handler === "gh" ? await handleGitHub() : await handlePiAuth(source);
-    if (result.code === 200) return json(200, { ok: true, output: result.output });
+    if (result.code === 200) {
+      // Trigger refresh callback if registered
+      if (handler === "gh" && onGitHubLogin) onGitHubLogin();
+      return json(200, { ok: true, output: result.output });
+    }
     return json(result.code, { error: `${result.error} ${MANUAL[source]}`, output: result.output });
   } finally {
     running.delete(source);
