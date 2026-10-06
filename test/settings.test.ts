@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { buildConfig, effectiveSettings, readSettingsFile, ticketPatternOf } from "../server/config.ts";
+import { buildConfig, effectiveSettings, readSettingsFile, setupNeeded, ticketPatternOf } from "../server/config.ts";
 import { handle } from "../server/routes/settings.ts";
 import { DEFAULT_SETTINGS, validateSettings } from "../shared/settings.ts";
 
@@ -45,6 +45,14 @@ test("a bad value is refused with a reason, and a bad value in the file keeps it
 
 test("ticket patterns escape nothing surprising and skip ignored keys in any position", () => {
   assert.deepEqual("FSDK-1 FSDK-10 EFSUP-2".match(ticketPatternOf(["FSDK", "EFSUP"], ["FSDK-1"])), ["FSDK-10", "EFSUP-2"]);
+});
+
+test("the setup banner names what a new user still has to set", () => {
+  const set = (over: object) => buildConfig({ ...DEFAULT_SETTINGS, ...over });
+  assert.deepEqual(setupNeeded(set({ jiraServer: "" }), {}), ["the Jira server", "your ticket projects"]);
+  assert.deepEqual(setupNeeded(set({ jiraServer: "https://x.atlassian.net" }), {}), ["your Jira login", "a Jira token file", "your ticket projects"]);
+  // The token can come from the env instead of a file.
+  assert.deepEqual(setupNeeded(set({ jiraServer: "https://x.atlassian.net", jiraLogin: "me@x.com", ticketProjects: ["ABC"] }), { JIRA_API_TOKEN: "t" }), []);
 });
 
 const file = join(dir, "route.json");

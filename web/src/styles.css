@@ -735,3 +735,5 @@ a.btn.verb { text-decoration: none; }
 .settings .setting-error { color: var(--bad); }
 .settings .settings-note { background: var(--warn-bg); color: var(--warn); }
 .settings-bar { display: flex; gap: 10px; }
+.setup-banner { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 20px; background: var(--warn-bg); color: var(--warn); font-size: 13px; border-bottom: 1px solid var(--line); }
+.setup-banner a { color: inherit; font-weight: 600; }

@@ -6,6 +6,33 @@ const toText = (f: SettingField, v: Settings[SettingKey]): string => (Array.isAr
 
 const GROUPS = [...new Set(SETTING_FIELDS.map((f) => f.group))];
 
+const DISMISSED = "agent-dash.setup-dismissed";
+
+/** Until the settings are set, every view says what is missing, instead of a red "Jira down". */
+export function SetupBanner({ setup }: { setup: string[] }) {
+  // Dismissed for this exact list, so a newly missing setting shows again.
+  const key = setup.join(",");
+  const [dismissed, setDismissed] = useState(() => localStorage.getItem(DISMISSED));
+  if (!setup.length || dismissed === key) return null;
+  const list = setup.length > 1 ? `${setup.slice(0, -1).join(", ")} and ${setup.at(-1)}` : setup[0];
+  return (
+    <div className="setup-banner" role="status">
+      <span>
+        agent-dash is not set up yet. Set {list} on the <a href="#/settings">Settings</a> page, then restart agent-dash.
+      </span>
+      <button
+        className="btn ghost small"
+        onClick={() => {
+          localStorage.setItem(DISMISSED, key);
+          setDismissed(key);
+        }}
+      >
+        Dismiss
+      </button>
+    </div>
+  );
+}
+
 /** `#/settings`: edit agent-dash.config.json. The server runs with the new values after a restart. */
 export function SettingsView() {
   const [state, setState] = useState<SettingsState | null>(null);
