@@ -113,7 +113,11 @@ function RunPlan({ plan, cwd, onError, primary = true }: { plan: SdlcEvent; cwd:
 function scrollTo(id: string) {
   return (e: { preventDefault: () => void }) => {
     e.preventDefault();
-    document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+    const row = document.getElementById(id);
+    // A settled row is closed, and the link is there to show it.
+    const item = row?.querySelector<HTMLDetailsElement>(":scope > details.smoke-item");
+    if (item) item.open = true;
+    row?.scrollIntoView({ behavior: "smooth" });
   };
 }
 
@@ -482,7 +486,7 @@ function PlanConversation({ sessionId, runs, now, onError }: { sessionId: string
   if (!run) return <p className="meta">Starting the planning agent…</p>;
   return (
     <div className="plan-chat">
-      <Chat sessionId={sessionId} refreshKey={run.status === "working" ? run.userMessageCount : run.lastActivityAt + run.status} />
+      <Chat sessionId={sessionId} refreshKey={run.status === "working" ? run.userMessageCount : run.lastActivityAt + run.status} firstPrompt="agent-dash's plan prompt" />
       <LivePanel run={run} now={now} onError={onError} working="The agent is working on the plan…" />
       {run.status !== "finished" ? (
         <Composer run={run} onError={onError} focusSignal={0} />
@@ -534,11 +538,13 @@ function PlanSummary({ e, waiting }: { e: SdlcEvent; waiting: boolean }) {
 
 function PlanRow({ e, now, runs, cwd, onError }: { e: SdlcEvent; now: number; runs: Run[]; cwd: string; onError: (m: string | null) => void }) {
   const waiting = isPlanWaiting(e);
-  const open = isPlanRunning(e) || waiting;
-  const [chat, setChat] = useState(open);
+  const running = isPlanRunning(e);
+  const open = running || waiting;
+  // A waiting plan's chat repeats its summaries at length, so it opens on request.
+  const [chat, setChat] = useState(running);
   const status = planStatus(e);
-  return (
-    <li id={`sdlc:${e.id}`} className={`plan-row ${open ? "open" : ""}`}>
+  const full = (
+    <>
       <div className="note-meta">
         <span title={e.startedAt}>{stamp(e.startedAt)}</span>
         <span>· {age(e.startedAt, now)} ago</span>
@@ -562,7 +568,7 @@ function PlanRow({ e, now, runs, cwd, onError }: { e: SdlcEvent; now: number; ru
       {waiting && (
         <div className="smoke-row plan-confirm">
           <RunPlan plan={e} cwd={cwd} onError={onError} />
-          <span className="meta">Confirm approves the state changes under Writes, and only those. To change the plan, write to the agent below.</span>
+          <span className="meta">Confirm approves the state changes under Writes, and only those. To change the plan, ask the agent for changes.</span>
         </div>
       )}
       {e.plannedAt && <PlanSummary e={e} waiting={waiting} />}
@@ -571,9 +577,25 @@ function PlanRow({ e, now, runs, cwd, onError }: { e: SdlcEvent; now: number; ru
           <PlanConversation sessionId={e.sessionId} runs={runs} now={now} onError={onError} />
         ) : (
           <button className="btn ghost small chat-toggle" onClick={() => setChat(true)}>
-            Show the planning conversation
+            {waiting ? "Ask the agent for changes" : "Show the planning conversation"}
           </button>
         ))}
+    </>
+  );
+  if (open) return <li id={`sdlc:${e.id}`} className="plan-row open">{full}</li>;
+  // A settled plan is a decision already made: one line, like a finished smoketest.
+  return (
+    <li id={`sdlc:${e.id}`} className="plan-row">
+      <details className="smoke-item">
+        <summary title="Show the plan">
+          <span className={`tag ${status.tone}`}>plan</span>
+          <span className="smoke-summary">{e.summary ?? firstLine(e.testDetails) ?? "No summary"}</span>
+          <span className="meta" title={e.startedAt}>
+            {e.environments.map((x) => ENV_LABEL[x]).join(", ")} · {age(e.startedAt, now)} ago
+          </span>
+        </summary>
+        <div className="smoke-full">{full}</div>
+      </details>
     </li>
   );
 }
