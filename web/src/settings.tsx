@@ -107,6 +107,29 @@ export function SettingsView() {
             </header>
             {SETTING_FIELDS.filter((f) => f.group === group).map((f) => {
               const env = state.envOverrides[f.key];
+              const change = (value: string) => {
+                setSaved(false);
+                setDraft((d) => ({ ...d, [f.key]: value }));
+              };
+              if (f.kind === "choice") {
+                return (
+                  <div className="setting" key={f.key}>
+                    <span className="setting-label">{f.label}</span>
+                    <span className="seg" role="radiogroup" aria-label={f.label}>
+                      {f.options!.map((o) => (
+                        <button key={o.value} role="radio" aria-checked={draft[f.key] === o.value} className={`btn small ${draft[f.key] === o.value ? "" : "ghost"}`} disabled={state.readOnly} onClick={() => change(o.value)}>
+                          {o.label}
+                        </button>
+                      ))}
+                    </span>
+                    <span className="meta">
+                      {errors[f.key] ? <b className="setting-error">{errors[f.key]}. </b> : null}
+                      {f.help}
+                      {env ? <b> {env} is set, and wins over this value.</b> : null}
+                    </span>
+                  </div>
+                );
+              }
               return (
                 <label className="setting" key={f.key}>
                   <span className="setting-label">{f.label}</span>
@@ -117,10 +140,7 @@ export function SettingsView() {
                     spellCheck={false}
                     readOnly={state.readOnly}
                     aria-invalid={!!errors[f.key]}
-                    onChange={(e) => {
-                      setSaved(false);
-                      setDraft((d) => ({ ...d, [f.key]: e.target.value }));
-                    }}
+                    onChange={(e) => change(e.target.value)}
                   />
                   <span className="meta">
                     {errors[f.key] ? <b className="setting-error">{errors[f.key]}. </b> : null}

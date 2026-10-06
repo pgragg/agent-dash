@@ -114,7 +114,7 @@ test("an open dialog means the run waits for you; Stop and Steer need extension 
 
 test("a run shows its activity only while working, and an old status file has none", () => {
   const session = (sessionId: string): ParsedSession => ({
-    sessionId, sessionFile: "/f", cwd: "/repo", name: null, firstPrompt: "p", lastReply: "", lastMessage: "", askedQuestion: false, startedAt: minutesAgo(10),
+    agent: "pi", sessionId, sessionFile: "/f", cwd: "/repo", name: null, firstPrompt: "p", lastReply: "", lastMessage: "", askedQuestion: false, startedAt: minutesAgo(10),
     lastActivityAt: minutesAgo(1), model: null, lastStopReason: "stop", midRun: false, tickets: [], createdPrs: [], mentionedPrs: [], userMessageCount: 1,
   });
   const activity = { tool: "bash", summary: "pnpm test", since: minutesAgo(1) };

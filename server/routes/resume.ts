@@ -54,5 +54,5 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   const blocker = resumeBlocker(s, reported.get(sessionId), { running: isRunning(sessionId) });
   if (blocker) return json(s ? 409 : 404, { error: blocker });
   const message = await readMessage(req);
-  return json(201, { sessionId: startConversation({ cwd: s!.cwd, message, resume: { sessionId, sessionFile: s!.sessionFile } }) });
+  return json(201, { sessionId: startConversation({ cwd: s!.cwd, message, resume: { sessionId, sessionFile: s!.sessionFile }, agent: s!.agent }) });
 }

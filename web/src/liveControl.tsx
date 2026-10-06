@@ -104,7 +104,7 @@ export function Composer({ run, onError, focusSignal }: { run: HistoryRun; onErr
     if (focusSignal) ref.current?.focus();
   }, [focusSignal]);
   const working = run.status === "working";
-  const controls = working && Boolean(run.canControl);
+  const controls = working && Boolean(run.canSteer);
   // An open dialog makes the run wait for you, but Stop is still the way out of it.
   const stoppable = Boolean(run.canControl) && (working || Boolean(run.dialog));
   const steering = controls && steer;
@@ -120,7 +120,10 @@ export function Composer({ run, onError, focusSignal }: { run: HistoryRun; onErr
     }
   };
   if (!run.canReply) {
-    return (
+    // A Claude Code session in a terminal reads only what you type there.
+    return run.agent === "claude" ? (
+      <div className="composer-off">Reply in this session's tab. agent-dash can send messages only to a Claude Code that it started without a terminal.</div>
+    ) : (
       <div className="composer-off">
         To reply from here, run <code>/reload</code> once in this session. Until then, reply in its tab.
       </div>

@@ -9,7 +9,8 @@ import { config, jiraConfigured, setupNeeded } from "./config.ts";
 import { team } from "../shared/team.ts";
 import { startConversation } from "./conversations.ts";
 import { recordExit, wroteRecently } from "./exits.ts";
-import { focusItermSession, piCommand, runInNewItermTab } from "./iterm.ts";
+import { focusItermSession, runInNewItermTab } from "./iterm.ts";
+import { claudeHooksInstalled, terminalCommand } from "./agent.ts";
 import { buildDashboard, buildHistory, otherTicketKeys } from "./model.ts";
 import * as exitRoutes from "./routes/exits.ts";
 import { agentMessage, agentName, buildHandoff, stepMessage } from "./handoff.ts";
@@ -150,7 +151,7 @@ async function dashboard(force: boolean) {
     now,
     recentDays: config.recentDays,
     sources: { jira, github: prs.health, sessions: sessionsHealth },
-    extensionInstalled: existsSync(EXTENSION_PATH),
+    extensionInstalled: config.agent === "claude" ? claudeHooksInstalled() : existsSync(EXTENSION_PATH),
     summaries,
     notes: summaryDb.notesByTicket(),
     snoozedUntil: summaryDb.snoozedUntilByTicket(),
@@ -390,9 +391,9 @@ const server = createServer(async (req, res) => {
           if (running) broadcast();
           return json(201, { ok: true, contextFile: `${base}.md`, sessionId });
         }
-        // A leading "-" would read as a pi option; the space keeps it a message.
+        // A leading "-" would read as an option; the space keeps it a message.
         writeFileSync(`${base}.txt`, message.trim().startsWith("-") ? ` ${message.trim()}` : message.trim());
-        const command = piCommand(dir, name, `${base}.md`, `${base}.txt`, sessionId);
+        const command = terminalCommand(config.agent, dir, name, `${base}.md`, `${base}.txt`, sessionId);
         const out = await runInNewItermTab(command);
         if (out.result !== "ok") {
           dropRunning();

@@ -90,7 +90,8 @@ export function runTitle(run: HistoryRun): string {
 }
 
 export function resumeCommand(run: HistoryRun): string {
-  return `cd '${run.cwd.replace(/'/g, "'\\''")}' && pi --session ${run.sessionId}`;
+  const cd = `cd '${run.cwd.replace(/'/g, "'\\''")}' && `;
+  return run.agent === "claude" ? `${cd}claude --resume ${run.sessionId}` : `${cd}pi --session ${run.sessionId}`;
 }
 
 export function plural(n: number, word: string): string {

@@ -1,5 +1,9 @@
 import type { SdlcEnvironment } from "./types.ts";
 
+/** The coding agent that the dash starts, and whose session logs it reads. */
+export type AgentKind = "pi" | "claude";
+export const AGENT_LABEL: Record<AgentKind, string> = { pi: "pi", claude: "Claude Code" };
+
 /**
  * The settings that shared code reads, in the server and in the page: whose dashboard it is,
  * where reviews are asked for, which repos deploy, and which environments a team tests on.
@@ -7,6 +11,8 @@ import type { SdlcEnvironment } from "./types.ts";
  * so the many shared functions that read them do not each take them as an argument.
  */
 export interface Team {
+  /** The agent that every run, summary and draft uses. */
+  agent: AgentKind;
   /** Your first name, as agents call you in their prompts. Empty: "the user". */
   userName: string;
   /** The Slack channel for PR review requests. Empty id: no review requests. */
@@ -22,6 +28,7 @@ export interface Team {
 }
 
 export const DEFAULT_TEAM: Team = {
+  agent: "pi",
   userName: "",
   reviewChannelId: "",
   reviewChannelName: "",
@@ -44,3 +51,6 @@ export function setTeam(t: Team): void {
 export const user = (): string => team.userName || "the user";
 /** The user at the start of a sentence. */
 export const User = (): string => team.userName || "The user";
+
+/** The agent's name, as the page shows it. */
+export const agentLabel = (): string => AGENT_LABEL[team.agent];

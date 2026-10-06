@@ -10,7 +10,7 @@ import { agentMessage } from "../handoff.ts";
 import { landFailureMessage, landLane, type LandOutcome } from "../land.ts";
 import { createLanes, git, LaneError, laneGit, planLanes } from "../lanes.ts";
 import { readReportedStatuses, resolveReported } from "../sources/status.ts";
-import { writeInbox } from "./liveControl.ts";
+import { deliver } from "./liveControl.ts";
 import * as db from "../summaries/db.ts";
 
 export interface StartLanesInput {
@@ -105,7 +105,7 @@ export interface LaneRouteDeps {
   agentWorking?: (sessionId: string) => Promise<boolean>;
   land?: typeof landLane;
   start?: typeof startConversation;
-  inbox?: typeof writeInbox;
+  inbox?: typeof deliver;
 }
 
 async function isWorking(sessionId: string): Promise<boolean> {
@@ -130,7 +130,7 @@ export async function land(id: number, deps: LaneRouteDeps): Promise<{ status: n
     else if (out.kind === "refused") db.setLaneState(id, before.state === "landing" ? "working" : before.state, out.message);
     else {
       db.setLaneState(id, out.kind === "conflict" ? "conflict" : "checks_failed", out.message);
-      if (before.sessionId) (deps.inbox ?? writeInbox)(before.sessionId, "txt", landFailureMessage(before, out));
+      if (before.sessionId) (deps.inbox ?? deliver)(before.sessionId, "txt", landFailureMessage(before, out));
     }
     deps.onChange();
     return out.ok ? { status: 200, body: out } : { status: out.kind === "refused" ? 409 : 200, body: out };

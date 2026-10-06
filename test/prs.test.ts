@@ -9,7 +9,7 @@ const build = (prs: ReturnType<typeof pr>[], createdPrs: string[] = []) =>
   buildDashboard({
     sessions: [
       {
-        sessionId: "s", sessionFile: "/f", cwd: "/repo", name: null, firstPrompt: "p", lastReply: "", lastMessage: "", askedQuestion: false,
+        agent: "pi", sessionId: "s", sessionFile: "/f", cwd: "/repo", name: null, firstPrompt: "p", lastReply: "", lastMessage: "", askedQuestion: false,
         startedAt: minutesAgo(100), lastActivityAt: minutesAgo(90), model: null, lastStopReason: "stop", midRun: false,
         tickets: ["FSDK-2"], createdPrs, mentionedPrs: [], userMessageCount: 1,
       },

@@ -5,9 +5,9 @@ It answers one question: **what do I look at next?**
 
 **The goal: one place for the whole developer workflow.** You find the next task, start agents, talk to them, and follow their PRs on this page, so you do not switch between iTerm and agent-dash. Each new feature moves one more step of the workflow from the terminal onto the page.
 
-It reads your pi session logs, your Jira tickets, and your GitHub PRs. You can act on the answer without leaving the page.
+It reads the session logs of your coding agent ([pi](https://github.com/badlogic/pi-mono) or [Claude Code](https://docs.claude.com/en/docs/claude-code), see [Choose the agent](#choose-the-agent)), your Jira tickets, and your GitHub PRs. You can act on the answer without leaving the page.
 
-The dashboard writes two things to Jira itself: a due date and a status move, from the [Ticket](#the-ticket-section) section or a drafted next step. It posts one thing to Slack as you: a [review request](#prs) when you click its **Post to Slack**. It never writes to GitHub. The other things it sends go to your own pi sessions: a reply that you type, a Stop, and the answer to an extension dialog. A [PR verb](#pr-verbs) button starts an agent on one small task, and that agent does the write: the click is your approval.
+The dashboard writes two things to Jira itself: a due date and a status move, from the [Ticket](#the-ticket-section) section or a drafted next step. It posts one thing to Slack as you: a [review request](#prs) when you click its **Post to Slack**. It never writes to GitHub. The other things it sends go to your own agent sessions: a reply that you type, a Stop, and the answer to an extension dialog. A [PR verb](#pr-verbs) button starts an agent on one small task, and that agent does the write: the click is your approval.
 
 ## Run it
 
@@ -16,7 +16,7 @@ You need macOS, and these on your `PATH`:
 | Tool | For | Check |
 |---|---|---|
 | Node 24 or later, and pnpm | the server; Node runs the TypeScript directly | `node -v` |
-| [pi](https://github.com/badlogic/pi-mono) | the agents that the dash reads and starts | `pi --version` |
+| [pi](https://github.com/badlogic/pi-mono) or [Claude Code](https://docs.claude.com/en/docs/claude-code) | the agents that the dash reads and starts | `pi --version` or `claude --version` |
 | `gh`, logged in | your PRs, CI and reviews | `gh auth status` |
 | A Jira API token | your tickets ([make one](https://id.atlassian.com/manage-profile/security/api-tokens)), in a file with a `JIRA_API_TOKEN=…` line | |
 
@@ -29,7 +29,7 @@ pnpm install-extension   # once: exact run status and replies (see below)
 pnpm build && pnpm start # http://127.0.0.1:7777
 ```
 
-Then open **Settings** (`#/settings`) and set your Jira login and token file, your ticket projects, and the other paths that you use, and restart. They go in `agent-dash.config.json`, which git ignores. See [Configuration](#configuration). Until they are set, a banner on every view says what is missing, and the top bar says **Jira off**, not **Jira down**.
+Then open **Settings** (`#/settings`). Pick the agent first, with the **pi** / **Claude Code** toggle at the top. Then set your Jira login and token file, your ticket projects, and the other paths that you use, and restart. They go in `agent-dash.config.json`, which git ignores. See [Configuration](#configuration). Until they are set, a banner on every view says what is missing, and the top bar says **Jira off**, not **Jira down**.
 
 To start it and open the page with one command, add this to `~/.zshrc` (change the folder to your clone):
 
@@ -43,6 +43,21 @@ dash() {
 ```
 
 `pnpm dev` runs the server with `--watch` and Vite on http://127.0.0.1:7778.
+
+## Choose the agent
+
+The **Agent** toggle at the top of Settings (`agent`: `pi` or `claude`) picks one agent for the whole dash. After a restart, every place uses it:
+
+- **The board** reads that agent's session logs only: `~/.pi/agent/sessions` for pi, `~/.claude/projects` for Claude Code. `server/sources/sessions.ts` turns a Claude Code transcript into pi's log shape (`asPiLog`), so one parser finds the tickets, PRs, diagrams and status in both.
+- **Agents on the page** (Start a new agent, next steps, lanes, smoketests, PR verbs, plain conversations) start headless. Claude Code runs as `claude -p --input-format stream-json --output-format stream-json --permission-prompt-tool stdio`, with the same stdin FIFO and log as pi's rpc mode. **Open in iTerm** starts `claude --session-id … --name …` with the context inline, and **Copy resume** gives `claude --resume <id>`.
+- **Summaries and drafts** (next steps, conversation summaries, review requests) run `claude -p --no-session-persistence`, so they do not show on the board. The default draft model is `haiku`; `AGENT_DASH_DRAFT_MODEL` and `AGENT_DASH_SUMMARY_MODEL` still win.
+- **Run status** comes from `extension/claude-status-hook.ts`, which writes the same status file as the pi extension. agent-dash passes the hooks with `--settings` to each Claude Code that it starts. `pnpm install-extension` adds them to `~/.claude/settings.json` too, so a session that you start in a terminal also reports.
+
+What Claude Code cannot do here:
+
+- **No Steer.** A message to a working agent waits until its turn ends. **Stop** works: the server sends an `interrupt` control request.
+- **Replies from the page go only to a headless run.** A Claude Code in a terminal reads only its own keys, so its card says to reply in the tab.
+- **Dialogs are tool permissions.** When Claude Code asks before a tool call, the card shows "Allow Write: /path?" with **Yes** and **No**. Yes runs the tool as asked; No and Stop deny it.
 
 ## The page
 
@@ -250,6 +265,8 @@ Each agent card opens on a short summary of its conversation, in three lines: **
 
 ## Conversations on the page
 
+This section and the next two describe pi. For what is different with Claude Code, see [Choose the agent](#choose-the-agent).
+
 `POST /api/conversations` (body `{message, cwd}`, with the `X-Agent-Dash` guard) starts `pi --mode rpc --session-id <uuid>` in the folder. The server picks the session id, so the page can open the conversation before pi writes anything. A ticket agent from **Start a new agent** starts the same way, with `--name "<KEY>: …"` added.
 
 - **The first message and each reply** go through the [reply inbox](#reply-to-an-agent), as for a terminal session. The status extension delivers them in rpc mode too, and records `mode: "rpc"` in the status file.
@@ -334,8 +351,8 @@ The server listens on `127.0.0.1` only, because the page shows prompts and repli
 
 | Source | How | Notes |
 |---|---|---|
-| pi sessions | `~/.pi/agent/sessions/**/*.jsonl` | Re-parses only the files that changed. A cold scan of about 700 sessions takes about 1 s. |
-| Run status | `~/.agent-dash/status/<sessionId>.json`, written by `extension/agent-dash-status.ts` | Without it, status is a guess from the log, marked `?` |
+| Agent sessions | `~/.pi/agent/sessions/**/*.jsonl` for pi, `~/.claude/projects/*/*.jsonl` for Claude Code | Re-parses only the files that changed. A cold scan of about 700 sessions takes about 1 s. |
+| Run status | `~/.agent-dash/status/<sessionId>.json`, written by `extension/agent-dash-status.ts` (pi) or `extension/claude-status-hook.ts` (Claude Code) | Without it, status is a guess from the log, marked `?` |
 | Jira | `POST /rest/api/3/search/jql` with the token in the Jira token file [setting](#configuration) (or `JIRA_API_TOKEN`) | Open tickets assigned to you, excluding the projects to leave out. The [Ticket](#the-ticket-section) section reads one ticket's description, comments and transitions with GETs, only when it opens. |
 | Local tickets | `<local tickets folder>/<status>/AD-<n>-<slug>.md` (a [setting](#configuration); none means no local tickets) | agent-dash's own tickets, `AD-1`, `AD-2`, …, are files, not Jira issues. The folder is the status (`todo`, `in-progress`, `in-review`, `done`, `canceled`), and the `# AD-<n> — Title` heading is the title. They are read on each build, never asked of Jira. The Ticket section shows the file and has no Jira verbs, and the key's link (`/api/local-ticket?key=AD-<n>`) shows the file as text. An `AD-` key with no file is not a ticket and links to nothing. |
 | GitHub | `gh api graphql` with your `gh` login | Your PRs updated in the last 14 days, with CI (and the names of the failing checks), review, and merge state. The [PR panel](#pr-panel) reads one PR in full on demand. |
@@ -467,9 +484,11 @@ Company-wide values (the Jira server, the Slack org, the deploy repos, the Postm
 
 | Setting | Key | Env var that wins over it | Default |
 |---|---|---|---|
+| The agent: `pi` or `claude` (Claude Code). See [Choose the agent](#choose-the-agent) | `agent` | `AGENT_DASH_AGENT` | `pi` |
 | Your first name, as agents call you in prompts | `userName` | | none: "the user" |
 | Port | `port` | `AGENT_DASH_PORT` | `7777` |
 | pi sessions folder | `sessionsDir` | `AGENT_DASH_SESSIONS_DIR` | `~/.pi/agent/sessions` |
+| Claude Code projects folder | `claudeProjectsDir` | `AGENT_DASH_CLAUDE_PROJECTS_DIR` | `~/.claude/projects` |
 | Recent days | `recentDays` | `AGENT_DASH_RECENT_DAYS` | `14` |
 | Jira server | `jiraServer` | `JIRA_SERVER` | `https://postmanlabs.atlassian.net`. Jira is off until the login is set too. |
 | Jira login | `jiraLogin` | `JIRA_LOGIN` | none |

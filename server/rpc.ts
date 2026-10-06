@@ -1,10 +1,12 @@
 import { closeSync, constants, openSync, writeSync } from "node:fs";
 import { open } from "node:fs/promises";
+import { permissionTitle } from "../shared/claudeDialog.ts";
 import type { RunDialog } from "../shared/types.ts";
 
 /**
- * Talk to a headless pi (`--mode rpc`) through its files: stdout is a log, stdin is a FIFO.
- * Only the extension UI sub-protocol is used here; replies still go through the inbox.
+ * Talk to a headless agent through its files: stdout is a log, stdin is a FIFO. For pi only the
+ * extension UI sub-protocol is used here; its replies go through the inbox. Claude Code asks
+ * before a tool call with a `can_use_tool` control request, which shows as a confirm dialog.
  */
 
 export interface UiRequest {
@@ -46,6 +48,36 @@ export function newestOpenDialog(log: string, answered: ReadonlySet<string>): Ui
   return null;
 }
 
+/** A Claude Code permission request, as a confirm dialog with the title that the hook shows. */
+export interface ClaudeRequest extends UiRequest {
+  input: unknown;
+}
+
+/** The newest permission request in a Claude Code log that this server did not answer. */
+export function newestOpenClaudeRequest(log: string, answered: ReadonlySet<string>): ClaudeRequest | null {
+  const lines = log.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].includes('"can_use_tool"')) continue;
+    try {
+      const msg = JSON.parse(lines[i]) as { type?: string; request_id?: string; request?: { subtype?: string; tool_name?: string; input?: unknown } };
+      if (msg.type !== "control_request" || msg.request?.subtype !== "can_use_tool" || typeof msg.request_id !== "string" || answered.has(msg.request_id)) continue;
+      const tool = msg.request.tool_name ?? "";
+      return { type: "extension_ui_request", id: msg.request_id, method: "confirm", title: permissionTitle(tool, msg.request.input), input: msg.request.input };
+    } catch {
+      // A line cut by the tail read, or a half-written last line.
+    }
+  }
+  return null;
+}
+
+/** Yes runs the tool as the agent asked; no and Stop deny it, and the agent hears why. */
+export function claudeResponse(req: ClaudeRequest, answer: UiAnswer): { line: string } | { error: string } {
+  const allow = "confirmed" in answer ? answer.confirmed : "cancelled" in answer ? false : null;
+  if (typeof allow !== "boolean") return { error: "a confirm dialog takes yes or no" };
+  const response = allow ? { behavior: "allow", updatedInput: req.input ?? {} } : { behavior: "deny", message: "The user denied this tool call in agent-dash." };
+  return { line: JSON.stringify({ type: "control_response", response: { subtype: "success", request_id: req.id, response } }) };
+}
+
 export async function readLogTail(file: string, bytes = TAIL_BYTES): Promise<string> {
   const fh = await open(file, "r");
   try {
@@ -82,6 +114,28 @@ export function uiResponse(req: UiRequest, answer: UiAnswer): { line: string } |
   }
   if (!("value" in answer) || typeof answer.value !== "string") return { error: "this dialog takes a value" };
   return { line: JSON.stringify({ ...base, value: answer.value }) };
+}
+
+/**
+ * Write one line to the FIFO, however long, without blocking the server: the agent can take some
+ * seconds to start reading. Fails at once when nothing reads the FIFO.
+ */
+export async function writeFifoSoon(fifo: string, line: string, timeoutMs = 120_000): Promise<void> {
+  const fd = openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK);
+  try {
+    const buf = Buffer.from(`${line}\n`);
+    const deadline = Date.now() + timeoutMs;
+    for (let off = 0; off < buf.length; ) {
+      try {
+        off += writeSync(fd, buf, off);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "EAGAIN" || Date.now() > deadline) throw err;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    }
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /**

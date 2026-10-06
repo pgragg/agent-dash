@@ -4,14 +4,14 @@ import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { GIST_VERSION, gistPrompt, parseGist, type ConversationGist } from "../shared/conversationSummary.ts";
 import type { ConversationSummary, Run } from "../shared/types.ts";
+import { draftCommand } from "./agent.ts";
+import { config } from "./config.ts";
 import { digestSession } from "./sources/sessions.ts";
 import * as db from "./summaries/db.ts";
 
 const run = promisify(execFile);
 
-/** Three short lines: a small, fast model is enough. */
-const MODEL = process.env.AGENT_DASH_DRAFT_MODEL ?? "anthropic/claude-haiku-4-5";
-/** Each draft is its own pi process; more than this at once only slows the machine. */
+/** Each draft is its own agent process; more than this at once only slows the machine. */
 const PARALLEL = 4;
 /** A failed or stuck draft is tried again after this. */
 const RETRY_MS = 5 * 60_000;
@@ -43,18 +43,15 @@ export function runsToDraft(runs: Run[], rows: Map<string, db.ConversationSummar
   });
 }
 
-/** One draft: the chat without tool traffic, then one tool-less pi turn with the cheap model. */
+/** One draft: the chat without tool traffic, then one tool-less agent turn with the cheap model. */
 export async function draftOne(r: Run, file: string): Promise<ConversationGist> {
   const digest = digestSession(await readFile(file, "utf8"), DIGEST_CHARS);
-  const args = ["-p", "--no-session", "--no-tools", "--no-extensions", "--no-skills", "--no-context-files", "--no-prompt-templates", "--model", MODEL, "--thinking", "off"];
-  const pi = run("pi", [...args, gistPrompt(r.status, digest)], {
-    timeout: 90_000,
-    // The `pi` shell alias sets this; a spawned pi does not get the alias.
-    env: { ...process.env, SSL_CERT_FILE: process.env.SSL_CERT_FILE ?? "/etc/ssl/cert.pem" },
-  });
-  // pi -p waits for stdin to close before it starts.
-  pi.child.stdin?.end();
-  const { stdout } = await pi;
+  // Three short lines: the cheap model is enough.
+  const { cmd, args, env } = draftCommand(config.agent, gistPrompt(r.status, digest));
+  const agent = run(cmd, args, { timeout: 90_000, env });
+  // `-p` waits for stdin to close before it starts.
+  agent.child.stdin?.end();
+  const { stdout } = await agent;
   const gist = parseGist(stdout.replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, "").replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, ""));
   if (!gist) throw new Error(`the model did not answer in the ABOUT, LATEST, NEEDS format: ${stdout.slice(0, 200)}`);
   return gist;

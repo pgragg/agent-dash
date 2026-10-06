@@ -8,6 +8,7 @@ import { NOW, minutesAgo, pr, ticket } from "./helpers.ts";
 
 function session(over: Partial<ParsedSession>): ParsedSession {
   return {
+    agent: "pi",
     sessionId: "s",
     sessionFile: "/f",
     cwd: "/repo",

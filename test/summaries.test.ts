@@ -122,7 +122,7 @@ test("a summary run sees resolved threads by name and reason only, not their his
   assert.match(ctx, /marked resolved for FSDK-11/);
   assert.match(ctx, /- Old approach \(resolved 2026-10-02T10:00:00.000Z: approach dropped\)/);
   assert.doesNotMatch(ctx, /OLD PLAN/);
-  assert.match(ctx, /pi sessions about FSDK-11 \(0,/);
+  assert.match(ctx, /Agent sessions about FSDK-11 \(0,/);
 });
 
 test("saving a summary stores each next step as its own row", () => {

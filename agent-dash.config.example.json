@@ -1,7 +1,9 @@
 {
+  "agent": "pi",
   "userName": "Sam",
   "port": 7777,
   "sessionsDir": "~/.pi/agent/sessions",
+  "claudeProjectsDir": "~/.claude/projects",
   "recentDays": 14,
   "jiraServer": "https://postmanlabs.atlassian.net",
   "jiraLogin": "sam@postman.com",

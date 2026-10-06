@@ -25,6 +25,7 @@ export const jsonl = (...entries: Entry[]) => entries.map((e) => JSON.stringify(
 
 export function run(over: Partial<Run> = {}): Run {
   return {
+    agent: "pi",
     sessionId: "s1",
     sessionFile: "/f.jsonl",
     cwd: "/repo",
