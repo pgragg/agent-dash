@@ -27,16 +27,21 @@ export async function jiraGet(path: string): Promise<any> {
   return res.json();
 }
 
-/** The one Jira write the dash makes itself: a ticket's due date. Jira answers 204. */
-export async function setJiraDueDate(key: string, date: string): Promise<void> {
-  const res = await fetch(`${config.jira.server}/rest/api/3/issue/${key}`, {
-    method: "PUT",
+/** One of the two Jira writes the dash makes itself. Jira answers 204. */
+async function jiraWrite(method: "PUT" | "POST", path: string, body: unknown): Promise<void> {
+  const res = await fetch(`${config.jira.server}${path}`, {
+    method,
     headers: { Authorization: basicAuth(), "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ fields: { duedate: date } }),
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(20_000),
   });
   if (!res.ok) throw new Error(`Jira ${res.status}: ${(await res.text()).slice(0, 200)}`);
 }
+
+export const setJiraDueDate = (key: string, date: string) => jiraWrite("PUT", `/rest/api/3/issue/${key}`, { fields: { duedate: date } });
+
+export const transitionJiraIssue = (key: string, id: string, fields: Record<string, unknown>) =>
+  jiraWrite("POST", `/rest/api/3/issue/${key}/transitions`, { transition: { id }, ...(Object.keys(fields).length ? { fields } : {}) });
 
 /** Read-only: POST /search/jql is a query, not a write. */
 async function search(jql: string): Promise<any[]> {

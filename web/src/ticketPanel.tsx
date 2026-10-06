@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { defaultDueDate, isDate, moveMessage } from "../../shared/jiraVerbs.ts";
+import { defaultDueDate, isDate, type MoveTarget, moveTargets } from "../../shared/jiraVerbs.ts";
 import type { Ticket, TicketDetail } from "../../shared/types.ts";
 import { age, api, Markdown, plural, stamp } from "./lib.tsx";
 
 /**
  * The ticket's description and newest comments, read from Jira when the section opens, and
- * verb buttons for one Jira change: "Move to" starts an agent, "Set due date" asks the server.
+ * verb buttons for one Jira change each. The server makes the change: no agent.
  */
 
 const TTL_MS = 2 * 60_000;
@@ -21,7 +21,7 @@ async function loadDetail(key: string, refresh: boolean): Promise<TicketDetail> 
   return body;
 }
 
-function useDetail(key: string, open: boolean) {
+export function useTicketDetail(key: string, open: boolean) {
   const [detail, setDetail] = useState<TicketDetail | null>(() => cache.get(key)?.value ?? null);
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
@@ -45,22 +45,24 @@ function useDetail(key: string, open: boolean) {
   return { detail, error, reload: () => setNonce((n) => n + 1) };
 }
 
-type StartState = "idle" | "starting" | "started";
-
-/** Starts an agent on the message; the click is Piper's approval of that one change. */
-function useStart(key: string, cwd: string, onError: (m: string | null) => void) {
-  const [state, setState] = useState<StartState>("idle");
-  const start = async (message: string) => {
-    setState("starting");
-    const err = await api.startAgent(key, message, cwd);
+/** Moves the ticket in Jira. The click is Piper's approval of that one change. */
+export function MoveButton({ ticket, target, from, onError, onMoved }: { ticket: string; target: MoveTarget; from: string; onError: (m: string | null) => void; onMoved: () => void }) {
+  const [state, setState] = useState<"idle" | "moving" | "moved">("idle");
+  const move = async () => {
+    setState("moving");
+    const err = await api.moveTicket(ticket, target.to, from);
     onError(err);
-    setState(err ? "idle" : "started");
-    if (!err) setTimeout(() => setState("idle"), 4_000);
+    setState(err ? "idle" : "moved");
+    if (err) return;
+    cache.delete(ticket);
+    onMoved();
   };
-  return { state, start };
+  return (
+    <button className="btn small" disabled={state !== "idle"} onClick={move} title={`Move ${ticket} from "${from}"${target.via ? ` through "${target.via}"` : ""} to "${target.to}" in Jira`}>
+      {state === "moving" ? "Moving…" : state === "moved" ? `${target.to} ✓` : `Move to ${target.to}`}
+    </button>
+  );
 }
-
-const LABEL: Record<StartState, string> = { idle: "Start agent", starting: "Starting…", started: "Started ✓" };
 
 /** "Set due date": the server sets it in Jira. The click is Piper's approval of that one change. */
 export function DueDateVerb({ ticket, onError, onSet, compact = false }: { ticket: Ticket; onError: (m: string | null) => void; onSet?: () => void; compact?: boolean }) {
@@ -101,36 +103,33 @@ export function DueDateVerb({ ticket, onError, onSet, compact = false }: { ticke
   );
 }
 
-function MoveVerb({ ticket, detail, cwd, onError }: { ticket: Ticket; detail: TicketDetail; cwd: string; onError: (m: string | null) => void }) {
-  const [id, setId] = useState("");
-  const { state, start } = useStart(ticket.key, cwd, onError);
-  const t = detail.transitions.find((x) => x.id === id);
-  const message = t ? moveMessage(ticket.key, t.to, t.name) : null;
-  if (!detail.transitions.length) return <span className="meta">{detail.transitionsError ? `Could not read the transitions: ${detail.transitionsError}` : "No transitions from here."}</span>;
+function MoveVerb({ ticket, detail, onError, onMoved }: { ticket: Ticket; detail: TicketDetail; onError: (m: string | null) => void; onMoved: () => void }) {
+  const [to, setTo] = useState("");
+  const targets = moveTargets(detail.transitions, detail.status);
+  const target = targets.find((x) => x.to === to);
+  if (!targets.length) return <span className="meta">{detail.transitionsError ? `Could not read the transitions: ${detail.transitionsError}` : "No transitions from here."}</span>;
   return (
     <span className="verb">
       <span className="meta">Move to</span>
-      <select value={id} onChange={(e) => setId(e.target.value)}>
+      <select value={to} onChange={(e) => setTo(e.target.value)}>
         <option value="">status…</option>
-        {detail.transitions.map((x) => (
-          <option key={x.id} value={x.id}>
+        {targets.map((x) => (
+          <option key={x.to} value={x.to}>
             {x.to}
-            {x.name !== x.to ? ` (${x.name})` : ""}
+            {x.via ? ` (through ${x.via})` : ""}
           </option>
         ))}
       </select>
-      <button className="btn small" disabled={!message || state !== "idle" || !cwd.trim()} onClick={() => message && start(message)} title={message ?? ""}>
-        {LABEL[state]}
-      </button>
+      {target && <MoveButton key={target.to} ticket={ticket.key} target={target} from={detail.status} onError={onError} onMoved={onMoved} />}
     </span>
   );
 }
 
 /** The "Ticket" section under the workspace header. `T` opens and closes it. */
-export function TicketPanel({ ticket, cwd, onError }: { ticket: Ticket; cwd: string; onError: (m: string | null) => void }) {
+export function TicketPanel({ ticket, onError }: { ticket: Ticket; onError: (m: string | null) => void }) {
   const [open, setOpen] = useState(false);
   const [whole, setWhole] = useState(false);
-  const { detail, error, reload } = useDetail(ticket.key, open);
+  const { detail, error, reload } = useTicketDetail(ticket.key, open);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
@@ -201,10 +200,10 @@ export function TicketPanel({ ticket, cwd, onError }: { ticket: Ticket; cwd: str
           ) : (
             <>
               <div className="verbs">
-                <MoveVerb ticket={ticket} detail={detail} cwd={cwd} onError={onError} />
+                <MoveVerb ticket={ticket} detail={detail} onError={onError} onMoved={reload} />
                 <DueDateVerb ticket={{ ...ticket, dueDate: detail.dueDate }} onError={onError} onSet={reload} />
               </div>
-              <p className="meta">Move to starts an agent in {cwd} that makes that one change with the jira-tickets skill. Set due date changes Jira at once.</p>
+              <p className="meta">Both change Jira at once. A move can give a ticket with no due date the default one, two weeks out.</p>
             </>
           )}
         </>

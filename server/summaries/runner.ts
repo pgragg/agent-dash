@@ -139,6 +139,7 @@ OUTPUT (at most 120 words, markdown):
 **State:** one sentence.
 **Next steps:**
 1. The most important step first. Start each step with who acts: Piper, an agent, or a named person.
+   A Jira status move is a step of its own, worded "Piper moves the ticket to <status>". agent-dash puts a Move button on it, so no agent is needed.
 (1 to 4 steps)
 **Blockers:** one line, or "none".
 **Gaps:** one line, only if a source failed.

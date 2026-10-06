@@ -26,9 +26,9 @@ process.env.JIRA_SERVER = `http://127.0.0.1:${(jira.address() as AddressInfo).po
 process.env.JIRA_API_TOKEN = "test";
 const { handle } = await import("../server/routes/ticket.ts");
 
-const changed: [string, string][] = [];
+const changed: [string, unknown][] = [];
 const server = createServer(async (req, res) => {
-  if (!(await handle(req, res, new URL(req.url ?? "/", "http://localhost"), (k, d) => changed.push([k, d])))) res.writeHead(404).end();
+  if (!(await handle(req, res, new URL(req.url ?? "/", "http://localhost"), (k, patch) => changed.push([k, patch])))) res.writeHead(404).end();
 });
 await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
 after(() => {
@@ -63,7 +63,7 @@ test("the server sets the due date in Jira, and tells the board", async () => {
   assert.equal(r.code, 200);
   assert.deepEqual(r.body, { key: "FSDK-99999", from: "2026-09-22", dueDate: "2026-10-30" });
   assert.deepEqual(writes, [{ fields: { duedate: "2026-10-30" } }]);
-  assert.deepEqual(changed, [["FSDK-99999", "2026-10-30"]]);
+  assert.deepEqual(changed, [["FSDK-99999", { dueDate: "2026-10-30" }]]);
 });
 
 test("a first due date works the same way", async () => {
