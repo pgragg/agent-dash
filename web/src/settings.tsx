@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { DEFAULT_SETTINGS, SETTING_FIELDS, type SettingField, type SettingKey, type Settings, type SettingsState } from "../../shared/settings.ts";
+import { AGENT_LABEL, type AgentKind, team } from "../../shared/team.ts";
 
 /** A list shows as "A, B" in its box; the server splits it again. */
 const toText = (f: SettingField, v: Settings[SettingKey]): string => (Array.isArray(v) ? v.join(", ") : String(v));
@@ -8,28 +9,102 @@ const GROUPS = [...new Set(SETTING_FIELDS.map((f) => f.group))];
 
 const DISMISSED = "agent-dash.setup-dismissed";
 
+/**
+ * "Set it up for me": pick the agent, then a headless agent finds the settings and saves them.
+ * The click on Start is the user's permission; the page then opens the agent's conversation.
+ */
+export function SetupAgent({ onCancel }: { onCancel: () => void }) {
+  const [agent, setAgent] = useState<AgentKind>(team.agent);
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const start = async () => {
+    setStarting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/setup", { method: "POST", headers: { "X-Agent-Dash": "1", "Content-Type": "application/json" }, body: JSON.stringify({ agent }) });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? `could not start the setup agent (${res.status})`);
+      location.hash = `#/c:${encodeURIComponent(body.sessionId)}`;
+      onCancel();
+    } catch (err) {
+      setError((err as Error).message);
+      setStarting(false);
+    }
+  };
+  return (
+    <div className="setup-agent" role="dialog" aria-label="Set up agent-dash">
+      <div className="setup-agent-row">
+        <span className="setting-label">1. Your agent</span>
+        <span className="seg" role="radiogroup" aria-label="Agent">
+          {(Object.keys(AGENT_LABEL) as AgentKind[]).map((a) => (
+            <button key={a} role="radio" aria-checked={agent === a} className={`btn small ${agent === a ? "" : "ghost"}`} onClick={() => setAgent(a)}>
+              {AGENT_LABEL[a]}
+            </button>
+          ))}
+        </span>
+      </div>
+      <p className="meta">
+        2. agent-dash saves {AGENT_LABEL[agent]} as your agent, {agent === "pi" ? "links its status extension into pi, " : ""}and starts {AGENT_LABEL[agent]} on this page. It looks for each setting on this machine with read-only commands (git config, gh, ls, grep), saves what it finds with the same checks as the Settings page, and asks you for the rest. It never prints your Jira token.
+        {agent === "claude" ? " Claude Code asks you on the page before each command." : ""} Then restart agent-dash.
+      </p>
+      {error && <p className="setting-error">{error}</p>}
+      <div className="setup-agent-row">
+        <button className="btn small" disabled={starting} onClick={start}>
+          {starting ? "Starting…" : `Start ${AGENT_LABEL[agent]}`}
+        </button>
+        <button className="btn ghost small" disabled={starting} onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Until the settings are set, every view says what is missing, instead of a red "Jira down". */
 export function SetupBanner({ setup }: { setup: string[] }) {
   // Dismissed for this exact list, so a newly missing setting shows again.
   const key = setup.join(",");
   const [dismissed, setDismissed] = useState(() => localStorage.getItem(DISMISSED));
+  const [picking, setPicking] = useState(false);
   if (!setup.length || dismissed === key) return null;
   const list = setup.length > 1 ? `${setup.slice(0, -1).join(", ")} and ${setup.at(-1)}` : setup[0];
   return (
     <div className="setup-banner" role="status">
-      <span>
-        agent-dash is not set up yet. Set {list} on the <a href="#/settings">Settings</a> page, then restart agent-dash.
-      </span>
-      <button
-        className="btn ghost small"
-        onClick={() => {
-          localStorage.setItem(DISMISSED, key);
-          setDismissed(key);
-        }}
-      >
-        Dismiss
-      </button>
+      <div className="setup-banner-row">
+        <span>
+          agent-dash is not set up yet. Set {list} on the <a href="#/settings">Settings</a> page, then restart agent-dash.
+        </span>
+        <span className="setup-banner-actions">
+          {!picking && (
+            <button className="btn small" onClick={() => setPicking(true)}>
+              Set it up for me
+            </button>
+          )}
+          <button
+            className="btn ghost small"
+            onClick={() => {
+              localStorage.setItem(DISMISSED, key);
+              setDismissed(key);
+            }}
+          >
+            Dismiss
+          </button>
+        </span>
+      </div>
+      {picking && <SetupAgent onCancel={() => setPicking(false)} />}
     </div>
+  );
+}
+
+/** `` `code` `` spans in a how-to-find text, as code. */
+const withCode = (text: string) => text.split(/`([^`]+)`/).map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part));
+
+/** The example value and where to find it, under a field's help. */
+function FieldGuide({ f }: { f: SettingField }) {
+  return (
+    <span className="meta setting-guide">
+      Example: <code>{f.example}</code>. How to find it: {withCode(f.find)}
+    </span>
   );
 }
 
@@ -41,6 +116,7 @@ export function SettingsView() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [picking, setPicking] = useState(false);
 
   const load = (s: SettingsState) => {
     setState(s);
@@ -78,8 +154,14 @@ export function SettingsView() {
           <span className="meta">
             Your own paths and accounts. They are saved in <code>{state?.file ?? "agent-dash.config.json"}</code>, which git ignores{state && !state.exists ? " (it does not exist yet: Save makes it)" : ""}. A path can start with <code>~/</code>.
           </span>
+          {state && !state.readOnly && !picking && (
+            <button className="btn ghost small" onClick={() => setPicking(true)} title="An agent finds these values on this machine and saves them">
+              Set it up for me
+            </button>
+          )}
         </div>
       </header>
+      {picking && <SetupAgent onCancel={() => setPicking(false)} />}
       {!state && !error && <p className="meta">Reading the settings…</p>}
       {state?.readOnly && (
         <div className="toast settings-note" role="status">
@@ -124,9 +206,10 @@ export function SettingsView() {
                     </span>
                     <span className="meta">
                       {errors[f.key] ? <b className="setting-error">{errors[f.key]}. </b> : null}
-                      {f.help}
+                      {withCode(f.help)}
                       {env ? <b> {env} is set, and wins over this value.</b> : null}
                     </span>
+                    <FieldGuide f={f} />
                   </div>
                 );
               }
@@ -144,10 +227,11 @@ export function SettingsView() {
                   />
                   <span className="meta">
                     {errors[f.key] ? <b className="setting-error">{errors[f.key]}. </b> : null}
-                    {f.help}
+                    {withCode(f.help)}
                     {f.kind === "list" ? " Separate them with commas." : ""}
                     {env ? <b> {env} is set, and wins over this value.</b> : null}
                   </span>
+                  <FieldGuide f={f} />
                 </label>
               );
             })}

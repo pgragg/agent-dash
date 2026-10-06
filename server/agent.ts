@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { AgentKind } from "../shared/team.ts";
@@ -53,6 +53,24 @@ export function installClaudeHooks(file = claudeSettingsFile()): string {
   return `Installed the agent-dash status hooks in ${file}. New Claude Code sessions run them.`;
 }
 
+const PI_EXTENSION = new URL("../extension/agent-dash-status.ts", import.meta.url).pathname;
+export const piExtensionFile = (): string => join(process.env.PI_EXTENSIONS_DIR ?? join(homedir(), ".pi/agent/extensions"), "agent-dash-status.ts");
+
+/**
+ * Link the status extension into pi's global extension folder. A symlink, not a copy, so a
+ * `git pull` here also updates it. A headless pi gets its first message through the extension.
+ */
+export function installPiExtension(force = false, target = piExtensionFile()): string {
+  mkdirSync(dirname(target), { recursive: true });
+  if (lstatSync(target, { throwIfNoEntry: false })) {
+    if (lstatSync(target).isSymbolicLink() && readlinkSync(target) === PI_EXTENSION) return `Already installed: ${target} -> ${PI_EXTENSION}`;
+    if (!force) throw new Error(`${target} exists and is not agent-dash's symlink. Run \`pnpm install-extension --force\` to replace it.`);
+    unlinkSync(target);
+  }
+  symlinkSync(PI_EXTENSION, target);
+  return `Installed: ${target} -> ${PI_EXTENSION}\nNew pi sessions load it at once. In a running session, type /reload.`;
+}
+
 /** The `pi` shell alias sets this; a spawned pi does not get the alias. */
 export const agentEnv = (env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv => ({ ...env, SSL_CERT_FILE: env.SSL_CERT_FILE ?? "/etc/ssl/cert.pem" });
 
@@ -60,6 +78,8 @@ export interface HeadlessOptions {
   name?: string;
   /** Continue this session. pi needs its file; Claude Code finds it by id in the run's folder. */
   resume?: { sessionId: string; sessionFile: string };
+  /** Claude Code tools that run without a permission dialog. pi asks before no tool call. */
+  allowedTools?: string[];
 }
 
 /**
@@ -76,6 +96,7 @@ export function headlessCommand(agent: AgentKind, sessionId: string, opts: Headl
   const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio", ...hookFlag()];
   args.push(...(opts.resume ? ["--resume", opts.resume.sessionId] : ["--session-id", sessionId]));
   if (opts.name && !opts.resume) args.push("--name", opts.name);
+  if (opts.allowedTools?.length) args.push("--allowedTools", opts.allowedTools.join(","));
   return { cmd: "claude", args };
 }
 

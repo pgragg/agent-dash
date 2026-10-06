@@ -81,7 +81,8 @@ export function main(event: string, input: HookInput): void {
     body.activity = { tool, summary: summarizeTool(tool.toLowerCase(), input.tool_input), since: now };
   } else if (event === "PostToolUse") {
     body.activity = null;
-    body.dialog = null;
+    // A parallel tool call that needs no permission can end while this one waits for its answer.
+    if ((old.dialog as { title?: string } | null | undefined)?.title === permissionTitle(input.tool_name ?? "", input.tool_input)) body.dialog = null;
   } else if (event === "PermissionRequest") {
     const tool = input.tool_name ?? "";
     body.dialog = { method: "confirm", title: permissionTitle(tool, input.tool_input), message: toolTarget(input.tool_input).slice(0, 1000), since: now };

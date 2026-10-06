@@ -21,6 +21,8 @@ export interface ConversationOptions {
   resume?: { sessionId: string; sessionFile: string };
   /** The agent that runs it; a resume takes the agent that wrote the session. Default: the configured one. */
   agent?: AgentKind;
+  /** Claude Code tools that run without a permission dialog. */
+  allowedTools?: string[];
 }
 
 /** The stdin FIFO of a headless run. */

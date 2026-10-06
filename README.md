@@ -29,7 +29,7 @@ pnpm install-extension   # once: exact run status and replies (see below)
 pnpm build && pnpm start # http://127.0.0.1:7777
 ```
 
-Then open **Settings** (`#/settings`). Pick the agent first, with the **pi** / **Claude Code** toggle at the top. Then set your Jira login and token file, your ticket projects, and the other paths that you use, and restart. They go in `agent-dash.config.json`, which git ignores. See [Configuration](#configuration). Until they are set, a banner on every view says what is missing, and the top bar says **Jira off**, not **Jira down**.
+Until the settings are set, a banner on every view says what is missing, and the top bar says **Jira off**, not **Jira down**. Click **Set it up for me** in the banner to let an agent find your settings (see [Set it up for me](#set-it-up-for-me)), or open **Settings** (`#/settings`) and set them yourself: pick the agent first, with the **pi** / **Claude Code** toggle at the top, then your Jira login and token file, your ticket projects, and the other paths that you use. Each setting shows an example value and how to find it. Then restart. The settings go in `agent-dash.config.json`, which git ignores. See [Configuration](#configuration).
 
 To start it and open the page with one command, add this to `~/.zshrc` (change the folder to your clone):
 
@@ -508,12 +508,27 @@ Company-wide values (the Jira server, the Slack org, the deploy repos, the Postm
 | Environments that a smoketest can run on | `environments` | | `localhost`, `postman_beta`, `postman_prod` (add `fern_dev`, `fern_prod` for Fern's stack) |
 | Local smoketest guide, read first by a local plan | `smoketestGuide` | | none |
 
+- **Each setting has an example and a way to find it.** The Settings page shows them under the field, and the [setup agent](#set-it-up-for-me) follows them. They live with the field in `shared/settings.ts` (`example` and `find`).
 - **A save needs a restart.** The server reads the file once, at start. After **Save**, the page says that the server still runs with the old values until you restart it.
 - **An env var wins over the file**, for a test server or a one-off run. The page marks each field that an env var sets now. A list env var takes commas or `|`.
 - **`AGENT_DASH_CONFIG`** names another config file. `pnpm test` uses `test/config.json`, so your own settings never change a test.
 - **A server in a git worktree** with no `agent-dash.config.json` of its own reads the main checkout's file, so a test server runs with your settings. From there the Settings page is read-only, so a test server never changes the file that your real dashboard uses.
 
 Other env vars, all optional: `AGENT_DASH_STATUS_DIR`, `AGENT_DASH_INBOX_DIR`, `AGENT_DASH_CONVERSATIONS_DIR`, `AGENT_DASH_REMOTE_TTL_MS`, `AGENT_DASH_MCP_ADAPTER` (pi-mcp-adapter's `dist` folder, for posting to Slack).
+
+## Set it up for me
+
+**Set it up for me**, in the setup banner and at the top of the Settings page, starts an agent that fills in the settings for you.
+
+1. You pick the agent: **pi** or **Claude Code**.
+2. **Start** is your permission. `POST /api/setup` (with `{agent}` and the `X-Agent-Dash` guard) saves the agent to the config file, links the pi status extension when pi has none, and starts a headless agent in the repo folder. The page opens its conversation (`#/c:<id>`).
+
+- **Its first message** (`setupMessage` in `server/routes/setup.ts`) lists each setting with its description, example, way to find it, and current value, and starts with what the banner says is missing.
+- **It looks, and does not change.** It runs read-only commands, never prints the Jira token, and keeps a default when it finds nothing better. It saves with `node scripts/save-settings.ts < patch.json`, which changes only the keys in the JSON and checks each value as the Settings page does. When one value is bad, the script saves nothing and says why, so the agent fixes it and runs it again.
+- **It ends with a table** of each value and where it found it, and asks you for the rest in its reply. Then restart agent-dash.
+- **Claude Code asks before each command** on the page (Read, Grep, Glob and LS run without a dialog). pi asks before no tool call.
+- **Before the restart, the board reads the other agent's logs only for this session.** A Claude Code setup agent on a pi server (or the opposite) still shows on the page: the server follows its log file in the other agent's folder.
+- A server in a worktree reads the main checkout's settings read-only, so it refuses to start the setup agent.
 
 ## Develop
 

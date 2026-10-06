@@ -1,7 +1,6 @@
-import { renameSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { type SettingsState, validateSettings } from "../../shared/settings.ts";
-import { CONFIG_FILE, CONFIG_READ_ONLY, config, effectiveSettings, envOverrides, readSettingsFile } from "../config.ts";
+import { CONFIG_FILE, CONFIG_READ_ONLY, config, effectiveSettings, envOverrides, readSettingsFile, writeSettingsFile } from "../config.ts";
 
 function readBody(req: IncomingMessage, max: number): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -54,8 +53,6 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   }
   const { settings, errors } = validateSettings(body);
   if (Object.keys(errors).length) return json(400, { error: "some settings are not valid", errors });
-  // A rename is atomic, so a crash never leaves half a file that stops the next start.
-  writeFileSync(`${file}.tmp`, `${JSON.stringify(settings, null, 2)}\n`);
-  renameSync(`${file}.tmp`, file);
+  writeSettingsFile(settings, file);
   return json(200, settingsState(file, readOnly));
 }

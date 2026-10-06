@@ -10,7 +10,7 @@ import { team } from "../shared/team.ts";
 import { startConversation } from "./conversations.ts";
 import { recordExit, wroteRecently } from "./exits.ts";
 import { focusItermSession, runInNewItermTab } from "./iterm.ts";
-import { claudeHooksInstalled, terminalCommand } from "./agent.ts";
+import { claudeHooksInstalled, piExtensionFile, terminalCommand } from "./agent.ts";
 import { buildDashboard, buildHistory, otherTicketKeys } from "./model.ts";
 import * as exitRoutes from "./routes/exits.ts";
 import { agentMessage, agentName, buildHandoff, stepMessage } from "./handoff.ts";
@@ -27,6 +27,7 @@ import * as reviewRoute from "./routes/reviewRequests.ts";
 import * as lanesRoute from "./routes/lanes.ts";
 import * as worktreesRoute from "./routes/worktrees.ts";
 import * as settingsRoute from "./routes/settings.ts";
+import * as setupRoute from "./routes/setup.ts";
 import { confirmDeployMessage, deployStageOf, parseEnvironment, planMessage } from "../shared/sdlc.ts";
 import { requestConversationSummaries, summariesFor } from "./conversationSummaries.ts";
 import { syncDiagrams } from "./diagramSync.ts";
@@ -44,7 +45,6 @@ import { reconcile, redraftAfterNewEvents, requestSummary } from "./summaries/ru
 const WEB_DIST = new URL("../web/dist/", import.meta.url).pathname;
 /** Agents record smoketests and deploys with this script, into this dash's database. */
 const SDLC_SCRIPT = new URL("../scripts/sdlc-event.ts", import.meta.url).pathname;
-const EXTENSION_PATH = join(homedir(), ".pi/agent/extensions/agent-dash-status.ts");
 
 /**
  * Keeps the last good answer when a refresh fails, and reports the failure next to it.
@@ -151,7 +151,7 @@ async function dashboard(force: boolean) {
     now,
     recentDays: config.recentDays,
     sources: { jira, github: prs.health, sessions: sessionsHealth },
-    extensionInstalled: config.agent === "claude" ? claudeHooksInstalled() : existsSync(EXTENSION_PATH),
+    extensionInstalled: config.agent === "claude" ? claudeHooksInstalled() : existsSync(piExtensionFile()),
     summaries,
     notes: summaryDb.notesByTicket(),
     snoozedUntil: summaryDb.snoozedUntilByTicket(),
@@ -217,6 +217,19 @@ function broadcast(): void {
 mkdirSync(config.statusDir, { recursive: true });
 watch(config.sessionsDir, { recursive: true }, broadcast);
 watch(config.statusDir, broadcast);
+const watchedDirs = new Set([config.sessionsDir]);
+/** A setup agent can run with the other agent before a restart: show its session, and update live. */
+function followSession(dir: string, sessionId: string): void {
+  sessions.follow(dir, sessionId);
+  if (watchedDirs.has(dir)) return;
+  try {
+    mkdirSync(dir, { recursive: true });
+    watch(dir, { recursive: true }, broadcast);
+    watchedDirs.add(dir);
+  } catch (err) {
+    console.warn(`agent-dash: cannot watch ${dir}: ${(err as Error).message}`);
+  }
+}
 let redraftLoad: Promise<unknown> | null = null;
 // A summary run saves into SQLite from its own process; WAL writes touch agent-dash.db-wal.
 watch(dirname(summaryDb.DB_PATH), (_e, file) => {
@@ -275,6 +288,7 @@ const server = createServer(async (req, res) => {
     if (await lanesRoute.handle(req, res, url, { context: ticketContext, onChange: broadcast })) return;
     if (await worktreesRoute.handle(req, res, url, broadcast)) return;
     if (await settingsRoute.handle(req, res, url)) return;
+    if (await setupRoute.handle(req, res, url, { follow: followSession })) return;
     if (await loginRoute.handle(req, res, url)) return;
     if (await slackRoute.handle(req, res, url)) return;
     if (url.pathname === "/api/dashboard") {

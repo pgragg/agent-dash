@@ -736,5 +736,13 @@ a.btn.verb { text-decoration: none; }
 .settings .setting-error { color: var(--bad); }
 .settings .settings-note { background: var(--warn-bg); color: var(--warn); }
 .settings-bar { display: flex; gap: 10px; }
-.setup-banner { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 20px; background: var(--warn-bg); color: var(--warn); font-size: 13px; border-bottom: 1px solid var(--line); }
+.setup-banner { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 8px 20px; background: var(--warn-bg); color: var(--warn); font-size: 13px; border-bottom: 1px solid var(--line); }
+.setup-banner-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.setup-banner-actions { display: flex; gap: 6px; flex: none; }
 .setup-banner a { color: inherit; font-weight: 600; }
+.setup-agent { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--bg); color: var(--ink); max-width: 760px; }
+.setup-agent-row { display: flex; align-items: center; gap: 10px; }
+.setup-agent .meta { margin: 0; }
+.setup-agent .setting-error { color: var(--bad); margin: 0; }
+.settings .setting-guide { color: var(--muted); }
+.settings .setting-guide code { font-size: 12px; overflow-wrap: anywhere; }

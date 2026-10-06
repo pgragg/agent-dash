@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentKind } from "../../shared/team.ts";
@@ -345,6 +346,8 @@ export class SessionIndex {
   private cache = new Map<string, { size: number; mtimeMs: number; parsed: ParsedSession | null }>();
   private readonly dir: string;
   private readonly ticketPattern: RegExp;
+  /** Sessions in another agent's folder, by id, with their log file once it is found. */
+  private readonly followed = new Map<string, { dir: string; file?: string }>();
 
   constructor(dir: string, ticketPattern: RegExp) {
     this.dir = dir;
@@ -359,6 +362,7 @@ export class SessionIndex {
         if (f.endsWith(".jsonl")) files.push(join(this.dir, project.name, f));
       }
     }
+    files.push(...(await this.followedFiles()));
     const seen = new Set(files);
     for (const key of this.cache.keys()) if (!seen.has(key)) this.cache.delete(key);
 
@@ -372,6 +376,30 @@ export class SessionIndex {
       }),
     );
     return [...this.cache.values()].flatMap((v) => (v.parsed ? [v.parsed] : []));
+  }
+
+  /**
+   * Also read one session from another agent's log folder. The setup agent can run with the agent
+   * that the user picked before a restart makes it the board's agent.
+   */
+  follow(dir: string, sessionId: string): void {
+    if (dir !== this.dir) this.followed.set(sessionId, { dir });
+  }
+
+  private async followedFiles(): Promise<string[]> {
+    const out: string[] = [];
+    for (const [id, f] of this.followed) {
+      // pi names a log `<time>_<id>.jsonl`, Claude Code `<id>.jsonl`, each in a folder per project.
+      if (!f.file) {
+        for (const project of await readdir(f.dir, { withFileTypes: true }).catch(() => [])) {
+          if (!project.isDirectory()) continue;
+          const name = (await readdir(join(f.dir, project.name)).catch(() => [])).find((n) => n === `${id}.jsonl` || n.endsWith(`_${id}.jsonl`));
+          if (name) f.file = join(f.dir, project.name, name);
+        }
+      }
+      if (f.file && existsSync(f.file)) out.push(f.file);
+    }
+    return out;
   }
 
   /** A session from the last scan, without a new scan: the dashboard scans often enough. */

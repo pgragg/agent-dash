@@ -122,6 +122,12 @@ test("the hook writes the status file that the pi extension writes, with dialogs
     hook.main("PermissionRequest", { ...input, tool_name: "Write", tool_input: { file_path: "/repo/a.ts", content: "x" } });
     assert.deepEqual([status().dialog.method, status().dialog.title], ["confirm", "Allow Write: /repo/a.ts?"]);
     assert.deepEqual([takesControls(status()), takesSteer(status())], [true, false]);
+    // A parallel Read that needs no permission ends first: the Write still waits for its answer.
+    hook.main("PreToolUse", { ...input, tool_name: "Read", tool_input: { file_path: "/repo/b.ts" } });
+    hook.main("PostToolUse", { ...input, tool_name: "Read", tool_input: { file_path: "/repo/b.ts" } });
+    assert.equal(status().dialog.title, "Allow Write: /repo/a.ts?");
+    hook.main("PostToolUse", { ...input, tool_name: "Write", tool_input: { file_path: "/repo/a.ts", content: "x" } });
+    assert.equal(status().dialog, null);
     hook.main("Stop", input);
     assert.deepEqual([status().state, status().activity, status().dialog], ["awaiting_input", null, null]);
   } finally {
