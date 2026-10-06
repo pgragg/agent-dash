@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit(/**)",
+      "Edit(//Users/piper/01_programming/agent-dash*/**)",
+      "Edit(//Users/piper/02_programming/agent-dash*/**)",
+      "Bash(git *)",
+      "Bash(gh *)",
+      "Bash(pnpm *)"
+    ]
+  }
+}
