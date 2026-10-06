@@ -717,3 +717,10 @@ a.btn.verb { text-decoration: none; }
 .worktrees .wl-note { margin-left: 0; }
 .composer-bar label.meta, .wl-bar label.meta { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; margin-right: 10px; }
 .composer-bar label.meta input, .wl-bar label.meta input { display: inline-block; width: auto; padding: 0; margin: 0; }
+
+/* Parked agents */
+.parked-group { margin-top: 14px; }
+.parked-head { padding: 10px 18px 0; flex-wrap: wrap; }
+.parked-head h3 { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.action.parked { align-items: flex-start; }
+.parked-reply textarea { min-height: 38px; padding: 8px 12px; }

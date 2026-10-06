@@ -27,6 +27,7 @@ import * as worktreesRoute from "./routes/worktrees.ts";
 import { confirmDeployMessage, deployStageOf, parseEnvironment, planMessage } from "../shared/sdlc.ts";
 import { requestConversationSummaries, summariesFor } from "./conversationSummaries.ts";
 import { syncDiagrams } from "./diagramSync.ts";
+import { sweep as sweepParks } from "./park.ts";
 import { fetchMyPrs, type PullWithFeedback } from "./sources/github.ts";
 import { toAddressCount } from "../shared/feedback.ts";
 import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
@@ -150,6 +151,7 @@ async function dashboard(force: boolean) {
     snoozedUntil: summaryDb.snoozedUntilByTicket(),
     starred: summaryDb.starredTickets(),
     threads: summaryDb.currentThreadStatuses(),
+    parked: new Set(summaryDb.activeParked().map((p) => p.sessionId)),
     jiraServer: config.jira.server,
   });
 
@@ -167,6 +169,12 @@ async function dashboard(force: boolean) {
   const boardRuns = [...d.myTickets, ...d.otherTickets].flatMap((g) => g.runs).concat(d.unlinkedRuns);
   requestConversationSummaries(boardRuns.filter((r) => r.status !== "finished"), (id) => sessions.fileFor(id), broadcast);
   d.conversationSummaries = summariesFor(boardRuns);
+  const done = new Set([...d.myTickets, ...d.otherTickets].filter((g) => g.ticket.statusCategory === "done").map((g) => g.ticket.key));
+  const laneSessions = new Set(Object.values(d.lanes).flatMap((ls) => ls.flatMap((l) => (l.sessionId && l.state !== "landed" ? [l.sessionId] : []))));
+  const runs = [...new Map(boardRuns.map((r) => [r.sessionId, r])).values()];
+  if (sweepParks({ runs, summaries: d.conversationSummaries, done, threads: summaryDb.currentThreadStatuses(), laneSessions, now }, reported)) broadcast();
+  const keepFrom = new Date(now - config.recentDays * 86_400_000).toISOString();
+  d.parked = summaryDb.activeParked().filter((p) => p.parkedAt >= keepFrom);
   return d;
 }
 
@@ -180,7 +188,7 @@ const onTicketChange: ticketRoute.OnTicketChange = (key, patch) => {
 async function ticketContext(key: string): Promise<string | null> {
   const d = await dashboard(false);
   const group = [...d.myTickets, ...d.otherTickets].find((g) => g.ticket.key === key);
-  return group ? buildHandoff({ group, notes: d.notes[key] ?? [], summary: d.summaries[key], events: d.sdlcEvents[key] ?? [], now: new Date() }) : null;
+  return group ? buildHandoff({ group, notes: d.notes[key] ?? [], summary: d.summaries[key], events: d.sdlcEvents[key] ?? [], parked: d.parked.filter((p) => p.ticket === key), now: new Date() }) : null;
 }
 
 // ---- live updates -------------------------------------------------------------------
@@ -325,7 +333,7 @@ const server = createServer(async (req, res) => {
       const d = await dashboard(false);
       const group = [...d.myTickets, ...d.otherTickets].find((g) => g.ticket.key === key);
       if (!group) return json(404, { error: `unknown ticket ${key}` });
-      const context = buildHandoff({ group, notes: d.notes[key] ?? [], summary: d.summaries[key], events: d.sdlcEvents[key] ?? [], now: new Date() });
+      const context = buildHandoff({ group, notes: d.notes[key] ?? [], summary: d.summaries[key], events: d.sdlcEvents[key] ?? [], parked: d.parked.filter((p) => p.ticket === key), now: new Date() });
       if (url.pathname === "/api/agents/context") return void res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8" }).end(context);
 
       const body = JSON.parse((await readBody(req, 64_000)) || "{}") as { message?: string; step?: number; cwd?: string; terminal?: boolean; sdlc?: { kind?: string; env?: string; stage?: string }; lanes?: unknown; laneMode?: unknown; base?: unknown };
@@ -403,6 +411,11 @@ const server = createServer(async (req, res) => {
       if (status?.mode !== "rpc" || !isAlive(status.pid)) return void res.writeHead(404, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "no live conversation to end" }));
       process.kill(status.pid, "SIGTERM");
       res.writeHead(202, { "Content-Type": "application/json" }).end(JSON.stringify({ ok: true }));
+    } else if (url.pathname === "/api/parked/dismiss" && req.method === "POST") {
+      if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
+      const ok = summaryDb.endParked(url.searchParams.get("session") ?? "", "dismissed");
+      if (ok) broadcast();
+      res.writeHead(ok ? 200 : 404, { "Content-Type": "application/json" }).end(JSON.stringify(ok ? { ok } : { error: "no parked agent with that id" }));
     } else if (url.pathname === "/api/threads" && req.method === "POST") {
       if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
       const json = (code: number, body: unknown) => void res.writeHead(code, { "Content-Type": "application/json" }).end(JSON.stringify(body));
