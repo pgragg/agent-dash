@@ -261,7 +261,9 @@ export function digestSession(raw: string, maxChars: number): string {
  * Status from the log alone, for sessions that the extension does not report on.
  * The log cannot say whether the pi process is still open, so time decides.
  */
-export function heuristicStatus(s: ParsedSession, now: number): { status: RunStatus; since: string } {
+export function heuristicStatus(s: ParsedSession, now: number, folderExists: (dir: string) => boolean = () => true): { status: RunStatus; since: string } {
+  // No pi can run in a folder that is gone, such as a test run's temp folder.
+  if (!folderExists(s.cwd)) return { status: "finished", since: s.lastActivityAt };
   const idleMs = now - Date.parse(s.lastActivityAt);
   if (s.midRun) {
     // A tool call that has written nothing for this long was killed with its session.
