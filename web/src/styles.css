@@ -701,14 +701,16 @@ a.btn.verb { text-decoration: none; }
 .why-new-count { color: var(--working); }
 
 /* Parallel lanes: the editor in Start a new agent, and the card with one row per lane. */
-.lanes-editor { border-top: 1px solid var(--line); padding: 8px 8px 8px 14px; display: flex; flex-direction: column; gap: 6px; }
-.lane-draft { display: flex; align-items: flex-start; gap: 8px; }
-.lane-draft .lane-name { width: 64px; flex: none; height: 26px; padding: 0 8px; border: 1px solid var(--line); border-radius: 7px; background: transparent; font: 12.5px var(--mono); color: var(--ink-2); }
-.lane-draft textarea { flex: 1; min-height: 44px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 7px; }
-.lanes-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.lanes-bar .base { flex: 0 1 220px; margin-right: 0; }
-.lane-rows { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.lane-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
-.lane-row .lane-branch { font: 12.5px var(--mono); color: var(--ink-2); }
-.composer-bar label.meta, .lanes-bar label.meta { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; margin-right: 10px; }
-.composer-bar label.meta input, .lanes-bar label.meta input { display: inline-block; width: auto; padding: 0; margin: 0; }
+.wl-editor { border-top: 1px solid var(--line); padding: 8px 8px 8px 14px; display: flex; flex-direction: column; gap: 6px; }
+.wl-draft { display: flex; align-items: flex-start; gap: 8px; }
+.wl-draft .wl-name { width: 64px; flex: none; height: 26px; padding: 0 8px; border: 1px solid var(--line); border-radius: 7px; background: transparent; font: 12.5px var(--mono); color: var(--ink-2); }
+.wl-draft textarea { flex: 1; min-height: 44px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 7px; }
+.wl-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.wl-bar .base { flex: 0 1 220px; margin-right: 0; }
+.wl-rows { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.wl-row { font-size: 13px; }
+.wl-line { display: flex; align-items: center; gap: 10px; }
+.wl-note { margin: 2px 0 4px 34px; font-size: 12.5px; }
+.wl-row .wl-branch { font: 12.5px var(--mono); color: var(--ink-2); }
+.composer-bar label.meta, .wl-bar label.meta { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; margin-right: 10px; }
+.composer-bar label.meta input, .wl-bar label.meta input { display: inline-block; width: auto; padding: 0; margin: 0; }

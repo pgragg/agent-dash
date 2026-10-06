@@ -177,7 +177,9 @@ CREATE TABLE IF NOT EXISTS lanes (
   session_id           TEXT,
   goal                 TEXT NOT NULL,
   state                TEXT NOT NULL DEFAULT 'working',
-  created_at           TEXT NOT NULL
+  note                 TEXT,
+  created_at           TEXT NOT NULL,
+  landed_at            TEXT
 );
 CREATE INDEX IF NOT EXISTS lanes_by_ticket ON lanes (ticket, id);
 
@@ -283,6 +285,7 @@ export function open(path = DB_PATH): DatabaseSync {
   // The copy below adds the CHECK on confirmed_by and the reference of plan_id.
   for (const c of SDLC_EVENT_COLUMNS) if (!db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = ?").get(c)) db.exec(`ALTER TABLE SDLC_Event ADD COLUMN ${c} ${c === "plan_id" ? "INTEGER" : "TEXT"}`);
   if (!db.prepare("SELECT 1 FROM pragma_table_info('tickets') WHERE name = 'starred_at'").get()) db.exec("ALTER TABLE tickets ADD COLUMN starred_at TEXT");
+  for (const c of ["note", "landed_at"]) if (!db.prepare("SELECT 1 FROM pragma_table_info('lanes') WHERE name = ?").get(c)) db.exec(`ALTER TABLE lanes ADD COLUMN ${c} TEXT`);
   // Before the trigger below: copying the table drops the triggers on it.
   upgradeSdlcEventChecks(db);
   // SQLite cannot change a CHECK, so an older table is copied into one that allows 'unlinked'.
@@ -437,16 +440,16 @@ export function starredTickets(): string[] {
 // ---- Parallel lanes ----------------------------------------------------------------------
 
 const LANE_COLUMNS = `id, ticket, repo, lane, mode, base, branch, worktree, integration_branch AS integrationBranch,
-  integration_worktree AS integrationWorktree, session_id AS sessionId, goal, state, created_at AS createdAt`;
+  integration_worktree AS integrationWorktree, session_id AS sessionId, goal, state, note, created_at AS createdAt, landed_at AS landedAt`;
 
-export type LaneRecord = Omit<WorkLane, "git">;
+export type LaneRecord = Omit<WorkLane, "git" | "integrationAhead">;
 
-export function addLane(l: Omit<LaneRecord, "id" | "state" | "createdAt">): LaneRecord {
+export function addLane(l: Omit<LaneRecord, "id" | "state" | "note" | "createdAt" | "landedAt">): LaneRecord {
   const createdAt = new Date().toISOString();
   const { lastInsertRowid } = open()
     .prepare("INSERT INTO lanes (ticket, repo, lane, mode, base, branch, worktree, integration_branch, integration_worktree, session_id, goal, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
     .run(l.ticket, l.repo, l.lane, l.mode, l.base, l.branch, l.worktree, l.integrationBranch, l.integrationWorktree, l.sessionId, l.goal, createdAt);
-  return { ...l, id: Number(lastInsertRowid), state: "working", createdAt };
+  return { ...l, id: Number(lastInsertRowid), state: "working", note: null, createdAt, landedAt: null };
 }
 
 /** Lanes that are not removed, by ticket key, oldest first. */
@@ -458,8 +461,11 @@ export function getLane(id: number): LaneRecord | null {
   return (open().prepare(`SELECT ${LANE_COLUMNS} FROM lanes WHERE id = ?`).get(id) as unknown as LaneRecord | undefined) ?? null;
 }
 
-export function setLaneState(id: number, state: LaneRecord["state"]): void {
-  open().prepare("UPDATE lanes SET state = ? WHERE id = ?").run(state, id);
+/** A land that goes in also stamps landed_at. */
+export function setLaneState(id: number, state: LaneRecord["state"], note: string | null = null): void {
+  open()
+    .prepare("UPDATE lanes SET state = ?, note = ?, landed_at = CASE WHEN ? = 'landed' THEN ? ELSE landed_at END WHERE id = ?")
+    .run(state, note, state, new Date().toISOString(), id);
 }
 
 // ---- PR feedback: what Piper marked addressed on the PR panel -------------------------

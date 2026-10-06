@@ -257,6 +257,7 @@ const server = createServer(async (req, res) => {
     if (await sdlcRoute.handle(req, res, url, broadcast)) return;
     // The dashboard's PRs carry the tickets that cross-linking gave them.
     if (await reviewRoute.handle(req, res, url, { prs: async () => (await dashboard(false)).prs, onChange: broadcast })) return;
+    if (await lanesRoute.handle(req, res, url, { context: ticketContext, onChange: broadcast })) return;
     if (await loginRoute.handle(req, res, url)) return;
     if (await slackRoute.handle(req, res, url)) return;
     if (url.pathname === "/api/dashboard") {
