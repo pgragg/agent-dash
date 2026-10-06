@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { basisOf, requestConversationSummaries, runsToDraft, summariesFor } from "../server/conversationSummaries.ts";
 import * as db from "../server/summaries/db.ts";
-import { gistPrompt, needsNothing, parseGist } from "../shared/conversationSummary.ts";
+import { gistPrompt, needsNothing, parseGist, waitsOnReview } from "../shared/conversationSummary.ts";
 import type { Run } from "../shared/types.ts";
 import { run } from "./helpers.ts";
 
@@ -19,6 +19,15 @@ test("the model's three lines are parsed; a reply without one of them is refused
   assert.equal(needsNothing("None now"), true);
   assert.equal(needsNothing("Approve the merge of PR 12"), false);
   assert.match(gistPrompt("awaiting_input", "USER: hi"), /waits for Piper[\s\S]*<conversation>\nUSER: hi\n<\/conversation>/);
+});
+
+test("the prompt's review marker is told apart from a need of Piper's own", () => {
+  assert.match(gistPrompt("awaiting_input", ""), /NEEDS: Waiting on review: <the PR>/);
+  assert.equal(waitsOnReview("Waiting on review: PR 12"), true);
+  assert.equal(waitsOnReview("waiting on a PR approval"), true);
+  assert.equal(waitsOnReview("Review the diff of PR 12"), false);
+  assert.equal(waitsOnReview("Approve the merge of PR 12"), false);
+  assert.equal(waitsOnReview(null), false);
 });
 
 test("a run is drafted when it has no summary or a newer message; a working run only when it has none", () => {

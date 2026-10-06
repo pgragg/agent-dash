@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
-import { gistPrompt, parseGist, type ConversationGist } from "../shared/conversationSummary.ts";
+import { GIST_VERSION, gistPrompt, parseGist, type ConversationGist } from "../shared/conversationSummary.ts";
 import type { ConversationSummary, Run } from "../shared/types.ts";
 import { digestSession } from "./sources/sessions.ts";
 import * as db from "./summaries/db.ts";
@@ -25,7 +25,7 @@ const DIGEST_CHARS = 16_000;
 export function basisOf(r: Run): string {
   const hash = createHash("sha1").update(r.lastMessage).digest("hex").slice(0, 12);
   // A draft made while the agent worked cannot say what it needs once it stops.
-  return `${r.userMessageCount}:${hash}:${r.status === "finished" ? "end" : r.status === "working" ? "work" : "live"}`;
+  return `v${GIST_VERSION}:${r.userMessageCount}:${hash}:${r.status === "finished" ? "end" : r.status === "working" ? "work" : "live"}`;
 }
 
 /**

@@ -12,7 +12,7 @@ import { countPrs, groupOpenPrs } from "./prs.ts";
 import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, lastSeen, resumeCommand, runTitle, shortDate, stamp, useDashboard, useFlash, useLook, useNow, usePageFocus, useWaitNotifications } from "./lib.tsx";
 import { Composer, LivePanel } from "./liveControl.tsx";
 import { needStep } from "./needs.ts";
-import { agentFinished, isNewSince, readySummary, runsOf, summaryText } from "./notify.ts";
+import { agentFinished, agentWaitsOnReview, isNewSince, readySummary, runsOf, summaryText } from "./notify.ts";
 import { needsNothing } from "../../shared/conversationSummary.ts";
 import { href, humanAge, parseHash, resolveBoardRef, type Route } from "./routes.ts";
 import { FixLogin } from "./fixLogin.tsx";
@@ -64,6 +64,8 @@ interface Item extends AttentionItem {
   gist: string | null;
   /** The agent stopped, and its summary says it needs nothing from you. */
   finished: boolean;
+  /** The agent stopped, and its only ask is that a reviewer approves its PR. */
+  waitsOnReview: boolean;
 }
 
 const KIND: Record<AttentionKind, { title: string; tone: "waiting" | "working" | "bad" | "warn" | "good" | "muted" }> = {
@@ -95,9 +97,11 @@ const SHORT: Record<AttentionKind, string> = {
 };
 
 const FINISHED = { title: "Agent finished", tone: "good", short: "finished" } as const;
+const WAITS_ON_REVIEW = { title: "Agent waits on a PR review", tone: "working", short: "review" } as const;
 
 /** How a signal shows: "Agent finished" for an agent that needs nothing, else its kind. */
 function look(a: Item): { title: string; tone: string; short: string } {
+  if (a.waitsOnReview) return WAITS_ON_REVIEW;
   return a.finished ? FINISHED : { ...KIND[a.kind], short: SHORT[a.kind] };
 }
 
@@ -117,11 +121,15 @@ function buildSubjects(d: Dashboard): Map<string, Subject> {
     const summary = agent && a.sessionId ? d.conversationSummaries[a.sessionId] : undefined;
     const run = runs.get(a.sessionId ?? "");
     const finished = a.kind === "awaiting_input" && agentFinished(run, summary);
+    // The reviewer has the next move, so the stop waits on others, as a PR out for review does.
+    const review = a.kind === "awaiting_input" && agentWaitsOnReview(run, summary);
+    const name = run && `“${run.name ?? run.firstPrompt.slice(0, 60)}”`;
     // The server's reason says "is waiting for you", which a finished agent is not.
-    const reason = finished && run ? `“${run.name ?? run.firstPrompt.slice(0, 60)}” finished ${age(run.statusSince, Date.parse(d.generatedAt))} ago` : a.reason;
-    s.items.push({ ...a, reason, status: finished ? "finished" : a.status, gist: summaryText(summary), finished });
+    const reason = review && name ? `${name} waits on a PR review` : finished && name ? `${name} finished ${age(run.statusSince, Date.parse(d.generatedAt))} ago` : a.reason;
+    const status = review ? "waits on review" : finished ? "finished" : a.status;
+    s.items.push({ ...a, info: a.info || review, reason, status, gist: summaryText(summary), finished, waitsOnReview: review });
   }
-  for (const s of out.values()) s.fingerprint = s.items.map((a) => `${a.kind}${a.finished ? ":finished" : ""}@${a.updatedAt}`).join("|");
+  for (const s of out.values()) s.fingerprint = s.items.map((a) => `${a.kind}${a.finished ? ":finished" : ""}${a.waitsOnReview ? ":review" : ""}@${a.updatedAt}`).join("|");
   return out;
 }
 

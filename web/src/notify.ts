@@ -1,4 +1,4 @@
-import { needsNothing } from "../../shared/conversationSummary.ts";
+import { needsNothing, waitsOnReview } from "../../shared/conversationSummary.ts";
 import type { AttentionItem, AttentionKind, ConversationSummary, Dashboard, Run, RunStatus } from "../../shared/types.ts";
 
 /**
@@ -63,10 +63,17 @@ export function agentFinished(run: Run | undefined, s: ConversationSummary | und
   return !!run && !!ready && run.status === "awaiting_input" && !run.dialog && !run.askedQuestion && needsNothing(ready.needs);
 }
 
+/** The agent's only ask is that a reviewer approves its PR, so the next move is the reviewer's. */
+export function agentWaitsOnReview(run: Run | undefined, s: ConversationSummary | undefined): boolean {
+  const ready = readySummary(s);
+  return !!run && !!ready && run.status === "awaiting_input" && !run.dialog && waitsOnReview(ready.needs);
+}
+
 /** The need goes on its own line, so a notification shows it apart. */
 export function summaryText(s: ConversationSummary | undefined): string | null {
   const ready = readySummary(s);
   if (!ready) return null;
+  if (waitsOnReview(ready.needs)) return `${ready.latest}\n${ready.needs}`;
   return needsNothing(ready.needs) ? ready.latest : `${ready.latest}\nNeeds from you: ${ready.needs}`;
 }
 
@@ -80,7 +87,7 @@ export interface Pending {
   heldAt: number;
 }
 
-/** A run that moved on drops its notification: that stop no longer needs you. */
+/** A run that moved on, or that only waits on a PR review, drops its notification: that stop does not need you. */
 export function releasePending(pending: Map<string, Pending>, runs: Run[], summaries: Record<string, ConversationSummary>, now: number, waitMs = SUMMARY_WAIT_MS): { send: Run[]; keep: Map<string, Pending> } {
   const byId = new Map(runs.map((r) => [r.sessionId, r]));
   const send: Run[] = [];
@@ -89,6 +96,7 @@ export function releasePending(pending: Map<string, Pending>, runs: Run[], summa
     const r = byId.get(id);
     if (!r || r.status !== "awaiting_input" || r.statusSince !== p.since) continue;
     const s = summaries[id];
+    if (agentWaitsOnReview(r, s)) continue;
     // A run with no message never gets a summary, so it does not wait.
     if (!r.lastMessage || readySummary(s) || (s?.status === "failed" && !s.stale) || now - p.heldAt >= waitMs) send.push(r);
     else keep.set(id, p);
