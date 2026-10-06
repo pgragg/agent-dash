@@ -7,7 +7,7 @@ It answers one question: **what do I look at next?**
 
 It reads your pi session logs, your Jira tickets, and your GitHub PRs. You can act on the answer without leaving the page.
 
-The dashboard writes one thing to Jira itself: a due date that you set on the [Ticket](#the-ticket-section) section. It posts one thing to Slack as you: a [review request](#prs) when you click its **Post to Slack**. It never writes to GitHub. The other things it sends go to your own pi sessions: a reply that you type, a Stop, and the answer to an extension dialog. A verb button (a [PR verb](#pr-verbs), or **Move to** on the [Ticket](#the-ticket-section) section) starts an agent on one small task, and that agent does the write: the click is your approval.
+The dashboard writes two things to Jira itself: a due date and a status move, from the [Ticket](#the-ticket-section) section or a drafted next step. It posts one thing to Slack as you: a [review request](#prs) when you click its **Post to Slack**. It never writes to GitHub. The other things it sends go to your own pi sessions: a reply that you type, a Stop, and the answer to an extension dialog. A [PR verb](#pr-verbs) button starts an agent on one small task, and that agent does the write: the click is your approval.
 
 ## Run it
 
@@ -102,7 +102,7 @@ The **Ticket** section under the workspace header is closed at first. A click or
 
 The section also has two **Jira verbs**. Your click is the approval of that one change.
 
-- **Move to**: the statuses that Jira's transitions list offers now. The click starts a new agent (`POST /api/agents?ticket=KEY`, as **Start a new agent** does) with a first message from `shared/jiraVerbs.ts`, which tells the agent to use the `jira-tickets` skill and to make that one change and nothing else. A status transition needs no further approval, so the agent applies it.
+- **Move to**: the statuses that Jira's transitions list offers now, plus **In Progress (through To Do)** when the ticket is in Backlog, because FSDK's Backlog cannot reach In Progress in one transition (`moveTargets` in `shared/jiraVerbs.ts`). The click moves the ticket at once, with no agent: `POST /api/ticket/move?key=KEY` (body `{to, from}`, with the `X-Agent-Dash` guard). `from` is the status that the page showed. If Jira holds another one now, or cannot reach `to`, the server changes nothing and answers 409. Each transition sends its screen fields, as the `jira-tickets` skill does: FSDK screens reject an empty field that Jira calls optional, so the server echoes each value the ticket holds and fills an empty date (the due date two weeks out, any other date with today). A move into an in-progress status sets the default due date first when the ticket has none. The board shows the new status at once.
 - **Set due date**: the date picker starts two weeks out. **Set** changes the due date in Jira at once, with no agent: `POST /api/ticket/due?key=KEY` (body `{date, from}`, with the `X-Agent-Dash` guard) reads the ticket's due date, and makes one `PUT /rest/api/3/issue/KEY` with only `duedate`. `from` is the due date that the page showed. If Jira holds another one now, the server changes nothing and answers 409, because your click did not approve replacing a date that you did not see. The board shows the new date at once, without a new Jira search.
 
 An **Overdue** or **Due soon** line in the "why" list has a **New due date…** button that does the same as **Set due date**.
@@ -404,7 +404,7 @@ The **Next steps** card on a ticket's workspace starts a headless pi run (**Draf
 | probably stuck · Start again | In progress for more than 30 minutes. Start again stops the old run and starts a new one. |
 | The last draft failed · Retry | The run ended without a summary. |
 
-When a summary is saved, the server splits its **Next steps** list into one `next_steps` row per step (`shared/nextSteps.ts`). Each step on the card has a **Start agent** button. It starts a new agent exactly as **Start a new agent** does (headless; ⌥-click opens it in iTerm), with the same context and folder, and with a first message that the server writes from the stored step: "Do this next step on KEY…" and the step text.
+When a summary is saved, the server splits its **Next steps** list into one `next_steps` row per step (`shared/nextSteps.ts`). Each step on the card has a **Start agent** button, except a step that only moves the ticket in Jira, such as "Piper moves the ticket to In Review" (`moveStepTarget`): it gets the **Move to** button instead, and a step whose status the ticket already has says so. The drafting prompt words a Jira move as a step of its own, so this match works. It starts a new agent exactly as **Start a new agent** does (headless; ⌥-click opens it in iTerm), with the same context and folder, and with a first message that the server writes from the stored step: "Do this next step on KEY…" and the step text.
 
 If a run exits without saving, the server takes its last reply (pi -p prints it) as the summary. If there is no reply, it marks the row failed. The server also stops a run after 30 minutes. Runs are detached and write to log files, so a server restart does not stop them. On the next page load, the server checks rows whose pid is gone.
 

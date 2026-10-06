@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type MoveTarget, moveStepTarget, moveTargets } from "../../shared/jiraVerbs.ts";
 import { splitSummary } from "../../shared/nextSteps.ts";
 import { prRef } from "../../shared/refs.ts";
 import { READ_FEEDBACK, REVIEW_AND_MERGE } from "../../shared/prVerbs.ts";
@@ -25,7 +26,7 @@ import { groupWhy, statusWord, UPDATES_SHOWN } from "./whyGroups.ts";
 import { Chat, useLoad } from "./chat.tsx";
 import { ConversationGist } from "./gist.tsx";
 import { SlackQuotes } from "./slackQuotes.tsx";
-import { DueDateVerb, TicketPanel } from "./ticketPanel.tsx";
+import { DueDateVerb, MoveButton, TicketPanel, useTicketDetail } from "./ticketPanel.tsx";
 import { DiagramCards, DiagramsView, DiagramView } from "./diagrams.tsx";
 import { SessionScope } from "./mermaid.tsx";
 import { type BoardMode, kanbanColumns, type Searchable, searchCards, stageOf, useBoardMode } from "./kanban.ts";
@@ -427,8 +428,11 @@ function KanbanBoard({ order, dim, ranks, selected, onSelect, data, now, until, 
 
 const STALE_MS = 30 * 60_000;
 
-/** One drafted step, with a button that starts a pi agent on it, with the same context as "Start a new agent". */
-function StepRow({ ticket, step, cwd, onError }: { ticket: string; step: NextStep; cwd: string; onError: (m: string | null) => void }) {
+/**
+ * One drafted step, with a button that starts a pi agent on it, with the same context as "Start a
+ * new agent". A step that only moves the ticket in Jira gets a Move button: that needs no agent.
+ */
+function StepRow({ ticket, step, cwd, move, onError }: { ticket: string; step: NextStep; cwd: string; move: { target: MoveTarget; from: string; onMoved: () => void } | null; onError: (m: string | null) => void }) {
   const [state, setState] = useState<"idle" | "starting" | "started">("idle");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const start = async (terminal: boolean) => {
@@ -445,14 +449,21 @@ function StepRow({ ticket, step, cwd, onError }: { ticket: string; step: NextSte
   return (
     <li className="step" id={`step:${step.id}`}>
       <span className="step-body">{inline(step.body)}</span>
-      {sessionId ? <a className="btn ghost small" href={conversationHash(sessionId)}>Started ✓ Open</a> : <button className="btn ghost small" onClick={(e) => start(e.altKey)} disabled={state !== "idle" || !cwd.trim()} title={`Start a pi agent in ${cwd} on this step, with this page as context. ⌥-click opens it in a new iTerm tab.`}>
+      {move && move.target.to === move.from ? <span className="tag tone-good">already {move.from}</span> : move ? <MoveButton ticket={ticket} target={move.target} from={move.from} onError={onError} onMoved={move.onMoved} /> : sessionId ? <a className="btn ghost small" href={conversationHash(sessionId)}>Started ✓ Open</a> : <button className="btn ghost small" onClick={(e) => start(e.altKey)} disabled={state !== "idle" || !cwd.trim()} title={`Start a pi agent in ${cwd} on this step, with this page as context. ⌥-click opens it in a new iTerm tab.`}>
         {state === "starting" ? "Starting…" : state === "started" ? "Started ✓" : "Start agent"}
       </button>}
     </li>
   );
 }
 
-function SummaryBody({ ticket, summary, cwd, onError }: { ticket: string; summary: TicketSummary; cwd: string; onError: (m: string | null) => void }) {
+function SummaryBody({ ticket, jira, summary, cwd, onError }: { ticket: string; jira: boolean; summary: TicketSummary; cwd: string; onError: (m: string | null) => void }) {
+  // Read the transitions only when a step may be a move.
+  const { detail, reload } = useTicketDetail(ticket, jira && summary.steps.some((st) => /\bmov/i.test(st.body)));
+  const moveFor = (st: NextStep) => {
+    // The current status counts too, so a step that is out of date says so instead of starting an agent.
+    const target = detail && moveStepTarget(st.body, ticket, [...moveTargets(detail.transitions, detail.status), { to: detail.status, via: null }]);
+    return target ? { target, from: detail.status, onMoved: reload } : null;
+  };
   if (!summary.steps.length) return <Markdown text={summary.summary ?? ""} />;
   const parts = splitSummary(summary.summary ?? "");
   return (
@@ -460,7 +471,7 @@ function SummaryBody({ ticket, summary, cwd, onError }: { ticket: string; summar
       <Markdown text={parts.before} />
       <ol className="steps">
         {summary.steps.map((st) => (
-          <StepRow key={st.id} ticket={ticket} step={st} cwd={cwd} onError={onError} />
+          <StepRow key={st.id} ticket={ticket} step={st} cwd={cwd} move={moveFor(st)} onError={onError} />
         ))}
       </ol>
       {parts.after && <Markdown text={parts.after} />}
@@ -528,7 +539,7 @@ function NextSteps({ s, state, notes, now, cwd, onError }: { s: Subject; state: 
       )}
       {shown?.summary ? (
         <>
-          <SummaryBody ticket={key} summary={shown} cwd={cwd} onError={onError} />
+          <SummaryBody ticket={key} jira={!s.ticket!.ticket.file} summary={shown} cwd={cwd} onError={onError} />
           <SlackQuotes summaryId={shown.id} text={shown.summary} />
         </>
       ) : (
@@ -1215,7 +1226,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
         {s.items.length > 0 && <WhyList s={s} data={data} now={now} cwd={cwd} lastLook={lastLook} onError={setError} />}
       </header>
 
-      {t && <TicketPanel key={t.key} ticket={t} cwd={cwd} onError={setError} />}
+      {t && <TicketPanel key={t.key} ticket={t} onError={setError} />}
 
       {error && (
         <div className="toast" role="alert">

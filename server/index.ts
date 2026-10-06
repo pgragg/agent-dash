@@ -170,11 +170,11 @@ async function dashboard(force: boolean) {
   return d;
 }
 
-/** Show a due date the dash just set at once, without a new Jira search. */
-function onDueDate(key: string, date: string): void {
-  for (const t of [...myTickets.value, ...others.values()]) if (t.key === key) t.dueDate = date;
+/** Show a Jira change the dash just made at once, without a new Jira search. */
+const onTicketChange: ticketRoute.OnTicketChange = (key, patch) => {
+  for (const t of [...myTickets.value, ...others.values()]) if (t.key === key) Object.assign(t, patch);
   broadcast();
-}
+};
 
 /** What a new agent on the ticket starts with, as the ticket page's Start agent gives it. */
 async function ticketContext(key: string): Promise<string | null> {
@@ -249,7 +249,7 @@ const server = createServer(async (req, res) => {
     if (await resumeRoute.handle(req, res, url, sessions)) return;
     if (await liveControl.handle(req, res, url)) return;
     if (await prRoute.handle(req, res, url, broadcast)) return;
-    if (await ticketRoute.handle(req, res, url, onDueDate)) return;
+    if (await ticketRoute.handle(req, res, url, onTicketChange)) return;
     if (await diagramRoute.handle(req, res, url, sessions, broadcast)) return;
     if (await smoketestPlanRoute.handle(req, res, url, { sessions, context: ticketContext, script: SDLC_SCRIPT, onChange: broadcast })) return;
     if (await sdlcRoute.handle(req, res, url, broadcast)) return;
