@@ -5,7 +5,6 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, normalize } from "node:path";
 import type { Dashboard, PullRequest, SourceHealth, Ticket } from "../shared/types.ts";
-import { actionCandidates, keepWhenDown, toActions } from "./actions.ts";
 import { config } from "./config.ts";
 import { startConversation } from "./conversations.ts";
 import { recordExit, wroteRecently } from "./exits.ts";
@@ -153,8 +152,6 @@ async function dashboard(force: boolean) {
     threads: summaryDb.currentThreadStatuses(),
     jiraServer: config.jira.server,
   });
-  const candidates = actionCandidates(d);
-  d.actions = toActions(candidates, summaryDb.syncActions(candidates, keepWhenDown(d.sources), new Date(now)), d);
 
   // A recent run can take its ticket from its PR; old logs cannot.
   const runTicket = new Map<string, string>();

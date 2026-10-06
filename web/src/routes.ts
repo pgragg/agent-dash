@@ -10,19 +10,17 @@ import type { Dashboard } from "../../shared/types.ts";
  * | `#/step:ID`       | A drafted next step, on its ticket                |
  * | `#/note:ID`       | A note, on its ticket                             |
  * | `#/pr:OWNER/REPO/N` | The PR panel (a view under PRs)                 |
- * | `#/a:ID`          | An action on the Actions view                     |
  * | `#/needs`         | The list behind "N notifications"                 |
  * | `#/c:SESSION`     | A conversation's page                             |
  * | `#/d:ID`          | A diagram's page                                  |
  * | `#/diagrams`      | Every diagram                                     |
  * | `#/worktrees`     | Every git worktree, with Clean up                 |
  *
- * On the page, the element of a run, step, note, PR, or action has its ref as its DOM id.
+ * On the page, the element of a run, step, note, or PR has its ref as its DOM id.
  */
 
 export type Route =
   | { view: "board"; ref: string | null }
-  | { view: "actions"; action: string | null }
   | { view: "needs" }
   | { view: "prs"; pr: string | null }
   | { view: "history" }
@@ -33,8 +31,6 @@ export type Route =
 
 export function parseHash(hash: string): Route {
   const path = decodeURIComponent(hash.replace(/^#\/?/, ""));
-  if (path === "actions") return { view: "actions", action: null };
-  if (/^a:\d+$/.test(path)) return { view: "actions", action: path };
   if (path === "needs") return { view: "needs" };
   if (path === "prs") return { view: "prs", pr: null };
   if (path.startsWith("pr:")) return { view: "prs", pr: path };

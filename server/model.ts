@@ -224,7 +224,6 @@ export function buildDashboard(input: ModelInput): Dashboard {
     snoozedUntil: input.snoozedUntil ?? {},
     starred: input.starred ?? [],
     // Filled by the server, which keeps each action's row in SQLite.
-    actions: [],
     diagrams: [],
     sdlcEvents: {},
     reviewDrafts: {},
