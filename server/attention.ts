@@ -29,21 +29,22 @@ function runItems(runs: Run[], now: number): Draft[] {
   for (const run of runs) {
     const waited = now - Date.parse(run.statusSince);
     const label = run.name ?? run.firstPrompt.slice(0, 60);
-    const base = { ticketKey: run.tickets[0] ?? null, sessionId: run.sessionId, since: run.statusSince, updatedAt: run.lastActivityAt };
+    const base = { ticketKey: run.tickets[0] ?? null, sessionId: run.sessionId, since: run.statusSince, updatedAt: run.lastActivityAt, name: run.name ?? run.firstPrompt };
     if (run.status === "awaiting_input" && run.endedInError) {
-      items.push({ ...base, kind: "run_error", score: 110, reason: `“${label}” stopped on an API error ${ago(waited)} ago — retry it` });
+      items.push({ ...base, kind: "run_error", score: 110, status: "API error", reason: `“${label}” stopped on an API error ${ago(waited)} ago — retry it` });
     } else if (run.status === "awaiting_input") {
       if (waited > DAY) {
         // A tab idle this long is more likely forgotten than blocking; still worth closing.
-        items.push({ ...base, kind: "awaiting_input", score: 35, reason: `“${label}” has waited ${ago(waited)} — answer it or close the tab` });
+        items.push({ ...base, kind: "awaiting_input", score: 35, status: `waiting ${ago(waited)}`, reason: `“${label}” has waited ${ago(waited)} — answer it or close the tab` });
         continue;
       }
       let score = 100 + Math.min(waited / MIN, 240) / 4 + (run.askedQuestion ? 30 : 0);
       if (run.statusSource === "heuristic") score *= 0.6; // The log cannot prove the tab is still open.
       const what = run.askedQuestion ? "asked you a question" : "is waiting for you";
-      items.push({ ...base, kind: "awaiting_input", score, reason: `“${label}” ${what} (${ago(waited)})${run.statusSource === "heuristic" ? " · guess" : ""}` });
+      const status = `${run.askedQuestion ? "asked a question" : `waiting ${ago(waited)}`}${run.statusSource === "heuristic" ? " · guess" : ""}`;
+      items.push({ ...base, kind: "awaiting_input", score, status, reason: `“${label}” ${what} (${ago(waited)})${run.statusSource === "heuristic" ? " · guess" : ""}` });
     } else if (run.status === "finished" && run.endedInError && waited < DAY) {
-      items.push({ ...base, kind: "run_error", score: 90, reason: `“${label}” died on an API error ${ago(waited)} ago` });
+      items.push({ ...base, kind: "run_error", score: 90, status: "API error", reason: `“${label}” died on an API error ${ago(waited)} ago` });
     }
   }
   return items;
@@ -56,25 +57,25 @@ function prItems(prs: PullRequest[], now: number): Draft[] {
   const items: Draft[] = [];
   for (const pr of prs) {
     if (pr.state !== "open") continue;
-    const base = { ticketKey: pr.tickets[0] ?? null, prUrl: pr.url, since: pr.updatedAt, updatedAt: pr.updatedAt };
     const name = `${pr.repo.split("/")[1]}#${pr.number}${pr.isDraft ? " (draft)" : ""}`;
+    const base = { ticketKey: pr.tickets[0] ?? null, prUrl: pr.url, since: pr.updatedAt, updatedAt: pr.updatedAt, name, title: pr.title };
     // A draft is not asking anyone for anything yet, so its problems can wait.
     const weight = pr.isDraft ? 0.5 : 1;
-    if (pr.reviewDecision === "CHANGES_REQUESTED") items.push({ ...base, kind: "changes_requested", score: 95 * weight, reason: `${name}: a reviewer asked for changes` });
-    if (pr.checks === "failure") items.push({ ...base, kind: "ci_failing", score: 85 * weight, reason: `${name}: CI is red${pr.failedChecks?.length ? `: ${checkList(pr.failedChecks)}` : ""}` });
-    if (pr.mergeable === "CONFLICTING") items.push({ ...base, kind: "merge_conflict", score: 80 * weight, reason: `${name}: merge conflict` });
+    if (pr.reviewDecision === "CHANGES_REQUESTED") items.push({ ...base, kind: "changes_requested", score: 95 * weight, status: "changes requested", reason: `${name}: a reviewer asked for changes` });
+    if (pr.checks === "failure") items.push({ ...base, kind: "ci_failing", score: 85 * weight, status: "CI red", reason: `${name}: CI is red${pr.failedChecks?.length ? `: ${checkList(pr.failedChecks)}` : ""}` });
+    if (pr.mergeable === "CONFLICTING") items.push({ ...base, kind: "merge_conflict", score: 80 * weight, status: "conflict", reason: `${name}: merge conflict` });
     if (pr.reviewDecision === "APPROVED" && !pr.isDraft && pr.checks !== "failure" && pr.checks !== "pending" && pr.mergeable !== "CONFLICTING") {
-      items.push({ ...base, kind: "ready_to_merge", score: 70, reason: `${name}: approved and green — merge it` });
+      items.push({ ...base, kind: "ready_to_merge", score: 70, status: "approved", reason: `${name}: approved and green — merge it` });
     } else if (pr.reviewDecision === null && !pr.isDraft && pr.mergeStateStatus === "CLEAN") {
       // The repo requires no review, so a green PR waits only for me.
-      items.push({ ...base, kind: "ready_to_merge", score: 70, reason: `${name}: needs no review and is green — merge it` });
+      items.push({ ...base, kind: "ready_to_merge", score: 70, status: "green", reason: `${name}: needs no review and is green — merge it` });
     }
     // Healthy and waiting for a reviewer: the ball is with them, until it has sat too long.
     if (pr.reviewDecision === "REVIEW_REQUIRED" && !pr.isDraft && pr.checks !== "failure" && pr.mergeable !== "CONFLICTING") {
       const quiet = now - Date.parse(pr.updatedAt);
       const ci = pr.checks === "success" ? ", CI green" : pr.checks === "pending" ? ", CI running" : "";
-      if (quiet > REVIEW_NUDGE_MS) items.push({ ...base, kind: "in_review", score: 45, reason: `${name}: no review activity for ${ago(quiet)} — nudge the reviewer` });
-      else items.push({ ...base, kind: "in_review", score: 15, info: true, reason: `${name} is out for review${ci} (last activity ${ago(quiet)} ago)` });
+      if (quiet > REVIEW_NUDGE_MS) items.push({ ...base, kind: "in_review", score: 45, status: `no review ${ago(quiet)}`, reason: `${name}: no review activity for ${ago(quiet)} — nudge the reviewer` });
+      else items.push({ ...base, kind: "in_review", score: 15, info: true, status: "in review", reason: `${name} is out for review${ci} (last activity ${ago(quiet)} ago)` });
     }
   }
   return items;
@@ -86,12 +87,12 @@ function ticketItems(tickets: Ticket[], runs: Run[], prs: PullRequest[], now: nu
   for (const t of tickets) {
     if (!t.assignedToMe || t.statusCategory === "done") continue;
     const parked = PARKED.test(t.status) ? -25 : 0;
-    const base = { ticketKey: t.key, since: t.updatedAt, updatedAt: t.updatedAt };
+    const base = { ticketKey: t.key, since: t.updatedAt, updatedAt: t.updatedAt, name: t.key };
     if (t.dueDate && t.dueDate < today) {
       const late = Math.round((Date.parse(today) - Date.parse(t.dueDate)) / DAY);
-      items.push({ ...base, kind: "overdue", score: 60 + Math.min(late, 20) + priorityBoost(t.priority) + parked, reason: `${t.key} was due ${late}d ago (${t.status})` });
+      items.push({ ...base, kind: "overdue", score: 60 + Math.min(late, 20) + priorityBoost(t.priority) + parked, status: `${late}d late`, reason: `${t.key} was due ${late}d ago (${t.status})` });
     } else if (t.dueDate && Date.parse(t.dueDate) - Date.parse(today) <= 2 * DAY) {
-      items.push({ ...base, kind: "due_soon", score: 50 + priorityBoost(t.priority) + parked, reason: `${t.key} is due ${t.dueDate === today ? "today" : t.dueDate}` });
+      items.push({ ...base, kind: "due_soon", score: 50 + priorityBoost(t.priority) + parked, status: `due ${t.dueDate === today ? "today" : t.dueDate}`, reason: `${t.key} is due ${t.dueDate === today ? "today" : t.dueDate}` });
     }
     if (t.statusCategory === "indeterminate" && !parked) {
       const mine = runs.filter((r) => r.tickets.includes(t.key));
@@ -99,7 +100,7 @@ function ticketItems(tickets: Ticket[], runs: Run[], prs: PullRequest[], now: nu
       const openPr = prs.some((p) => p.state === "open" && p.tickets.includes(t.key));
       if (!openPr && now - lastRun > 3 * DAY) {
         const when = lastRun ? `no agent run for ${ago(now - lastRun)}` : "no agent run yet";
-        items.push({ ...base, kind: "stalled", score: 25 + priorityBoost(t.priority), reason: `${t.key} is ${t.status} with ${when} and no open PR` });
+        items.push({ ...base, kind: "stalled", score: 25 + priorityBoost(t.priority), status: "stalled", reason: `${t.key} is ${t.status} with ${when} and no open PR` });
       }
     }
   }
