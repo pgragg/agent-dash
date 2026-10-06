@@ -3,13 +3,13 @@
  * Kept free of Node and React, so the server, the page and the tests share one copy.
  */
 
-/** The Fern AWS migration team asks for PR reviews here. */
-export const REVIEW_CHANNEL = { id: "C0BFE2ABFA9", name: "proj-fern-aws-migration-devs" };
+import { team } from "./team.ts";
 
-/** Piper's own repos: no one else reviews them, so a Slack review request has no reader. */
-const NO_REVIEW_REPOS = new Set(["pgragg/agent-dash"]);
+/** The team's review channel from the settings, or null when review requests are off. */
+export const reviewChannel = (): { id: string; name: string } | null => (team.reviewChannelId ? { id: team.reviewChannelId, name: team.reviewChannelName || team.reviewChannelId } : null);
 
-export const wantsReviewRequest = (pr: { repo: string; state: string }): boolean => pr.state === "open" && !NO_REVIEW_REPOS.has(pr.repo);
+/** A repo in noReviewRepos has no reviewer, so a Slack review request has no reader. */
+export const wantsReviewRequest = (pr: { repo: string; state: string }): boolean => !!team.reviewChannelId && pr.state === "open" && !team.noReviewRepos.includes(pr.repo);
 
 const MAX_SUMMARY = 160;
 

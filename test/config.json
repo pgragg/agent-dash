@@ -1,7 +1,12 @@
 {
+  "userName": "Piper",
   "jiraServer": "https://example.atlassian.net",
   "jiraLogin": "test@example.com",
   "jiraExcludeProjects": ["FSM"],
   "ticketProjects": ["FSDK", "EFSUP", "AD"],
-  "ignoreTickets": ["FSDK-1"]
+  "ignoreTickets": ["FSDK-1"],
+  "reviewChannelId": "C0BFE2ABFA9",
+  "reviewChannelName": "proj-fern-aws-migration-devs",
+  "noReviewRepos": ["pgragg/agent-dash"],
+  "environments": ["localhost", "fern_dev", "fern_prod", "postman_beta", "postman_prod"]
 }

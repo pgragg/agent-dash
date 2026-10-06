@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { requestReviewDrafts } from "../server/reviewDrafts.ts";
 import { handle } from "../server/routes/reviewRequests.ts";
 import * as db from "../server/summaries/db.ts";
-import { cleanSummary, draftPrompt, fallbackMessage, REVIEW_CHANNEL, reviewMessage } from "../shared/reviewRequest.ts";
+import { cleanSummary, draftPrompt, fallbackMessage, reviewChannel, reviewMessage } from "../shared/reviewRequest.ts";
 import type { PullRequest } from "../shared/types.ts";
 import { pr } from "./helpers.ts";
 
@@ -94,9 +94,9 @@ test("Post sends the text to the review channel as Piper, then records a review_
   const ok = call("/api/review-requests", { prUrl: URL1, text: `  ${text} ` });
   await handle(ok.req, ok.res, ok.url, deps);
   assert.equal(ok.out.code, 201);
-  assert.deepEqual(posted, [[REVIEW_CHANNEL.id, text]]);
+  assert.deepEqual(posted, [[reviewChannel()!.id, text]]);
   const e = JSON.parse(ok.out.body);
-  assert.deepEqual([e.eventType, e.tickets, e.prUrl, e.message, e.channel], ["review_request", ["FSDK-2101"], URL1, text, REVIEW_CHANNEL.id]);
+  assert.deepEqual([e.eventType, e.tickets, e.prUrl, e.message, e.channel], ["review_request", ["FSDK-2101"], URL1, text, reviewChannel()!.id]);
   assert.match(e.messageUrl, /p1791213047219629$/);
   assert.equal(changes, 1);
   assert.equal(db.sdlcEventsByTicket()["FSDK-2101"][0].id, e.id);

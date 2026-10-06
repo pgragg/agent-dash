@@ -4,6 +4,7 @@
  * free of Node and React, so the server, the page and the tests share one copy.
  */
 import type { RunStatus } from "./types.ts";
+import { User, user } from "./team.ts";
 
 export interface ConversationGist {
   about: string;
@@ -11,22 +12,20 @@ export interface ConversationGist {
   needs: string;
 }
 
-const STATUS_TEXT: Record<RunStatus, string> = {
-  working: "The agent is working now.",
-  awaiting_input: "The agent stopped and waits for Piper.",
-  finished: "The conversation ended.",
-};
+/** A function, not a constant: the user's name comes from the settings after this module loads. */
+const statusText = (status: RunStatus): string =>
+  ({ working: "The agent is working now.", awaiting_input: `The agent stopped and waits for ${user()}.`, finished: "The conversation ended." })[status];
 
 /** The prompt for the cheap model. `digest` is the chat without tool traffic, newest kept. */
 export function gistPrompt(status: RunStatus, digest: string): string {
-  return `Summarise this conversation between Piper (USER) and a coding agent (AGENT) for a card on Piper's dashboard. ${STATUS_TEXT[status]}
+  return `Summarise this conversation between ${user()} (USER) and a coding agent (AGENT) for a card on ${user()}'s dashboard. ${statusText(status)}
 
 Write exactly three lines, in this format, with plain text and no markdown:
 ABOUT: <what the conversation is about, at most 15 words>
 LATEST: <what the agent's latest message says, at most 35 words>
-NEEDS: <what the agent needs from Piper now (an answer, a decision, an approval, a review), at most 25 words; or "Nothing">
+NEEDS: <what the agent needs from ${user()} now (an answer, a decision, an approval, a review), at most 25 words; or "Nothing">
 
-When the only thing left is that another person reviews or approves a PR (Piper only has to get it approved), and the agent asks nothing else, write NEEDS: Waiting on review: <the PR>.
+When the only thing left is that another person reviews or approves a PR (${user()} only has to get it approved), and the agent asks nothing else, write NEEDS: Waiting on review: <the PR>.
 
 Use short sentences and simple words. Name the ticket, PR or system when the conversation names it. Do not invent facts.
 

@@ -5,7 +5,8 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, normalize } from "node:path";
 import type { Dashboard, PullRequest, SourceHealth, Ticket } from "../shared/types.ts";
-import { config, setupNeeded } from "./config.ts";
+import { config, jiraConfigured, setupNeeded } from "./config.ts";
+import { team } from "../shared/team.ts";
 import { startConversation } from "./conversations.ts";
 import { recordExit, wroteRecently } from "./exits.ts";
 import { focusItermSession, piCommand, runInNewItermTab } from "./iterm.ts";
@@ -84,8 +85,8 @@ class Cached<T> {
 }
 
 const sessions = new SessionIndex(config.sessionsDir, config.ticketPattern);
-/** With no Jira server, Jira is off: no requests, and no "Jira down". */
-const JIRA_ON = !!config.jira.server;
+/** With no Jira server or login, Jira is off: no requests, and no "Jira down". */
+const JIRA_ON = jiraConfigured();
 const myTickets = new Cached<Ticket[]>([], JIRA_ON ? fetchMyTickets : async () => []);
 const prs = new Cached<PullWithFeedback[]>([], () => fetchMyPrs(config.recentDays, config.ticketPattern));
 const others = new Map<string, Ticket>();
@@ -181,6 +182,7 @@ async function dashboard(force: boolean) {
   const keepFrom = new Date(now - config.recentDays * 86_400_000).toISOString();
   d.parked = summaryDb.activeParked().filter((p) => p.parkedAt >= keepFrom);
   d.setup = setupNeeded();
+  d.team = team;
   return d;
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { prRef } from "../../shared/refs.ts";
-import { ENV_LABEL, ENVIRONMENTS, isPlanRunning, isPlanStage, isPlanWaiting, isSmoketestRunning, mergePrs, newestPlan, SHARED_ENVS, SMOKETEST_ENV, type SmoketestLane, sdlcProgress, smoketestLanes, type Stage, type StageState } from "../../shared/sdlc.ts";
+import { ENV_LABEL, enabledEnvironments, isPlanRunning, isPlanStage, isPlanWaiting, isSmoketestRunning, mergePrs, newestPlan, sharedEnvs, SMOKETEST_ENV, type SmoketestLane, sdlcProgress, smoketestLanes, type Stage, type StageState } from "../../shared/sdlc.ts";
 import type { PullRequest, Run, SdlcEnvironment, SdlcEvent, SmoketestOutcome, TicketGroup } from "../../shared/types.ts";
 import { conversationHash, launchAgent, type LaunchBody, ResumeHere } from "./agents.tsx";
 import { Chat } from "./chat.tsx";
@@ -389,7 +389,7 @@ function RecordForm({ ticket, onError, onDone }: { ticket: string; onError: (m: 
     <div className="smoke-form">
       <div className="smoke-row">
         <span className="meta">Environment under test</span>
-        {ENVIRONMENTS.map((e) => (
+        {enabledEnvironments().map((e) => (
           <label key={e.id} className="check">
             <input type="checkbox" checked={envs.includes(e.id)} onChange={(ev) => setEnvs(ev.target.checked ? [...envs, e.id] : envs.filter((x) => x !== e.id))} />
             {e.label}
@@ -559,7 +559,7 @@ function PlanSummary({ e, waiting }: { e: SdlcEvent; waiting: boolean }) {
             </details>
           </>
         ) : (
-          <p>None: no state changes on {SHARED_ENVS}.</p>
+          <p>None: no state changes on {sharedEnvs()}.</p>
         )}
       </div>
       <div className="plan-section">

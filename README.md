@@ -97,7 +97,7 @@ The rules are in `web/src/needs.ts`.
 
 Your open PRs, grouped by ticket. A PR links to a ticket as on the board, so a PR with no key in its title or branch takes the ticket of the run that opened it. A PR that names two tickets shows under both. The groups of starred tickets come first. Then the groups with the most urgent PR come first, in the [queue ranking](#queue-ranking) order, and PRs with no ticket come last. Under each PR, the signals that need you (for example "CI is red: lint, test") show with the reason and a [verb button](#pr-verbs). The ticket title opens that ticket on the board. A click on a PR row, here or on the board, opens the [PR panel](#pr-panel); the small `↗` at the end of the row opens GitHub. The CI tag of a red PR names the failing checks. Only PRs updated in the last 14 days show, because the GitHub fetch uses that window. `J`/`K` select a PR, and `↵` opens it.
 
-**Review requests.** Under each PR is a drafted Slack message in the team's format, for example `PR: bind slack token env vars https://github.com/postman-eng/cloud9-parcels-production-deployments/pull/13612`. You can edit it. **Post to Slack** (or `⌘↵` in the message) posts it to #proj-fern-aws-migration-devs as you, and the click is your approval. After Slack takes the message, the server records a `review_request` [SDLC event](#sdlc-progress-and-smoketests) with the PR, the text and the permalink, on the PR's tickets, so the ticket's **Review requested** stage turns done. The PR then shows "Review requested … Open in Slack", and **Post again** opens the draft again. If the post fails, nothing is recorded, and the PR shows Slack's reason.
+**Review requests.** Under each PR is a drafted Slack message in the team's format, for example `PR: bind slack token env vars https://github.com/postman-eng/cloud9-parcels-production-deployments/pull/13612`. You can edit it. **Post to Slack** (or `⌘↵` in the message) posts it to your review channel (a [setting](#configuration); with none, PRs show no draft) as you, and the click is your approval. After Slack takes the message, the server records a `review_request` [SDLC event](#sdlc-progress-and-smoketests) with the PR, the text and the permalink, on the PR's tickets, so the ticket's **Review requested** stage turns done. The PR then shows "Review requested … Open in Slack", and **Post again** opens the draft again. If the post fails, nothing is recorded, and the PR shows Slack's reason.
 
 - **Drafts.** When the PRs view loads, it calls `POST /api/review-drafts`. The server takes each open PR from its own list that has no draft, marks it in progress, and drafts at most 6 at once in the background: it reads the PR body and files with `gh pr view`, then runs one tool-less `pi -p --no-session` turn with a cheap model (`AGENT_DASH_DRAFT_MODEL`, default `anthropic/claude-haiku-4-5`). The model writes only the phrase; the server adds `PR:` and the link. Each finished draft reloads the page. A failed or stuck draft is tried again on a page load after 5 minutes; meanwhile the message starts from the PR title. **Redraft** (`POST /api/review-drafts?pr=<url>`) asks for a new draft.
 - **Posting.** `POST /api/review-requests` with `{prUrl, text}`, with the `X-Agent-Dash` guard. The PR must be one of the dashboard's PRs. The server runs `scripts/slack-post.ts`, which posts through Slack's hosted MCP with your own OAuth grant from pi-mcp-adapter, because copied Slack cookies get the session revoked. The grant needs the `chat:write` scope. The adapter config hides the send tool from pi agents (`excludeTools`), so only this button posts. If the grant has no `chat:write`, the PR shows how to sign in again, with the **Slack sign-in command** [setting](#configuration).
@@ -463,23 +463,30 @@ Optional: `AGENT_DASH_SUMMARY_MODEL` and `AGENT_DASH_SUMMARY_THINKING` choose th
 
 Your own paths and accounts live in `agent-dash.config.json` at the repo root. Git ignores it, so a clone never runs with someone else's paths. Edit it on the **Settings** page (`#/settings`), or by hand: `agent-dash.config.example.json` shows every key. A path can start with `~/`.
 
+Company-wide values (the Jira server, the Slack org, the deploy repos, the Postman environments) are defaults, so you set only your own: your first name, Jira login and token file, ticket projects, your team's review channel, and the paths on your machine.
+
 | Setting | Key | Env var that wins over it | Default |
 |---|---|---|---|
+| Your first name, as agents call you in prompts | `userName` | | none: "the user" |
 | Port | `port` | `AGENT_DASH_PORT` | `7777` |
 | pi sessions folder | `sessionsDir` | `AGENT_DASH_SESSIONS_DIR` | `~/.pi/agent/sessions` |
 | Recent days | `recentDays` | `AGENT_DASH_RECENT_DAYS` | `14` |
-| Jira server | `jiraServer` | `JIRA_SERVER` | none: Jira is off |
+| Jira server | `jiraServer` | `JIRA_SERVER` | `https://postmanlabs.atlassian.net`. Jira is off until the login is set too. |
 | Jira login | `jiraLogin` | `JIRA_LOGIN` | none |
 | Jira token file (a `JIRA_API_TOKEN=…` line) | `jiraTokenFile` | `AGENT_DASH_JIRA_ENV`; `JIRA_API_TOKEN` wins over the file | none |
 | Jira projects to leave out | `jiraExcludeProjects` | `AGENT_DASH_EXCLUDE_PROJECTS` | none |
 | Ticket projects (key prefixes that link) | `ticketProjects` | `AGENT_DASH_PROJECTS` | none: no key links |
 | Keys to ignore | `ignoreTickets` | `AGENT_DASH_IGNORE_TICKETS` | none |
 | Local tickets folder | `localTicketsDir` | `AGENT_DASH_LOCAL_TICKETS_DIR` | none |
+| Review channel id and name: where **Post to Slack** asks for PR reviews | `reviewChannelId`, `reviewChannelName` | | none: review requests are off |
+| Repos with no review request | `noReviewRepos` | | none |
+| Beta and Prod deploy repos | `deployRepoBeta`, `deployRepoProd` | | `postman-eng/cloud9-parcels-deployments`, `postman-eng/cloud9-parcels-production-deployments` |
 | pi-auth binary for **Fix login** | `piAuth` | `AGENT_DASH_PI_AUTH` | none |
 | Slack login state for Slack search | `slackStateFile` | | none: no Slack search |
-| Slack org or team id | `slackOrgId` | | the first logged-in team |
-| Slack workspace URL, for permalinks | `slackWorkspaceUrl` | | none |
+| Slack org or team id | `slackOrgId` | | `E071JP7HM0C` (Postman's Enterprise Grid) |
+| Slack workspace URL, for permalinks | `slackWorkspaceUrl` | | `https://postman.enterprise.slack.com` |
 | Slack sign-in command, shown when posting needs a new sign-in | `slackReloginCommand` | | none |
+| Environments that a smoketest can run on | `environments` | | `localhost`, `postman_beta`, `postman_prod` (add `fern_dev`, `fern_prod` for Fern's stack) |
 | Local smoketest guide, read first by a local plan | `smoketestGuide` | | none |
 
 - **A save needs a restart.** The server reads the file once, at start. After **Save**, the page says that the server still runs with the old values until you restart it.

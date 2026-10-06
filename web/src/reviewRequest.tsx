@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
-import { fallbackMessage, REVIEW_CHANNEL, wantsReviewRequest } from "../../shared/reviewRequest.ts";
+import { fallbackMessage, reviewChannel, wantsReviewRequest } from "../../shared/reviewRequest.ts";
 import type { PullRequest, ReviewDraft, SdlcEvent } from "../../shared/types.ts";
 import { age, post } from "./lib.tsx";
+
+/** The channel is set whenever a review request shows: wantsReviewRequest needs it. */
+const channelName = () => reviewChannel()?.name ?? "";
 
 /**
  * The drafted Slack review request under a PR on the PRs view. Post sends it to the review
@@ -37,7 +40,7 @@ export function ReviewRequest({ pr, draft, sent, now }: { pr: PullRequest; draft
       <div className="review-req sent">
         <span className="tone-text-good">✓</span>
         <span>
-          Review requested in #{REVIEW_CHANNEL.name} <span className="meta">· {age(last.startedAt, now)} ago</span>
+          Review requested in #{channelName()} <span className="meta">· {age(last.startedAt, now)} ago</span>
         </span>
         {last.messageUrl && (
           <a href={last.messageUrl} target="_blank" rel="noreferrer">
@@ -80,7 +83,7 @@ export function ReviewRequest({ pr, draft, sent, now }: { pr: PullRequest; draft
       )}
       <span className="meta">
         {draft?.status === "failed" && edited === null ? <span title={draft.error ?? ""}>The draft failed, so this is the PR title. </span> : null}
-        Slack draft for #{REVIEW_CHANNEL.name}, posted as you
+        Slack draft for #{channelName()}, posted as you
       </span>
       {error && <span className="tone-text-bad">{error}</span>}
       <span className="grow" />
@@ -101,7 +104,7 @@ export function ReviewRequest({ pr, draft, sent, now }: { pr: PullRequest; draft
           Redraft
         </button>
       )}
-      <button className="btn small" disabled={posting || !text.trim()} onClick={send} title={`Post this message to #${REVIEW_CHANNEL.name} as you, and record a review request on the ticket.`}>
+      <button className="btn small" disabled={posting || !text.trim()} onClick={send} title={`Post this message to #${channelName()} as you, and record a review request on the ticket.`}>
         {posting ? "Posting…" : "Post to Slack"}
       </button>
     </div>
