@@ -62,6 +62,37 @@ export function addressReview(pr: VerbPr): string {
   ].join("\n");
 }
 
+/** One feedback entry that still needs an answer, as the PR panel's Feedback section shows it. */
+export interface FeedbackNote {
+  author: string;
+  /** The GitHub URL of the review, comment, or thread comment. */
+  url: string;
+  /** What it says. Only its start goes into the message. */
+  text: string;
+}
+
+/** Feedback text is someone else's: one line, no backticks, short. */
+const quote = (text: string) => {
+  const line = text.replace(/[`\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+  return line.length > 200 ? `${line.slice(0, 199)}…` : line;
+};
+
+/** Like Address review, for the entries that the panel counts as "to address", which an approval can also carry. */
+export function addressFeedback(pr: VerbPr, notes: FeedbackNote[]): string {
+  return [
+    `Address the feedback on ${name(pr)}`,
+    "",
+    `${pr.url}${branch(pr)} has ${notes.length === 1 ? "1 review comment" : `${notes.length} review comments`} with no answer yet:`,
+    ...notes.map((n, i) => `${i + 1}. ${clean(n.author)}, ${n.url}: "${quote(n.text)}"`),
+    "",
+    `1. Read each one in full on GitHub: \`gh pr view ${pr.url} --comments\`, and \`gh api graphql\` for \`reviewThreads\`.`,
+    `2. ${checkout(pr)}`,
+    "3. For each one, fix the code, or decide that no change is needed and say why. Run the tests.",
+    `4. ${noForce}`,
+    "5. Post nothing on GitHub: no reply, no review, no resolved thread. Draft a one-line reply for each comment, and show the drafts to me.",
+  ].join("\n");
+}
+
 export function rebase(pr: VerbPr): string {
   return [
     `Fix the merge conflict on ${name(pr)}`,
@@ -104,12 +135,28 @@ export function draftNudge(pr: VerbPr): string {
 
 export type VerbId = "fix_ci" | "address_review" | "rebase" | "merge" | "nudge";
 
+/** Outside the PR panel, a PR that is ready to merge gets this link to the panel, not a merge. */
+export const REVIEW_AND_MERGE = "Review & merge";
+
 export interface PrVerb {
   id: VerbId;
   label: string;
   /** Asked before the agent starts, because the task cannot be undone. */
   confirm?: string;
   message: string;
+}
+
+/**
+ * The panel's verbs at the end of its Feedback section, for a PR that is ready to merge. With
+ * feedback to address, that comes first, and the merge asks with the count.
+ */
+export function mergeVerbs(pr: VerbPr, open: FeedbackNote[]): PrVerb[] {
+  if (!open.length) return [verbFor({ kind: "ready_to_merge" }, pr)!];
+  const count = open.length === 1 ? "1 review comment is" : `${open.length} review comments are`;
+  return [
+    { id: "address_review", label: "Address feedback", message: addressFeedback(pr, open) },
+    { id: "merge", label: "Merge anyway", confirm: `${count} not addressed. Merge #${pr.number} anyway?`, message: merge(pr) },
+  ];
 }
 
 /** The one verb for a PR signal, or null when the signal has none (for example a healthy review). */

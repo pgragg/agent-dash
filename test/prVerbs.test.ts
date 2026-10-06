@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { addressReview, checkList, draftNudge, fixCi, merge, rebase, verbFor } from "../shared/prVerbs.ts";
+import { addressFeedback, addressReview, checkList, draftNudge, fixCi, merge, mergeVerbs, rebase, verbFor } from "../shared/prVerbs.ts";
 import type { AttentionKind } from "../shared/types.ts";
 
 const pr = { url: "https://github.com/o/r/pull/7", repo: "o/r", number: 7, headRef: "fix-it", failedChecks: ["lint", "test"] };
@@ -55,4 +55,30 @@ test("each PR signal has one verb; Merge asks first; a healthy review has none",
 test("checkList keeps the line short", () => {
   assert.equal(checkList(["a"]), "a");
   assert.equal(checkList(["a", "b", "c", "d"], 2), "a, b, +2 more");
+});
+
+test("with no feedback to address, the panel offers Merge with its confirm", () => {
+  const [only, ...rest] = mergeVerbs(pr, []);
+  assert.equal(rest.length, 0);
+  assert.equal(only.label, "Merge");
+  assert.ok(only.confirm);
+  assert.equal(only.message, merge(pr));
+});
+
+test("with feedback to address, Address feedback comes first, and Merge anyway asks with the count", () => {
+  const notes = [
+    { author: "arielitovsky", url: "https://github.com/o/r/pull/7#pullrequestreview-1", text: "Approved, but look at the bot comment" },
+    { author: "bot", url: "https://github.com/o/r/pull/7#discussion_r2", text: "a.ts: `rm -rf`\nnext line" },
+  ];
+  const [address, anyway] = mergeVerbs(pr, notes);
+  assert.equal(address.label, "Address feedback");
+  assert.equal(address.confirm, undefined);
+  assert.equal(anyway.label, "Merge anyway");
+  assert.equal(anyway.confirm, "2 review comments are not addressed. Merge #7 anyway?");
+  assert.equal(mergeVerbs(pr, notes.slice(0, 1))[1].confirm, "1 review comment is not addressed. Merge #7 anyway?");
+  const m = addressFeedback(pr, notes);
+  assert.match(m, /arielitovsky, https:\/\/github\.com\/o\/r\/pull\/7#pullrequestreview-1: "Approved, but look at the bot comment"/);
+  // Someone else's text cannot add a line or a code span to the prompt.
+  assert.match(m, /"a\.ts: rm -rf next line"/);
+  assert.match(m, /Post nothing on GitHub/);
 });

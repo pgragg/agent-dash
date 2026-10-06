@@ -671,3 +671,6 @@ a.btn.verb { text-decoration: none; }
 .q-item.dim:hover, .q-item.dim.selected { opacity: 1; }
 .kanban-drawer { position: absolute; top: 0; right: 0; bottom: 0; width: min(900px, 64vw); overflow-y: auto; background: var(--bg); border-left: 1px solid var(--line); box-shadow: -12px 0 32px #0000001f; z-index: 5; animation: rise .18s ease-out; }
 .drawer-close { position: sticky; top: 10px; float: right; margin: 10px 14px 0 0; z-index: 1; background: var(--bg); }
+
+/* The merge sits under the feedback, so it is read first. */
+.pr-merge { display: flex; justify-content: flex-end; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
