@@ -11,6 +11,7 @@ import type { Dashboard } from "../../shared/types.ts";
  * | `#/note:ID`       | A note, on its ticket                             |
  * | `#/pr:OWNER/REPO/N` | The PR panel (a view under PRs)                 |
  * | `#/needs`         | The list behind "N notifications"                 |
+ * | `#/parked`        | The waiting agents that agent-dash parked          |
  * | `#/c:SESSION`     | A conversation's page                             |
  * | `#/d:ID`          | A diagram's page                                  |
  * | `#/diagrams`      | Every diagram                                     |
@@ -22,6 +23,7 @@ import type { Dashboard } from "../../shared/types.ts";
 export type Route =
   | { view: "board"; ref: string | null }
   | { view: "needs" }
+  | { view: "parked" }
   | { view: "prs"; pr: string | null }
   | { view: "history" }
   | { view: "conversation"; id: string | null }
@@ -32,6 +34,7 @@ export type Route =
 export function parseHash(hash: string): Route {
   const path = decodeURIComponent(hash.replace(/^#\/?/, ""));
   if (path === "needs") return { view: "needs" };
+  if (path === "parked") return { view: "parked" };
   if (path === "prs") return { view: "prs", pr: null };
   if (path.startsWith("pr:")) return { view: "prs", pr: path };
   if (path === "history") return { view: "history" };

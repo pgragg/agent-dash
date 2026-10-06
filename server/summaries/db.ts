@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { splitSummary } from "../../shared/nextSteps.ts";
-import type { ConversationSummary, Diagram, DiagramKind, NextStep, Note, ReviewDraft, SdlcEnvironment, SdlcEvent, SdlcEventType, SmoketestOutcome, ThreadStatus, ThreadStatusChange, TicketSummary, WorkLane } from "../../shared/types.ts";
+import type { ConversationSummary, Diagram, ParkedRun, DiagramKind, NextStep, Note, ReviewDraft, SdlcEnvironment, SdlcEvent, SdlcEventType, SmoketestOutcome, ThreadStatus, ThreadStatusChange, TicketSummary, WorkLane } from "../../shared/types.ts";
 
 export const DB_PATH = process.env.AGENT_DASH_DB ?? join(homedir(), ".agent-dash/agent-dash.db");
 
@@ -193,6 +193,23 @@ CREATE TABLE IF NOT EXISTS conversation_summaries (
   error        TEXT,
   requested_at TEXT NOT NULL,
   generated_at TEXT
+);
+
+-- One row per waiting agent that agent-dash parked: it stopped the pi process and kept what the
+-- agent needed, because a stopped run gets no new summary. ended_by is 'resumed' when the run is
+-- live again, and 'dismissed' when Piper no longer needs it.
+CREATE TABLE IF NOT EXISTS parked_runs (
+  session_id   TEXT PRIMARY KEY,
+  ticket       TEXT,
+  name         TEXT,
+  cwd          TEXT NOT NULL,
+  reason       TEXT NOT NULL,
+  needs        TEXT,
+  latest       TEXT,
+  last_message TEXT NOT NULL,
+  parked_at    TEXT NOT NULL,
+  ended_at     TEXT,
+  ended_by     TEXT CHECK (ended_by IN ('resumed', 'dismissed'))
 );
 `;
 
@@ -829,4 +846,32 @@ export function finishConversationSummary(sessionId: string, basis: string, resu
       .prepare("UPDATE conversation_summaries SET status = 'done', about = ?, latest = ?, needs = ?, error = NULL, generated_at = ? WHERE session_id = ? AND basis = ? AND status = 'in_progress'")
       .run(result.about, result.latest, result.needs, now.toISOString(), sessionId, basis).changes > 0
   );
+}
+
+// ---- parked runs: waiting agents that agent-dash stopped ------------------------------
+
+const PARKED_COLUMNS = "session_id AS sessionId, ticket, name, cwd, reason, needs, latest, last_message AS lastMessage, parked_at AS parkedAt";
+
+/** A new park replaces an older row of the same session, so a run that was resumed can park again. */
+export function addParked(p: ParkedRun): void {
+  open()
+    .prepare(
+      `INSERT OR REPLACE INTO parked_runs (session_id, ticket, name, cwd, reason, needs, latest, last_message, parked_at, ended_at, ended_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+    )
+    .run(p.sessionId, p.ticket, p.name, p.cwd, p.reason, p.needs, p.latest, p.lastMessage, p.parkedAt);
+}
+
+/** The parks that are still in effect, newest first. */
+export function activeParked(): ParkedRun[] {
+  return (open().prepare(`SELECT ${PARKED_COLUMNS} FROM parked_runs WHERE ended_at IS NULL ORDER BY parked_at DESC`).all() as unknown as ParkedRun[]).map((r) => ({ ...r }));
+}
+
+export function endParked(sessionId: string, by: "resumed" | "dismissed", now = new Date()): boolean {
+  return open().prepare("UPDATE parked_runs SET ended_at = ?, ended_by = ? WHERE session_id = ? AND ended_at IS NULL").run(now.toISOString(), by, sessionId).changes > 0;
+}
+
+/** Runs that were resumed after a park since this time. The sweep leaves them alone. */
+export function resumedSince(since: string): Set<string> {
+  return new Set((open().prepare("SELECT session_id AS id FROM parked_runs WHERE ended_by = 'resumed' AND ended_at >= ?").all(since) as { id: string }[]).map((r) => r.id));
 }

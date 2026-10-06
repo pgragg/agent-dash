@@ -19,6 +19,8 @@ export interface ModelInput {
   starred?: Dashboard["starred"];
   /** Current status of each (ticket, thread) pair that has one. */
   threads?: ThreadStatusChange[];
+  /** Runs that agent-dash parked. A parked run that ended is no signal, also not for an API error. */
+  parked?: Set<string>;
   isAlive?: (pid: number) => boolean;
   jiraServer: string;
 }
@@ -179,7 +181,9 @@ export function buildDashboard(input: ModelInput): Dashboard {
   linkRuns(runs, prs, threads);
   const recentRuns = runs.filter((r) => r.status !== "finished" || isRecent(r.lastActivityAt, now, recentDays));
   const done = new Set([...input.myTickets, ...input.otherTickets].filter((t) => t.statusCategory === "done").map((t) => t.key));
-  const attention = rankAttention(withoutResolved(recentRuns, threads, done), prs, input.myTickets, now, input.jiraServer);
+  const parked = input.parked ?? new Set<string>();
+  const signalRuns = recentRuns.filter((r) => !(r.status === "finished" && parked.has(r.sessionId)));
+  const attention = rankAttention(withoutResolved(signalRuns, threads, done), prs, input.myTickets, now, input.jiraServer);
   // The ticket is closed, so nothing on it is a task any more: an open tab there is only worth knowing about.
   for (const a of attention) if (a.ticketKey && done.has(a.ticketKey)) a.info = true;
   attachRuns(attention, withoutResolved(runs, threads, done));
@@ -230,6 +234,7 @@ export function buildDashboard(input: ModelInput): Dashboard {
     conversationSummaries: {},
     reviewRequests: {},
     lanes: {},
+    parked: [],
     sources: input.sources,
     extensionInstalled: input.extensionInstalled,
   };

@@ -1,5 +1,5 @@
 import { progressLines, sdlcProgress } from "../shared/sdlc.ts";
-import type { Note, PullRequest, Run, SdlcEvent, TicketGroup, TicketSummaryState } from "../shared/types.ts";
+import type { Note, ParkedRun, PullRequest, Run, SdlcEvent, TicketGroup, TicketSummaryState } from "../shared/types.ts";
 
 /**
  * The context a new agent starts with: what the ticket's page shows. It goes into the first
@@ -40,6 +40,8 @@ export interface HandoffInput {
   summary: TicketSummaryState | undefined;
   /** The ticket's smoketests and confirmed deploys, newest first. */
   events?: SdlcEvent[];
+  /** Agents on the ticket that agent-dash parked, with what each one needed. */
+  parked?: ParkedRun[];
   now: Date;
 }
 
@@ -62,7 +64,7 @@ export function featuredRuns(group: TicketGroup): Run[] {
   return live.length ? live : relevant.slice(-1);
 }
 
-export function buildHandoff({ group, notes, summary, events = [], now }: HandoffInput): string {
+export function buildHandoff({ group, notes, summary, events = [], parked = [], now }: HandoffInput): string {
   const t = group.ticket;
   const out: string[] = [
     HANDOFF_START(t.key),
@@ -93,6 +95,11 @@ export function buildHandoff({ group, notes, summary, events = [], now }: Handof
       const msg = r.lastMessage.length > MESSAGE_MAX ? `…${r.lastMessage.slice(-MESSAGE_MAX)}` : r.lastMessage;
       out.push("", `### ${r.name ?? r.firstPrompt.slice(0, 80)} (${status(r)}, last active ${r.lastActivityAt})`, "", msg || "(no reply yet)");
     }
+  }
+
+  if (parked.length) {
+    out.push("", "## Parked agents (stopped while they waited for Piper; each ask can still be open)");
+    for (const p of parked) out.push(`- ${p.name ?? p.sessionId} · parked ${p.parkedAt} · needs: ${p.needs ?? p.lastMessage.slice(-300).replace(/\s+/g, " ")}`);
   }
 
   out.push("", "## Agent conversation history (oldest first)");

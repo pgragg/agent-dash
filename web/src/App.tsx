@@ -4,6 +4,7 @@ import { prRef } from "../../shared/refs.ts";
 import { READ_FEEDBACK, REVIEW_AND_MERGE } from "../../shared/prVerbs.ts";
 import type { AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, LaneMode, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState } from "../../shared/types.ts";
 import { conversationHash, launchAgent, ResumeHere, resuming } from "./agents.tsx";
+import { ParkedView } from "./parked.tsx";
 import { FIRST_LANES, type LaneDraft, LanesCard, LanesEditor, type LaneRun, WorktreesView } from "./lanes.tsx";
 import { filterHistory, groupByDay } from "./history.ts";
 import { PrPanel, PrVerbButton } from "./prPanel.tsx";
@@ -1944,6 +1945,11 @@ export function App() {
           <span>
             <Dot tone="working" pulse={workingRuns > 0} /> {workingRuns} working
           </span>
+          {data.parked.length > 0 && (
+            <a href="#/parked" className={view === "parked" ? "active" : ""} title="Waiting agents that agent-dash stopped, with what each one needed">
+              <Dot tone="muted" /> {data.parked.length} parked
+            </a>
+          )}
         </div>
         <span className="grow" />
         <span className={`sources ${down.length ? "bad" : ""}`} title={sources.map(([n, h]) => `${n}: ${h.ok ? "ok" : h.error}`).join("\n")}>
@@ -1964,6 +1970,10 @@ export function App() {
       {route.view === "needs" ? (
         <main className="main">
           <NeedsView queue={queue} hidden={done.length} data={data} now={now} onDismiss={doneForNow.markDone} />
+        </main>
+      ) : route.view === "parked" ? (
+        <main className="main">
+          <ParkedView data={data} now={now} />
         </main>
       ) : route.view === "prs" ? (
         <main className="main">

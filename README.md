@@ -42,6 +42,21 @@ The navbar at the top switches between the views: **Board** (`#/`, the queue and
 - **Fix login**: when Jira or GitHub is down, the top bar shows **Fix Jira login** or **Fix GitHub login**. It runs `~/pi/auth/pi-auth ensure <target>` on the server (`POST /api/login?source=jira|github`, with the `X-Agent-Dash` guard), then refreshes. The target comes from a fixed list, never from the request. pi-auth can open your Chrome; it changes nothing remote. If pi-auth has no target for the source, the button tells you how to log in by hand.
 - `#/t:ABC-123` or `#/r:<sessionId>` in the URL selects an entry. See [Addresses](#addresses) for the other objects.
 
+### Parked agents
+
+At most **15 agents wait for you** at one time. agent-dash stops (parks) the other waiting agents, and keeps what each one needed. The top bar shows **N parked**, which opens `#/parked`. The rules are in `server/park.ts`.
+
+- **Park**: the server writes a `parked_runs` row with the ask (the summary's NEEDS and LATEST, and the end of the last message), then sends SIGTERM to the pi process. The session log stays. A stopped run gets no new summary, so the row keeps the ask.
+- **When**: on each dashboard load, in this order:
+  1. All of the agent's tickets are Done in Jira, or you resolved the thread on each of them.
+  2. Its summary says that it needs nothing, or that it waits only on a PR review.
+  3. A newer live agent is on the same main ticket. Agents of [parallel lanes](#parallel-lanes) are not replaced by each other.
+  4. It waited more than 24 h and did not ask a question.
+  5. More than 15 agents still wait. The agents that asked a question stay first, then the newest stops. The others park.
+- **Never parked**: an agent that waited less than 30 minutes (so its notification goes out and you can read it live), an iTerm run (a tab cannot be restored), a run with an open dialog, a status that is only a guess, a run whose summary is not drafted yet, and a run that you resumed after a park in the last 24 h. These count towards the 15. Just before a park, the server reads the status file again, and parks nothing that changed or has a reply in its inbox.
+- **The Parked view** groups the parked agents by ticket: open tickets first, then no ticket, then Done tickets. Each row shows why it parked and what it needs. **Send** resumes the agent headless with your reply as its first message (`POST /api/conversations/resume?session=<id>` with `{message}`). **Resume** continues it with no reply, on its page. **Dismiss** (`POST /api/parked/dismiss?session=<id>`) removes the ask from the list; the conversation stays in History. **Dismiss all** does that for a group.
+- A parked run gives no signal on the board, also not "died on an API error". When a parked run is live again, its row ends as `resumed`. A new agent on the ticket gets the parked asks in its context.
+
 ### Notifications
 
 A click on **N notifications** in the top bar opens `#/needs`: the same N entries as **Up next** on the board, in the same order. "Done for now" entries are not on it. Each row shows:
@@ -172,6 +187,7 @@ Every object in agent-dash has an address in the URL hash. A link opens the obje
 | `#/note:<id>` | A note, in its ticket's Notes card |
 | `#/pr:<owner>/<repo>/<number>` | The [PR panel](#pr-panel) |
 | `#/needs` | The [Notifications](#notifications) list |
+| `#/parked` | The [parked agents](#parked-agents) |
 | `#/c:<sessionId>` | The conversation's page. A conversation that is older than the board's window shows its chat from the log. |
 | `#/d:<id>` | The [diagram's](#diagrams) page |
 | `#/diagrams` | Every diagram |
@@ -268,6 +284,7 @@ Everything you write lives in SQLite at `~/.agent-dash/agent-dash.db`:
 | `SDLC_Event_Ticket` | One per ticket of an event: `sdlc_event_id`, `ticket`, `created_at` (when the link was made), `summary_requested_at` (when the server started the next-steps draft for it; empty until then, set at once for a smoketest that only started, and empty again when the event changes), `changed_at` (when the event last changed; set by the `sdlc_event_changed` trigger) |
 | `conversation_summaries` | One per pi conversation with a summary: `session_id`, `status` (`in_progress`, `done` or `failed`), `basis` (the prompt count, a hash of the last message, and live or ended: the state it describes), `about`, `latest`, `needs`, `error`, `requested_at`, `generated_at` |
 | `PiConversationStatusChange` | One per change to a thread's relevance: `ticket`, `session_id`, `status` (`relevant` or `resolved`), `reason` (resolved only, optional), `created_at`. Append-only; the newest row per ticket and thread is the current state. |
+| `parked_runs` | One per parked agent: `session_id`, `ticket`, `name`, `cwd`, `reason` (`ticket_done`, `needs_nothing`, `superseded`, `stale` or `over_cap`), `needs`, `latest`, `last_message`, `parked_at`, `ended_at` and `ended_by` (`resumed` or `dismissed`). A new park of the same session replaces its row. See [Parked agents](#parked-agents). |
 | `lanes` | One per parallel lane: `ticket`, `repo` (the main checkout), `lane`, `mode` (`land` or `pr`), `base`, `branch`, `worktree`, `integration_branch` and `integration_worktree` (`land` mode), `session_id`, `goal` (its first message), `state` (`working`, `landing`, `landed`, `conflict`, `checks_failed` or `removed`), `note` (what the last land said), `created_at`, `landed_at`. Written by the server when it makes the worktree. See [Parallel lanes](#parallel-lanes). |
 
 ## Reply to an agent

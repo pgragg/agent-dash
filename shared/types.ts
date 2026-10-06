@@ -70,6 +70,28 @@ export interface RunDialog {
   since: string;
 }
 
+/** Why agent-dash parked a waiting agent. */
+export type ParkReason = "ticket_done" | "needs_nothing" | "superseded" | "stale" | "over_cap";
+
+/**
+ * A waiting headless agent that agent-dash stopped. Its session log stays, so Resume continues it;
+ * the row keeps what the agent needed, because a stopped run gets no new summary.
+ */
+export interface ParkedRun {
+  sessionId: string;
+  ticket: string | null;
+  name: string | null;
+  cwd: string;
+  reason: ParkReason;
+  parkedAt: string;
+  /** What the agent needed from Piper when it was parked, from its summary. */
+  needs: string | null;
+  /** What its last message said, from its summary. */
+  latest: string | null;
+  /** The end of its last message, for when the summary is missing. */
+  lastMessage: string;
+}
+
 /** A run in the History view. The whole last message stays out, so the list of every chat stays small. */
 export type HistoryRun = Omit<Run, "lastMessage">;
 
@@ -446,6 +468,8 @@ export interface Dashboard {
   reviewRequests: Record<string, SdlcEvent[]>;
   /** Parallel lanes by ticket key, oldest first, without removed ones. */
   lanes: Record<string, WorkLane[]>;
+  /** Waiting agents that agent-dash stopped to keep the waiting list short, newest first. */
+  parked: ParkedRun[];
   sources: { jira: SourceHealth; github: SourceHealth; sessions: SourceHealth };
   extensionInstalled: boolean;
 }

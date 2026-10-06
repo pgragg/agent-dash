@@ -21,7 +21,24 @@ export function resumeBlocker(s: ParsedSession | undefined, reported: ReportedSt
   return null;
 }
 
-/** `POST /api/conversations/resume?session=<id>`: continue a finished session headless, under its own id. */
+async function readMessage(req: IncomingMessage): Promise<string | undefined> {
+  let body = "";
+  for await (const chunk of req) {
+    body += chunk;
+    if (body.length > 64_000) return undefined;
+  }
+  try {
+    const text = (JSON.parse(body || "{}") as { message?: unknown }).message;
+    return typeof text === "string" && text.trim() ? text.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * `POST /api/conversations/resume?session=<id>`: continue a finished session headless, under its own id.
+ * An optional `{message}` is the first reply, so a parked agent gets its answer as it starts.
+ */
 export async function handle(req: IncomingMessage, res: ServerResponse, url: URL, sessions: SessionIndex): Promise<boolean> {
   if (url.pathname !== "/api/conversations/resume" || req.method !== "POST") return false;
   const json = (code: number, body: unknown) => {
@@ -36,5 +53,6 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   const s = parsed.find((p) => p.sessionId === sessionId);
   const blocker = resumeBlocker(s, reported.get(sessionId), { running: isRunning(sessionId) });
   if (blocker) return json(s ? 409 : 404, { error: blocker });
-  return json(201, { sessionId: startConversation({ cwd: s!.cwd, resume: { sessionId, sessionFile: s!.sessionFile } }) });
+  const message = await readMessage(req);
+  return json(201, { sessionId: startConversation({ cwd: s!.cwd, message, resume: { sessionId, sessionFile: s!.sessionFile } }) });
 }
