@@ -17,11 +17,9 @@ test("a fresh clone has the company's Jira and Slack, but no login, paths, revie
   assert.equal(exists, false);
   assert.deepEqual(settings, DEFAULT_SETTINGS);
   const c = buildConfig(settings);
-  assert.equal(c.jira.server, "https://postmanlabs.atlassian.net");
-  assert.equal(c.jira.login, "");
+  assert.deepEqual(c.ticketProviders, [{ type: "jira", id: "jira", server: "https://postmanlabs.atlassian.net", login: "", tokenFile: "", excludeProjects: [], projects: [] }]);
   assert.equal(c.settings.reviewChannelId, "");
   assert.deepEqual(c.settings.environments, ["localhost", "postman_beta", "postman_prod"]);
-  assert.equal(c.localTicketsDir, "");
   assert.equal(c.slack.stateFile, "");
   assert.equal("FSDK-12 ABC-1".match(c.ticketPattern), null);
 });
@@ -33,7 +31,7 @@ test("the file sets the values, ~ expands, and an env var wins over the file", (
   assert.equal(settings.jiraServer, "https://x.atlassian.net");
   const c = buildConfig(effectiveSettings(settings, { AGENT_DASH_PORT: "7799", AGENT_DASH_PROJECTS: "ABC|XYZ" }));
   assert.equal(c.port, 7799);
-  assert.equal(c.jira.tokenFile, join(homedir(), "secrets/jira.env"));
+  assert.equal(c.ticketProviders[0]?.type === "jira" && c.ticketProviders[0].tokenFile, join(homedir(), "secrets/jira.env"));
   assert.deepEqual("ABC-1 ABC-12 XYZ-3 AD-4".match(c.ticketPattern), ["ABC-12", "XYZ-3"]);
 });
 
@@ -47,6 +45,40 @@ test("a bad value is refused with a reason, and a bad value in the file keeps it
   assert.equal(settings.jiraLogin, "me@x.com");
 });
 
+test("with no ticketProviders list, the flat fields make a Jira and an AD provider, and AD links with no ticket project", () => {
+  const c = buildConfig({ ...DEFAULT_SETTINGS, jiraLogin: "me@x.com", jiraExcludeProjects: ["FSM"], localTicketsDir: "~/tickets", ticketProjects: ["FSDK"] });
+  assert.deepEqual(
+    c.ticketProviders.map((p) => [p.id, p.type]),
+    [["jira", "jira"], ["local-AD", "local"]],
+  );
+  assert.equal(c.ticketProviders[1]?.type === "local" && c.ticketProviders[1].dir, join(homedir(), "tickets"));
+  assert.deepEqual("FSDK-2 AD-3 XYZ-4".match(c.ticketPattern), ["FSDK-2", "AD-3"]);
+});
+
+test("a ticketProviders list wins over the flat fields, and adds its prefixes to the pattern", () => {
+  const list = [
+    { type: "local", prefix: "AD", dir: "/a" },
+    { type: "local", id: "notes", prefix: "NOTE", dir: "/b" },
+    { type: "jira", server: "https://y.atlassian.net/", login: "me@y.com", projects: ["ABC"] },
+  ];
+  const { settings, errors } = validateSettings({ ticketProviders: list, localTicketsDir: "/ignored" });
+  assert.deepEqual(errors, {});
+  const c = buildConfig(settings);
+  assert.deepEqual(
+    c.ticketProviders.map((p) => p.id),
+    ["local-AD", "notes", "jira"],
+  );
+  assert.equal(c.ticketProviders[2]?.type === "jira" && c.ticketProviders[2].server, "https://y.atlassian.net");
+  assert.deepEqual("AD-1 NOTE-2 ABC-3 FSDK-4".match(c.ticketPattern), ["AD-1", "NOTE-2", "ABC-3"]);
+});
+
+test("a bad ticketProviders entry is refused with its number", () => {
+  assert.match(validateSettings({ ticketProviders: [{ type: "local", prefix: "AD", dir: "/a" }, { type: "linear" }] }).errors.ticketProviders ?? "", /^entry 2: type/);
+  assert.match(validateSettings({ ticketProviders: [{ type: "local", prefix: "ad", dir: "/a" }] }).errors.ticketProviders ?? "", /prefix/);
+  assert.match(validateSettings({ ticketProviders: [{ type: "jira", server: "nope" }] }).errors.ticketProviders ?? "", /server/);
+  assert.match(validateSettings({ ticketProviders: "x" }).errors.ticketProviders ?? "", /list/);
+});
+
 test("ticket patterns escape nothing surprising and skip ignored keys in any position", () => {
   assert.deepEqual("FSDK-1 FSDK-10 EFSUP-2".match(ticketPatternOf(["FSDK", "EFSUP"], ["FSDK-1"])), ["FSDK-10", "EFSUP-2"]);
 });
@@ -57,6 +89,8 @@ test("the setup banner names what a new user still has to set", () => {
   assert.deepEqual(setupNeeded(set({}), {}), ["your Jira login", "a Jira token file", "your ticket projects", "your first name"]);
   // The token can come from the env instead of a file.
   assert.deepEqual(setupNeeded(set({ jiraLogin: "me@x.com", ticketProjects: ["ABC"], userName: "Sam" }), { JIRA_API_TOKEN: "t" }), []);
+  // A local folder alone is enough: no Jira, and its prefix is a ticket project.
+  assert.deepEqual(setupNeeded(set({ jiraServer: "", localTicketsDir: "/t", userName: "Sam" }), {}), []);
 });
 
 const file = join(dir, "route.json");
@@ -85,6 +119,12 @@ test("Save needs the header, refuses a bad value without writing, and writes the
   const written = JSON.parse(readFileSync(file, "utf8"));
   assert.equal(written.jiraServer, "https://x.atlassian.net");
   assert.equal(written.port, 7777);
+
+  // The form does not hold the providers list, so a save from the page keeps the file's.
+  const list = [{ type: "local", prefix: "AD", dir: "/a" }];
+  writeFileSync(file, JSON.stringify({ ...written, ticketProviders: list }));
+  assert.equal((await post({ jiraServer: "https://z.atlassian.net" })).status, 200);
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).ticketProviders, list);
 });
 
 test("team settings: no name says the user, no channel turns review requests off, and only enabled environments are offered", async () => {

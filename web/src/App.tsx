@@ -140,7 +140,7 @@ function buildSubjects(d: Dashboard): Map<string, Subject> {
   return out;
 }
 
-/** The ticket is Done in Jira. */
+/** The ticket is Done in its tracker. */
 function isDone(s: Subject): boolean {
   return s.ticket?.ticket.statusCategory === "done";
 }
@@ -441,7 +441,7 @@ const STALE_MS = 30 * 60_000;
 
 /**
  * One drafted step, with a button that starts a pi agent on it, with the same context as "Start a
- * new agent". A step that only moves the ticket in Jira gets a Move button: that needs no agent.
+ * new agent". A step that only moves the ticket in its tracker gets a Move button: that needs no agent.
  */
 function StepRow({ ticket, step, cwd, move, onError }: { ticket: string; step: NextStep; cwd: string; move: { target: MoveTarget; from: string; onMoved: () => void } | null; onError: (m: string | null) => void }) {
   const [state, setState] = useState<"idle" | "starting" | "started">("idle");
@@ -467,9 +467,9 @@ function StepRow({ ticket, step, cwd, move, onError }: { ticket: string; step: N
   );
 }
 
-function SummaryBody({ ticket, jira, summary, cwd, onError }: { ticket: string; jira: boolean; summary: TicketSummary; cwd: string; onError: (m: string | null) => void }) {
+function SummaryBody({ ticket, canMove, summary, cwd, onError }: { ticket: string; canMove: boolean; summary: TicketSummary; cwd: string; onError: (m: string | null) => void }) {
   // Read the transitions only when a step may be a move.
-  const { detail, reload } = useTicketDetail(ticket, jira && summary.steps.some((st) => /\bmov/i.test(st.body)));
+  const { detail, reload } = useTicketDetail(ticket, canMove && summary.steps.some((st) => /\bmov/i.test(st.body)));
   const moveFor = (st: NextStep) => {
     // The current status counts too, so a step that is out of date says so instead of starting an agent.
     const target = detail && moveStepTarget(st.body, ticket, [...moveTargets(detail.transitions, detail.status), { to: detail.status, via: null }]);
@@ -534,7 +534,7 @@ function NextSteps({ s, state, notes, now, cwd, onError }: { s: Subject; state: 
             <>
               <span className="shimmer" />
               <span>
-                Reading Jira, PRs, Slack and agent history… <b>{elapsed(latest!.requestedAt, now)}</b>
+                Reading the ticket, PRs, Slack and agent history… <b>{elapsed(latest!.requestedAt, now)}</b>
               </span>
             </>
           )}
@@ -550,7 +550,7 @@ function NextSteps({ s, state, notes, now, cwd, onError }: { s: Subject; state: 
       )}
       {shown?.summary ? (
         <>
-          <SummaryBody ticket={key} jira={!s.ticket!.ticket.file} summary={shown} cwd={cwd} onError={onError} />
+          <SummaryBody ticket={key} canMove={s.ticket!.ticket.source.move} summary={shown} cwd={cwd} onError={onError} />
           <SlackQuotes summaryId={shown.id} text={shown.summary} />
         </>
       ) : (
@@ -1183,7 +1183,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
           {isDone(s) && (
             <>
               <Dot tone="good" />
-              <span className="tone-text-good">Done in Jira</span>
+              <span className="tone-text-good">Done in {s.ticket!.ticket.source.label}</span>
             </>
           )}
           {top && isDone(s) ? (
@@ -1202,7 +1202,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
         <h1>{subjectTitle(s)}</h1>
         <div className="ws-meta">
           {t && (
-            <a className="key-link" href={t.url} target="_blank" rel="noreferrer" title={t.file ? "Open the ticket file" : "Open in Jira"}>
+            <a className="key-link" href={t.url} target="_blank" rel="noreferrer" title={t.file ? "Open the ticket file" : `Open in ${t.source.label}`}>
               {t.key} ↗
             </a>
           )}
@@ -1327,7 +1327,7 @@ function PrsView({ data, now }: { data: Dashboard; now: number }) {
             <header className="pr-group-head">
               {t ? (
                 <>
-                  <a className="key-link" href={t.url} target="_blank" rel="noreferrer" title={t.file ? "Open the ticket file" : "Open in Jira"}>
+                  <a className="key-link" href={t.url} target="_blank" rel="noreferrer" title={t.file ? "Open the ticket file" : `Open in ${t.source.label}`}>
                     {t.key} ↗
                   </a>
                   {data.starred.includes(t.key) && (
@@ -1780,11 +1780,11 @@ export function App() {
   const othersTurn = all.filter((s) => s.items.length && !actionable(s) && !isDone(s) && !onlyFinished(s)).sort((a, b) => lead(b)!.score - lead(a)!.score);
   const finishedList = all.filter((s) => !actionable(s) && !isDone(s) && onlyFinished(s)).sort((a, b) => lead(b)!.score - lead(a)!.score);
   const working = all.filter((s) => !s.items.length && liveRuns(s).length && !isDone(s));
-  // Closed in Jira, but agents still open on it: worth a glance to close the tabs, never a task.
-  const doneInJira = all.filter((s) => isDone(s) && (s.items.length || liveRuns(s).length));
+  // Closed in its tracker, but agents still open on it: worth a glance to close the tabs, never a task.
+  const doneTickets = all.filter((s) => isDone(s) && (s.items.length || liveRuns(s).length));
   const quiet = data ? data.myTickets.map((g) => subjects.get(`t:${g.ticket.key}`)!).filter((s) => !ticketSnoozed(s) && !s.items.length && !liveRuns(s).length) : [];
   // A starred ticket shows once, in the Starred section at the top of the rail; a snooze still hides it.
-  const unsnoozed = [...queue, ...othersTurn, ...working, ...finishedList, ...done, ...doneInJira, ...quiet];
+  const unsnoozed = [...queue, ...othersTurn, ...working, ...finishedList, ...done, ...doneTickets, ...quiet];
   const starredList = unsnoozed.filter(isStarred);
   const unstarred = (list: Subject[]) => list.filter((s) => !isStarred(s));
   const order = [...starredList, ...unstarred(unsnoozed), ...snoozedList];
@@ -1985,8 +1985,8 @@ export function App() {
           )}
         </div>
         <span className="grow" />
-        <span className={`sources ${down.length ? "bad" : ""}`} title={sources.map(([n, h]) => `${n}: ${h.off ? "off (not set up)" : h.ok ? "ok" : h.error}`).join("\n")}>
-          {down.length ? `${down.map(([n]) => n).join(", ")} down` : data.sources.jira.off ? `Jira off · GitHub · ${agentLabel()}` : `Jira · GitHub · ${agentLabel()}`}
+        <span className={`sources ${down.length ? "bad" : ""}`} title={sources.map(([n, h]) => `${h.label ?? n}: ${h.off ? "off (not set up)" : h.ok ? "ok" : h.error}`).join("\n")}>
+          {down.length ? `${down.map(([n, h]) => h.label ?? n).join(", ")} down` : [...sources.filter(([n]) => n !== "sessions").map(([n, h]) => `${h.label ?? n}${h.off ? " off" : ""}`), agentLabel()].join(" · ")}
           <Dot tone={down.length ? "bad" : "good"} />
         </span>
         <FixLogin sources={data.sources} onFixed={refresh} />
@@ -2138,8 +2138,8 @@ export function App() {
                 <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} snoozedUntil={until(s)} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
               ))}
             </RailSection>
-            <RailSection title="Done in Jira" count={unstarred(doneInJira).length} defaultOpen={false} hint="Closed tickets that still have agents open">
-              {unstarred(doneInJira).map((s) => (
+            <RailSection title="Done tickets" count={unstarred(doneTickets).length} defaultOpen={false} hint="Closed tickets that still have agents open">
+              {unstarred(doneTickets).map((s) => (
                 <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} />
               ))}
             </RailSection>

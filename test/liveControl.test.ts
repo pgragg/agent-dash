@@ -9,7 +9,7 @@ import { newestOpenDialog, readLogTail, sameDialog, uiResponse, type UiRequest, 
 import { type ParsedSession, parseSession } from "../server/sources/sessions.ts";
 import { type ReportedStatus, resolveReported, takesControls } from "../server/sources/status.ts";
 import { activityParts } from "../shared/activity.ts";
-import { header, jsonl, minutesAgo, NOW, PATTERN, ticket, toolCall, user } from "./helpers.ts";
+import { header, jsonl, minutesAgo, NOW, PATTERN, stubTicket, ticket, ticketUrl, toolCall, user } from "./helpers.ts";
 
 const tmp = mkdtempSync(join(tmpdir(), "agent-dash-live-"));
 process.env.AGENT_DASH_STATUS_DIR = join(tmp, "status");
@@ -126,7 +126,7 @@ test("a run shows its activity only while working, and an old status file has no
       ["idle", reported({ sessionId: "idle", version: 2, state: "awaiting_input", activity })],
     ]),
     myTickets: [ticket()], otherTickets: [], prs: [], now: NOW, recentDays: 14,
-    sources: { jira: { ok: true }, github: { ok: true }, sessions: { ok: true } }, extensionInstalled: true, jiraServer: "https://jira",
+    sources: { jira: { ok: true }, github: { ok: true }, sessions: { ok: true } }, extensionInstalled: true, ticketUrl, stubTicket,
     isAlive: () => true,
   });
   const byId = new Map(d.unlinkedRuns.map((r) => [r.sessionId, r]));

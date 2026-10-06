@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildDashboard } from "../server/model.ts";
 import { countPrs, groupOpenPrs } from "../web/src/prs.ts";
-import { NOW, minutesAgo, pr, ticket } from "./helpers.ts";
+import { NOW, minutesAgo, pr, stubTicket, ticket, ticketUrl } from "./helpers.ts";
 
 const ok = { ok: true };
 const build = (prs: ReturnType<typeof pr>[], createdPrs: string[] = []) =>
@@ -22,7 +22,7 @@ const build = (prs: ReturnType<typeof pr>[], createdPrs: string[] = []) =>
     recentDays: 14,
     sources: { jira: ok, github: ok, sessions: ok },
     extensionInstalled: false,
-    jiraServer: "https://jira",
+    ticketUrl, stubTicket,
   });
 
 const url = (n: number) => `https://github.com/o/r/pull/${n}`;

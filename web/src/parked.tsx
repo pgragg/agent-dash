@@ -115,7 +115,7 @@ export function ParkedView({ data, now }: { data: Dashboard; now: number }) {
               <span className="meta">no ticket</span>
             )}
             <h3>{g.ticket?.summary ?? (g.key ? "" : "Conversations with no ticket")}</h3>
-            {g.ticket?.statusCategory === "done" && <span className="tone-text-good">Done in Jira</span>}
+            {g.ticket?.statusCategory === "done" && <span className="tone-text-good">Done in {g.ticket.source.label}</span>}
             <span className="meta">{plural(g.rows.length, "agent")}</span>
             <span className="grow" />
             <button className="btn small ghost" onClick={() => dismissAll(g.rows)} title="Dismiss every parked agent in this group">

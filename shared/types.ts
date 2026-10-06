@@ -229,8 +229,22 @@ export interface Ticket {
   dueDate: string | null;
   updatedAt: string;
   assignedToMe: boolean;
-  /** Set on a local agent-dash ticket (`AD-<n>`): the markdown file that is the ticket. */
+  /** Set when a file is the ticket, as with a local ticket: the page links to it, and agents read it. */
   file?: string;
+  /** The tracker that holds the ticket, and the changes that the dash can make there. */
+  source: TicketSource;
+}
+
+/** A ticket provider (`server/tickets/`), as a ticket and the page see it. */
+export interface TicketSource {
+  /** The provider's id, such as "jira" or "local-AD". It is also its key in `Dashboard.sources`. */
+  id: string;
+  /** The tracker's name for people: "Open in Jira", "Done in Jira". */
+  label: string;
+  /** The dash can set the due date. */
+  dueDate: boolean;
+  /** The dash can move the ticket to another status. */
+  move: boolean;
 }
 
 export type AttentionKind =
@@ -440,6 +454,8 @@ export interface ConversationSummary {
 
 export interface SourceHealth {
   ok: boolean;
+  /** The source's name for people, such as "Jira" or "AD tickets". */
+  label?: string;
   /** Not set up, so never asked: not a failure. */
   off?: boolean;
   error?: string;
@@ -480,7 +496,8 @@ export interface Dashboard {
   lanes: Record<string, WorkLane[]>;
   /** Waiting agents that agent-dash stopped to keep the waiting list short, newest first. */
   parked: ParkedRun[];
-  sources: { jira: SourceHealth; github: SourceHealth; sessions: SourceHealth };
+  /** One health per ticket provider, by its id, next to GitHub and the session logs. */
+  sources: Record<string, SourceHealth> & { github: SourceHealth; sessions: SourceHealth };
   extensionInstalled: boolean;
   /** Settings that a new user still has to set, in words. Empty when the board can work. */
   setup?: string[];
@@ -488,14 +505,14 @@ export interface Dashboard {
   team?: Team;
 }
 
-/** One Jira comment, with its body as markdown. */
+/** One comment on a ticket, with its body as markdown. */
 export interface TicketComment {
   author: string;
   created: string;
   body: string;
 }
 
-/** A status the ticket can move to now, from Jira's transitions list. */
+/** A status the ticket can move to now, from the tracker's transitions list. */
 export interface TicketTransition {
   id: string;
   /** The transition's own name, such as "Ready for Review". */
@@ -509,7 +526,7 @@ export interface TicketDetail {
   key: string;
   status: string;
   dueDate: string | null;
-  /** Markdown, from Jira's ADF. */
+  /** Markdown. */
   description: string;
   /** The newest comments, oldest first. */
   comments: TicketComment[];

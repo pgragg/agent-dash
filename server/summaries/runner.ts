@@ -8,7 +8,7 @@ import type { Note, PullRequest, Run, SdlcEvent, ThreadStatusChange, Ticket } fr
 import { summaryCommand } from "../agent.ts";
 import { config } from "../config.ts";
 import { fetchTicketPrs } from "../sources/github.ts";
-import { isLocalKey } from "../sources/localTickets.ts";
+import { ticketProviders } from "../tickets/registry.ts";
 import { digestSession } from "../sources/sessions.ts";
 import { isAlive } from "../sources/status.ts";
 import * as db from "./db.ts";
@@ -48,7 +48,7 @@ function prLine(p: PullRequest): string {
   return `- ${p.url} — ${p.title} (${bits.join(", ")}; updated ${p.updatedAt})`;
 }
 
-/** What agent-dash already knows, so the agent spends its time on Jira, PR comments and Slack. */
+/** What agent-dash already knows, so the agent spends its time on the ticket, PR comments and Slack. */
 export async function buildContext({ ticket, runs: allRuns, prs, notes = [], threads = {}, events = [], ticketPrs = [] }: SummaryInput): Promise<string> {
   // Piper marked these threads as no longer relevant to the ticket; their history would mislead.
   const resolved = allRuns.filter((r) => threads[r.sessionId]?.status === "resolved");
@@ -56,7 +56,7 @@ export async function buildContext({ ticket, runs: allRuns, prs, notes = [], thr
   const out: string[] = [
     `# ${ticket.key}: ${ticket.summary}`,
     "",
-    ticket.file ? `- Ticket file: ${ticket.file}` : `- Jira: ${ticket.url}`,
+    ticket.file ? `- Ticket file: ${ticket.file}` : `- ${ticket.source.label}: ${ticket.url}`,
     `- Status: ${ticket.status} · Priority: ${ticket.priority ?? "-"} · Due: ${ticket.dueDate ?? "-"} · Updated: ${ticket.updatedAt || "-"}`,
     `- Assigned to ${user()}: ${ticket.assignedToMe ? "yes" : "no"}`,
     "",
@@ -115,14 +115,11 @@ export async function buildContext({ ticket, runs: allRuns, prs, notes = [], thr
 export function buildPrompt(key: string, id: number, workDir: string): string {
   const contextFile = join(workDir, "context.md");
   const summaryFile = join(workDir, "summary.md");
-  const ticketStep = isLocalKey(key)
-    ? `2. ${key} is a local ticket, not a Jira issue. Read its file, named as "Ticket file" in the context file.`
-    : `2. Jira body and comments:
-   ${config.jira.tokenFile ? `set -a; source '${config.jira.tokenFile.replace(/'/g, "'\\''")}'; set +a; ` : ""}jira issue view ${key} --comments 20 --plain`;
+  const ticketStep = ticketProviders.providerFor(key)?.agentReadStep(key) ?? `2. No tracker holds ${key}: skip it, and note it under "Gaps".`;
   return `Write a next-steps summary for ticket ${key}. ${User()} oversees several coding agents at once and reads it in a dashboard, so keep it very short.
 
 RULES
-- Read-only. Do not write to Jira, GitHub, Slack, or any repo: no comments, transitions, reviews, messages, reactions, commits, or pushes.
+- Read-only. Do not write to the ticket tracker, GitHub, Slack, or any repo: no comments, transitions, reviews, messages, reactions, commits, or pushes.
 - Spend at most 10 minutes. If a source fails, skip it and note it under "Gaps".
 - ${User()}'s private notes (in the context file) are the most trusted source: when a newer note disagrees with an older source, follow the note. They are private, so never copy them anywhere outside the summary.
 - Follow the SDLC order in the context file's "SDLC progress": PR, local test plan, local smoketest, review requested, in Beta, Beta test plan, Beta smoketest, in Prod, Prod test plan, Prod smoketest, Done. A local smoketest comes before a PR review request, and a Beta smoketest comes before the prod chart version update deploy PR. Each smoketest starts with a plan: an agent that ${user()} starts from agent-dash writes it, and a plan that changes Beta or Prod state waits for ${user()} to confirm it in agent-dash. When the next stage is the review request, one step must say that ${user()} posts the drafted review request from agent-dash's PRs view. When the next stage is a test plan, one step must say to plan a smoketest from agent-dash and name the environment (localhost, Postman Beta, or Postman Prod). When the next stage is a test plan that waits, one step must say that ${user()} reads the plan and confirms it in agent-dash. When the next stage is a blocked smoketest, one step must say what blocks it and how to remove the blocker. ${User()} can skip a stage: never plan a step for a stage that shows as skipped.
@@ -141,7 +138,7 @@ OUTPUT (at most 120 words, markdown):
 **State:** one sentence.
 **Next steps:**
 1. The most important step first. Start each step with who acts: ${User()}, an agent, or a named person.
-   A Jira status move is a step of its own, worded "${User()} moves the ticket to <status>". agent-dash puts a Move button on it, so no agent is needed.
+   A ticket status move is a step of its own, worded "${User()} moves the ticket to <status>". agent-dash puts a Move button on it, so no agent is needed.
 (1 to 4 steps)
 **Blockers:** one line, or "none".
 **Gaps:** one line, only if a source failed.

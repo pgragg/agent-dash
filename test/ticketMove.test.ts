@@ -65,9 +65,8 @@ beforeEach(() => {
   changed.length = 0;
 });
 
-test("a move needs the header, a Jira key, a transition id, and the status the page showed", async () => {
+test("a move needs the header, a ticket key, a status, and the status the page showed", async () => {
   assert.equal((await call("FSDK-99999", { to: "In Progress", from: "To Do" }, {})).code, 403);
-  assert.equal((await call("AD-1", { to: "In Progress", from: "To Do" })).code, 400);
   assert.equal((await call("FSDK-99999", { to: "", from: "To Do" })).code, 400);
   assert.equal((await call("FSDK-99999", { to: "In Progress" })).code, 400);
   assert.deepEqual(writes, []);
