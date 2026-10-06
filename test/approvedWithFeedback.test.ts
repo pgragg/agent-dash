@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { rankAttention } from "../server/attention.ts";
 import { actionCandidates } from "../server/actions.ts";
 import { feedbackOf } from "../server/sources/github.ts";
-import { toAddressCount } from "../shared/feedback.ts";
+import { feedback, feedbackCounts, toAddressCount } from "../shared/feedback.ts";
 import { verbFor } from "../shared/prVerbs.ts";
 import { NOW, minutesAgo, pr } from "./helpers.ts";
 
@@ -53,4 +53,36 @@ test("an approval with an empty body and no open thread is still 'approved and g
   const [item] = rankAttention([], [pr({ reviewDecision: "APPROVED", toAddress })], [], NOW);
   assert.equal(item.kind, "ready_to_merge");
   assert.match(item.reason, /approved and green — merge it/);
+});
+
+/** cloud9-terraform-prod#178 as the board's search saw it on 2026-10-06: approved, three Atlantis plans. */
+const atlantis = { login: "postman-cloud9-terraform-prod", __typename: "Bot" };
+const plan = (m: number, id: number) => ({ author: atlantis, body: "Ran Plan for dir: `org/aws/eks/c9-eks-use1-wa-iam` workspace: `default`\n\n<details><summary>Show Output</summary>…</details>", createdAt: at(m), url: `https://github.com/o/r/pull/178#issuecomment-${id}` });
+const node178 = {
+  author: { login: "pgragg" },
+  reviews: { nodes: [{ author: { login: "reviewer", __typename: "User" }, state: "APPROVED", body: "", submittedAt: at(20), url: "https://github.com/o/r/pull/178#pullrequestreview-1" }] },
+  comments: { nodes: [plan(35, 1), plan(28, 2), plan(17, 3)] },
+  reviewThreads: { nodes: [] },
+  commits: { nodes: [{ commit: { committedDate: at(40) } }] },
+};
+
+test("a bot's status report (Atlantis plan) is not feedback to address: the PR is 'merge it'", () => {
+  const f = { ...feedbackOf(node178), addressed: [] };
+  assert.deepEqual(
+    feedback(f).map((e) => e.state),
+    ["report", "report", "report"],
+  );
+  assert.equal(feedbackCounts(feedback(f)), "3 report");
+  const toAddress = toAddressCount(f);
+  assert.equal(toAddress, 0);
+  const [item] = rankAttention([], [pr({ reviewDecision: "APPROVED", toAddress })], [], NOW);
+  assert.equal(item.kind, "ready_to_merge");
+  assert.match(item.reason, /approved and green — merge it/);
+});
+
+test("the same text from a person, or a bot thread on a line of code, still counts", () => {
+  const person = { ...plan(10, 4), author: { login: "reviewer", __typename: "User" } };
+  const botThread = { isResolved: false, isOutdated: false, comments: { nodes: [{ ...plan(5, 5), url: "t1" }] } };
+  const f = feedbackOf({ ...node178, comments: { nodes: [...node178.comments.nodes, person] }, reviewThreads: { nodes: [botThread] } });
+  assert.equal(toAddressCount({ ...f, addressed: [] }), 2);
 });

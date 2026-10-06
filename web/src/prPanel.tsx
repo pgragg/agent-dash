@@ -180,6 +180,7 @@ const FEEDBACK_TAG: Record<FeedbackState, [string, string]> = {
   replied: ["replied", "muted"],
   outdated: ["outdated", "muted"],
   addressed: ["marked addressed", "muted"],
+  report: ["report", "muted"],
 };
 
 /** The first line with words in it, for a bot's closed summary. */
