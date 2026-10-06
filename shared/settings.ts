@@ -38,7 +38,12 @@ export interface SettingField {
   pattern?: RegExp;
   /** An env var that wins over the file, for a test server or a one-off run. */
   env?: string;
+  /** What the setting does, in one or two sentences. */
   help: string;
+  /** A value that looks right, as the Settings page and the setup agent show it. */
+  example: string;
+  /** Where to find the value: a command to run or a place to look. The setup agent follows it. */
+  find: string;
 }
 
 /**
@@ -70,31 +75,156 @@ const PROJECT = /^[A-Z][A-Z0-9]*$/;
 const REPO = /^[\w.-]+\/[\w.-]+$/;
 
 export const SETTING_FIELDS: SettingField[] = [
-  { key: "agent", group: "Agent", label: "Agent", kind: "choice", options: Object.entries(AGENT_LABEL).map(([value, label]) => ({ value, label })), env: "AGENT_DASH_AGENT", help: "The coding agent that agent-dash starts for runs, summaries and drafts, and whose session logs the board shows." },
-  { key: "userName", group: "You", label: "Your first name", kind: "text", pattern: /^[^\s"'`]{1,40}$/, help: "Agents call you by this name in the prompts that agent-dash writes. Empty: \"the user\"." },
-  { key: "port", group: "Server", label: "Port", kind: "number", env: "AGENT_DASH_PORT", help: "The dashboard listens on 127.0.0.1 at this port." },
-  { key: "sessionsDir", group: "Server", label: "pi sessions folder", kind: "path", env: "AGENT_DASH_SESSIONS_DIR", help: "Where pi writes its session logs. Used when the agent is pi." },
-  { key: "claudeProjectsDir", group: "Server", label: "Claude Code projects folder", kind: "path", env: "AGENT_DASH_CLAUDE_PROJECTS_DIR", help: "Where Claude Code writes its session logs. Used when the agent is Claude Code." },
-  { key: "recentDays", group: "Server", label: "Recent days", kind: "number", env: "AGENT_DASH_RECENT_DAYS", help: "Runs and PRs older than this do not make groups of their own." },
-  { key: "jiraServer", group: "Jira", label: "Jira server", kind: "url", env: "JIRA_SERVER", help: "For example https://your-company.atlassian.net. Empty turns Jira off." },
-  { key: "jiraLogin", group: "Jira", label: "Jira login", kind: "text", env: "JIRA_LOGIN", help: "The email of your Atlassian account." },
-  { key: "jiraTokenFile", group: "Jira", label: "Jira token file", kind: "path", env: "AGENT_DASH_JIRA_ENV", help: "A file with a JIRA_API_TOKEN=… line. The JIRA_API_TOKEN env var wins over it." },
-  { key: "jiraExcludeProjects", group: "Jira", label: "Projects to leave out", kind: "list", pattern: PROJECT, env: "AGENT_DASH_EXCLUDE_PROJECTS", help: "Jira projects whose tickets do not show, for example a deprecated mirror." },
-  { key: "ticketProjects", group: "Tickets", label: "Ticket projects", kind: "list", pattern: PROJECT, env: "AGENT_DASH_PROJECTS", help: "Key prefixes that link a run or PR to a ticket, for example ABC for ABC-123." },
-  { key: "ignoreTickets", group: "Tickets", label: "Keys to ignore", kind: "list", pattern: /^[A-Z][A-Z0-9]*-\d+$/, env: "AGENT_DASH_IGNORE_TICKETS", help: "Real keys that code uses as sample data. They never link." },
-  { key: "localTicketsDir", group: "Tickets", label: "Local tickets folder", kind: "path", env: "AGENT_DASH_LOCAL_TICKETS_DIR", help: "agent-dash's own AD-<n> tickets: <folder>/<status>/AD-<n>-<slug>.md. Add AD to the ticket projects too." },
-  { key: "reviewChannelId", group: "Reviews", label: "Review channel id", kind: "text", pattern: /^[CG][A-Z0-9]{6,}$/, help: "The Slack channel where your team asks for PR reviews, for example C0123ABCD. Empty turns review requests off." },
-  { key: "reviewChannelName", group: "Reviews", label: "Review channel name", kind: "text", pattern: /^[a-z0-9_-]+$/, help: "Its name without the #, as the page shows it." },
-  { key: "noReviewRepos", group: "Reviews", label: "Repos with no review request", kind: "list", pattern: REPO, help: "owner/repo of repos that no one reviews, such as your own tools." },
-  { key: "deployRepoBeta", group: "Deploys", label: "Beta deploy repo", kind: "text", pattern: REPO, help: "A merged PR in this owner/repo deploys to Beta." },
-  { key: "deployRepoProd", group: "Deploys", label: "Prod deploy repo", kind: "text", pattern: REPO, help: "A merged PR in this owner/repo deploys to Prod." },
-  { key: "piAuth", group: "Logins", label: "pi-auth binary", kind: "path", env: "AGENT_DASH_PI_AUTH", help: "Fix login runs `<binary> ensure jira`. Empty turns it off." },
-  { key: "slackStateFile", group: "Slack", label: "Slack login state", kind: "path", help: "An agent-browser state file with a Slack login. Summary runs search Slack with it. Empty turns Slack search off." },
-  { key: "slackOrgId", group: "Slack", label: "Slack org or team id", kind: "text", pattern: /^[ET][A-Z0-9]+$/, help: "An Enterprise Grid org id (E…) searches every workspace. Empty uses the first logged-in team." },
-  { key: "slackWorkspaceUrl", group: "Slack", label: "Slack workspace URL", kind: "url", help: "Makes a permalink when Slack does not return one, for example https://your-company.slack.com." },
-  { key: "slackReloginCommand", group: "Slack", label: "Slack sign-in command", kind: "text", help: "Shown when the Slack sign-in for posting expires." },
-  { key: "environments", group: "Smoketests", label: "Environments", kind: "list", pattern: /^(localhost|postman_beta|postman_prod|fern_dev|fern_prod)$/, help: "Where a smoketest can run: localhost, postman_beta, postman_prod, fern_dev, fern_prod." },
-  { key: "smoketestGuide", group: "Smoketests", label: "Local smoketest guide", kind: "path", help: "A file that a local smoketest plan reads first." },
+  {
+    key: "agent", group: "Agent", label: "Agent", kind: "choice", options: Object.entries(AGENT_LABEL).map(([value, label]) => ({ value, label })), env: "AGENT_DASH_AGENT",
+    help: "The coding agent that agent-dash starts for runs, summaries and drafts, and whose session logs the board shows.",
+    example: "pi",
+    find: "The agent you use for your coding sessions. `pi --version` and `claude --version` show which ones are installed.",
+  },
+  {
+    key: "userName", group: "You", label: "Your first name", kind: "text", pattern: /^[^\s"'`]{1,40}$/,
+    help: "Agents call you by this name in the prompts that agent-dash writes. Empty: \"the user\".",
+    example: "Sam",
+    find: "The first word of `git config --global user.name`, or of `id -F`.",
+  },
+  {
+    key: "port", group: "Server", label: "Port", kind: "number", env: "AGENT_DASH_PORT",
+    help: "The dashboard listens on 127.0.0.1 at this port.",
+    example: "7777",
+    find: "Keep 7777. Change it only when a program that is not agent-dash listens there: `lsof -iTCP:7777 -sTCP:LISTEN`.",
+  },
+  {
+    key: "sessionsDir", group: "Server", label: "pi sessions folder", kind: "path", env: "AGENT_DASH_SESSIONS_DIR",
+    help: "Where pi writes its session logs. Used when the agent is pi.",
+    example: "~/.pi/agent/sessions",
+    find: "Keep the default. `ls ~/.pi/agent/sessions` shows one folder per project when pi is installed.",
+  },
+  {
+    key: "claudeProjectsDir", group: "Server", label: "Claude Code projects folder", kind: "path", env: "AGENT_DASH_CLAUDE_PROJECTS_DIR",
+    help: "Where Claude Code writes its session logs. Used when the agent is Claude Code.",
+    example: "~/.claude/projects",
+    find: "Keep the default, unless `CLAUDE_CONFIG_DIR` is set: then it is `$CLAUDE_CONFIG_DIR/projects`. `ls ~/.claude/projects` shows one folder per project.",
+  },
+  {
+    key: "recentDays", group: "Server", label: "Recent days", kind: "number", env: "AGENT_DASH_RECENT_DAYS",
+    help: "Runs and PRs older than this do not make groups of their own.",
+    example: "14",
+    find: "Keep 14. A smaller number gives a shorter board.",
+  },
+  {
+    key: "jiraServer", group: "Jira", label: "Jira server", kind: "url", env: "JIRA_SERVER",
+    help: "The Jira site that holds your tickets. Empty turns Jira off.",
+    example: "https://postmanlabs.atlassian.net",
+    find: "The start of a Jira ticket link, up to `.net`. With jira-cli, the `server:` line of `~/.config/.jira/.config.yml`.",
+  },
+  {
+    key: "jiraLogin", group: "Jira", label: "Jira login", kind: "text", env: "JIRA_LOGIN",
+    help: "The email of your Atlassian account.",
+    example: "sam@postman.com",
+    find: "Your work email: `git config --global user.email`, or the `login:` line of `~/.config/.jira/.config.yml`.",
+  },
+  {
+    key: "jiraTokenFile", group: "Jira", label: "Jira token file", kind: "path", env: "AGENT_DASH_JIRA_ENV",
+    help: "A file with a JIRA_API_TOKEN=… line. The JIRA_API_TOKEN env var wins over it.",
+    example: "~/.config/agent-dash/jira.env",
+    find: "Look for a file that has the line, without printing the token: `grep -rls '^JIRA_API_TOKEN=' ~/.config ~/.env* ~/pi/secrets 2>/dev/null`. With none, make a token at https://id.atlassian.com/manage-profile/security/api-tokens, copy it, and run `mkdir -p ~/.config/agent-dash && (umask 077; printf 'JIRA_API_TOKEN=%s\\n' \"$(pbpaste)\" > ~/.config/agent-dash/jira.env)`.",
+  },
+  {
+    key: "jiraExcludeProjects", group: "Jira", label: "Projects to leave out", kind: "list", pattern: PROJECT, env: "AGENT_DASH_EXCLUDE_PROJECTS",
+    help: "Jira projects whose tickets do not show, for example a deprecated mirror.",
+    example: "FSM",
+    find: "Usually empty. Add a project whose open tickets are copies of tickets in another project, such as FSM (mirrored into FSDK).",
+  },
+  {
+    key: "ticketProjects", group: "Tickets", label: "Ticket projects", kind: "list", pattern: PROJECT, env: "AGENT_DASH_PROJECTS",
+    help: "Key prefixes that link a run or PR to a ticket, for example ABC for ABC-123.",
+    example: "FSDK, EFSUP",
+    find: "The prefixes of the open Jira tickets assigned to you: `jira issue list -a\"$(jira me)\" --plain --no-headers --columns key`, or a GET of `<Jira server>/rest/api/3/search/jql?jql=assignee=currentUser()+AND+statusCategory!=Done&fields=key` with the login and token. Also the keys in your branch names: `gh search prs --author @me --limit 50 --json title`.",
+  },
+  {
+    key: "ignoreTickets", group: "Tickets", label: "Keys to ignore", kind: "list", pattern: /^[A-Z][A-Z0-9]*-\d+$/, env: "AGENT_DASH_IGNORE_TICKETS",
+    help: "Real keys that code uses as sample data. They never link.",
+    example: "FSDK-1",
+    find: "Usually empty. Add a key that shows up in many unrelated runs because code or docs use it as an example.",
+  },
+  {
+    key: "localTicketsDir", group: "Tickets", label: "Local tickets folder", kind: "path", env: "AGENT_DASH_LOCAL_TICKETS_DIR",
+    help: "agent-dash's own AD-<n> tickets: <folder>/<status>/AD-<n>-<slug>.md. Add AD to the ticket projects too.",
+    example: "~/pi/projects/27_agent_dash/project_management",
+    find: "Usually empty: only for people who work on agent-dash itself. It is the folder above the status folders of the AD-*.md files: `mdfind -onlyin ~ 'kMDItemFSName == \"AD-*.md\"' | grep -E '/(todo|in-progress|in-review|done|canceled)/AD-' | head -3`.",
+  },
+  {
+    key: "reviewChannelId", group: "Reviews", label: "Review channel id", kind: "text", pattern: /^[CG][A-Z0-9]{6,}$/,
+    help: "The Slack channel where your team asks for PR reviews. Empty turns review requests off.",
+    example: "C0123ABCD",
+    find: "Ask the user which channel their team uses for review requests. In Slack, click the channel name: the id is at the bottom of the About tab.",
+  },
+  {
+    key: "reviewChannelName", group: "Reviews", label: "Review channel name", kind: "text", pattern: /^[a-z0-9_-]+$/,
+    help: "Its name without the #, as the page shows it.",
+    example: "my-team-reviews",
+    find: "The name of the review channel, as Slack shows it, without the #.",
+  },
+  {
+    key: "noReviewRepos", group: "Reviews", label: "Repos with no review request", kind: "list", pattern: REPO,
+    help: "owner/repo of repos that no one reviews, such as your own tools.",
+    example: "sam/dotfiles",
+    find: "Your personal repos that you open PRs in: `gh repo list --limit 30 --json nameWithOwner -q '.[].nameWithOwner'`. Ask the user before you add one.",
+  },
+  {
+    key: "deployRepoBeta", group: "Deploys", label: "Beta deploy repo", kind: "text", pattern: REPO,
+    help: "A merged PR in this owner/repo deploys to Beta.",
+    example: "postman-eng/cloud9-parcels-deployments",
+    find: "Keep the default for Postman services. Elsewhere, ask the user's team where Beta deploy PRs go.",
+  },
+  {
+    key: "deployRepoProd", group: "Deploys", label: "Prod deploy repo", kind: "text", pattern: REPO,
+    help: "A merged PR in this owner/repo deploys to Prod.",
+    example: "postman-eng/cloud9-parcels-production-deployments",
+    find: "Keep the default for Postman services. Elsewhere, ask the user's team where Prod deploy PRs go.",
+  },
+  {
+    key: "piAuth", group: "Logins", label: "pi-auth binary", kind: "path", env: "AGENT_DASH_PI_AUTH",
+    help: "Fix login runs `<binary> ensure jira`. Empty turns it off.",
+    example: "~/pi/auth/pi-auth",
+    find: "Usually empty. `command -v pi-auth || ls ~/pi/auth/pi-auth` finds it when it is installed.",
+  },
+  {
+    key: "slackStateFile", group: "Slack", label: "Slack login state", kind: "path",
+    help: "An agent-browser state file with a Slack login. Summary runs search Slack with it. Empty turns Slack search off.",
+    example: "~/.config/agent-dash/slack-state.json",
+    find: "A file that `agent-browser state save` wrote after a Slack login: `mdfind -onlyin ~ -name state | grep -i slack | grep '\\.json$'`. Empty when agent-browser is not set up.",
+  },
+  {
+    key: "slackOrgId", group: "Slack", label: "Slack org or team id", kind: "text", pattern: /^[ET][A-Z0-9]+$/,
+    help: "An Enterprise Grid org id (E…) searches every workspace. Empty uses the first logged-in team.",
+    example: "E071JP7HM0C",
+    find: "Keep the default at Postman. Elsewhere, the E… or T… part of the address when Slack is open in a browser: `https://app.slack.com/client/<id>/…`.",
+  },
+  {
+    key: "slackWorkspaceUrl", group: "Slack", label: "Slack workspace URL", kind: "url",
+    help: "Makes a permalink when Slack does not return one.",
+    example: "https://postman.enterprise.slack.com",
+    find: "Keep the default at Postman. Elsewhere, the address of Slack in a browser, up to `.com`.",
+  },
+  {
+    key: "slackReloginCommand", group: "Slack", label: "Slack sign-in command", kind: "text",
+    help: "Shown when the Slack sign-in for posting expires.",
+    example: "node ~/pi/slack/bin/mcp-slack-login.mjs --force",
+    find: "Usually empty. The command that signs the pi-mcp-adapter `slack` server in again, if the user has one.",
+  },
+  {
+    key: "environments", group: "Smoketests", label: "Environments", kind: "list", pattern: /^(localhost|postman_beta|postman_prod|fern_dev|fern_prod)$/,
+    help: "Where a smoketest can run: localhost, postman_beta, postman_prod, fern_dev, fern_prod.",
+    example: "localhost, postman_beta, postman_prod",
+    find: "Keep the default for Postman services. Add fern_dev and fern_prod for work on Fern's own stack.",
+  },
+  {
+    key: "smoketestGuide", group: "Smoketests", label: "Local smoketest guide", kind: "path",
+    help: "A file that a local smoketest plan reads first.",
+    example: "~/notes/local-smoketesting.md",
+    find: "Usually empty. A markdown file that tells how to run your services locally, if the user keeps one.",
+  },
 ];
 
 /** A list setting from an env var: "A,B", "A|B" (the old regex form) or "A B". */

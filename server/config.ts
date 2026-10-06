@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DEFAULT_SETTINGS, SETTING_FIELDS, type SettingKey, type Settings, splitList, validateSettings } from "../shared/settings.ts";
@@ -56,6 +56,24 @@ export function readSettingsFile(file = CONFIG_FILE): { settings: Settings; exis
   return { settings, exists: true };
 }
 
+/** Write the whole settings object. A rename is atomic, so a crash never leaves half a file that stops the next start. */
+export function writeSettingsFile(settings: Settings, file = CONFIG_FILE): void {
+  writeFileSync(`${file}.tmp`, `${JSON.stringify(settings, null, 2)}\n`);
+  renameSync(`${file}.tmp`, file);
+}
+
+/**
+ * Change some keys and keep the others, with the Settings page's checks. Nothing is written
+ * when one value is bad, so the setup agent can fix its values and try again.
+ */
+export function saveSettingsPatch(patch: Record<string, unknown>, file = CONFIG_FILE): { settings: Settings; errors: Partial<Record<SettingKey, string>> } {
+  const unknown = Object.keys(patch).filter((k) => !SETTING_FIELDS.some((f) => f.key === k));
+  const out = validateSettings({ ...readSettingsFile(file).settings, ...patch });
+  for (const k of unknown) (out.errors as Record<string, string>)[k] = "is not a setting";
+  if (!Object.keys(out.errors).length) writeSettingsFile(out.settings, file);
+  return out;
+}
+
 /** The env vars that are set for a field now. */
 export function envOverrides(e: NodeJS.ProcessEnv = env): Partial<Record<SettingKey, string>> {
   return Object.fromEntries(SETTING_FIELDS.filter((f) => f.env && e[f.env] !== undefined).map((f) => [f.key, f.env!]));
@@ -85,13 +103,16 @@ export function ticketPatternOf(projects: string[], ignore: string[]): RegExp {
   return new RegExp(`\\b${skip}(?:${projects.map(escape).join("|")})-\\d+\\b`, "g");
 }
 
+/** The folder of an agent's session logs. */
+export const sessionsDirOf = (s: Settings, agent: Settings["agent"]): string => expandPath(agent === "claude" ? s.claudeProjectsDir : s.sessionsDir);
+
 export function buildConfig(s: Settings) {
   return {
     settings: s,
     port: s.port,
     agent: s.agent,
     /** The session logs of the agent that the board shows. */
-    sessionsDir: expandPath(s.agent === "claude" ? s.claudeProjectsDir : s.sessionsDir),
+    sessionsDir: sessionsDirOf(s, s.agent),
     /** The pi extension and the Claude Code hook write one status file per session here. */
     statusDir: env.AGENT_DASH_STATUS_DIR ?? join(home, ".agent-dash/status"),
     /** Replies typed in the dash go here, one folder per session; the extension delivers them. */
