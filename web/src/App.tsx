@@ -16,7 +16,8 @@ import { FixLogin } from "./fixLogin.tsx";
 import { rowKey } from "./rowNav.ts";
 import { ReviewRequest, useReviewDrafts } from "./reviewRequest.tsx";
 import { wantsReviewRequest } from "../../shared/reviewRequest.ts";
-import { SdlcBar, Smoketests } from "./sdlc.tsx";
+import { SdlcBar, Smoketests, SmoketestWhyRow } from "./sdlc.tsx";
+import { smoketestRow } from "./smoketestRow.ts";
 import { Chat, useLoad } from "./chat.tsx";
 import { ConversationGist } from "./gist.tsx";
 import { SlackQuotes } from "./slackQuotes.tsx";
@@ -1018,17 +1019,28 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
         {s.ticket && <SdlcBar group={s.ticket} events={data.sdlcEvents[s.ticket.ticket.key] ?? []} cwd={cwd} onError={setError} />}
         {s.items.length > 0 && (
           <ul className="why">
-            {s.items.map((a, i) => (
+            {s.items.map((a, i) => {
               // A stable key: the verb button keeps its "Started" state when the list changes order.
-              <li key={`${a.kind}:${a.prUrl ?? a.sessionId ?? a.ticketKey ?? i}`}>
-                <span className="why-main" title={a.reason}>
-                  <RowHead a={a} summary={a.sessionId ? data.conversationSummaries[a.sessionId] : undefined} pageTicket={t?.key} />
-                  {a.gist && <span className="why-gist">{a.gist}</span>}
-                </span>
-                <PrVerbButton item={a} data={data} />
-                {t && (a.kind === "overdue" || a.kind === "due_soon") && <DueDateVerb ticket={t} onError={setError} compact />}
-              </li>
-            ))}
+              const key = `${a.kind}:${a.prUrl ?? a.sessionId ?? a.ticketKey ?? i}`;
+              const smoke = t && a.kind === "awaiting_input" ? smoketestRow(a.sessionId, data.sdlcEvents[t.key] ?? [], { asked: !!a.run?.askedQuestion, finished: a.finished }) : null;
+              if (smoke) {
+                return (
+                  <li key={key}>
+                    <SmoketestWhyRow row={smoke} runs={runs} cwd={cwd} onError={setError} />
+                  </li>
+                );
+              }
+              return (
+                <li key={key}>
+                  <span className="why-main" title={a.reason}>
+                    <RowHead a={a} summary={a.sessionId ? data.conversationSummaries[a.sessionId] : undefined} pageTicket={t?.key} />
+                    {a.gist && <span className="why-gist">{a.gist}</span>}
+                  </span>
+                  <PrVerbButton item={a} data={data} />
+                  {t && (a.kind === "overdue" || a.kind === "due_soon") && <DueDateVerb ticket={t} onError={setError} compact />}
+                </li>
+              );
+            })}
           </ul>
         )}
       </header>

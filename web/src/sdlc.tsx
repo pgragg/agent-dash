@@ -7,6 +7,7 @@ import { Chat } from "./chat.tsx";
 import { age, Markdown, post, stamp } from "./lib.tsx";
 import { Composer, LivePanel } from "./liveControl.tsx";
 import { href } from "./routes.ts";
+import type { SmoketestRow } from "./smoketestRow.ts";
 
 /**
  * The SDLC progress bar at the top of a ticket, and the ticket's Smoketests card. Smoketest plans,
@@ -149,6 +150,35 @@ function SkipSmoketest({ ticket, env, onError }: { ticket: string; env: SdlcEnvi
 const OUTCOME_TONE: Record<SmoketestOutcome, string> = { passed: "tone-good", failed: "tone-bad", blocked: "tone-muted" };
 
 const STATE_TEXT: Record<StageState, string> = { done: "done", failed: "failed", blocked: "blocked", running: "running", waiting: "waiting", skipped: "skipped", todo: "to do" };
+
+/**
+ * A smoketest agent's row in the why list: the smoketest and its one action. Confirm is the
+ * bar's Confirm, so it sends the same plan version.
+ */
+export function SmoketestWhyRow({ row, runs, cwd, onError }: { row: SmoketestRow; runs: Run[]; cwd: string; onError: (m: string | null) => void }) {
+  const id = `sdlc:${row.event.id}`;
+  return (
+    <>
+      <span className="why-main">
+        <span className="row-head">
+          <span className="tag type-chip">Smoketest</span>
+          <span className={`tag tone-${row.tone}`}>{row.status}</span>
+          <a className="row-name" href={`#${id}`} onClick={scrollTo(id)} title="Show it on the Smoketests card">
+            {row.title}
+          </a>
+        </span>
+        {row.detail && <span className="why-gist">{row.detail}</span>}
+      </span>
+      {row.action === "confirm" && row.plan && <RunPlan plan={row.plan} cwd={cwd} onError={onError} />}
+      {row.action === "run_again" && row.plan && <RunPlan plan={row.plan} cwd={cwd} onError={onError} primary={false} />}
+      {row.action === "reply" && row.event.sessionId && (
+        <a className="btn small" href={agentHref(row.event.sessionId, runs)}>
+          Reply
+        </a>
+      )}
+    </>
+  );
+}
 
 /** Its card in the ticket view; its page until pi writes the log. */
 function agentHref(sessionId: string, runs: Run[]): string {
