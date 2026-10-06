@@ -264,6 +264,13 @@ export const api = {
     if (!res.ok) throw new Error(json.error ?? `could not load the PR (${res.status})`);
     return json;
   },
+  /** Saved in agent-dash only; resolves to the PR's addressed keys. */
+  markAddressed: async (ref: string, key: string, addressed: boolean): Promise<string[]> => {
+    const res = await fetch(`/api/pr/addressed?ref=${encodeURIComponent(ref)}`, { method: "POST", headers: { "X-Agent-Dash": "1", "Content-Type": "application/json" }, body: JSON.stringify({ key, addressed }) });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error ?? `could not save (${res.status})`);
+    return json.addressed;
+  },
   diagram: async (id: number): Promise<DiagramWithSource> => {
     const res = await fetch(`/api/diagram?id=${id}`);
     const json = await res.json().catch(() => ({}));

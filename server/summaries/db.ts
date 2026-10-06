@@ -151,6 +151,16 @@ CREATE TABLE IF NOT EXISTS tickets (
   starred_at    TEXT
 );
 
+-- PR feedback that Piper marked addressed on the PR panel. GitHub has no resolved state for a
+-- review body or a conversation comment. A thread's key is its newest comment, so a new reply
+-- makes it "to address" again.
+CREATE TABLE IF NOT EXISTS pr_feedback_addressed (
+  pr_ref       TEXT NOT NULL,
+  key          TEXT NOT NULL,
+  addressed_at TEXT NOT NULL,
+  PRIMARY KEY (pr_ref, key)
+);
+
 -- One drafted Slack review request per PR, written by a cheap model. Piper can edit it before it is sent.
 CREATE TABLE IF NOT EXISTS review_drafts (
   pr_url       TEXT PRIMARY KEY,
@@ -402,6 +412,17 @@ export function setStarred(ticket: string, starred: boolean): void {
 /** Starred ticket keys, first starred first. */
 export function starredTickets(): string[] {
   return (open().prepare("SELECT key FROM tickets WHERE starred_at IS NOT NULL ORDER BY starred_at").all() as { key: string }[]).map((r) => r.key);
+}
+
+// ---- PR feedback: what Piper marked addressed on the PR panel -------------------------
+
+export function setAddressed(prRef: string, key: string, addressed: boolean): void {
+  if (addressed) open().prepare("INSERT OR IGNORE INTO pr_feedback_addressed (pr_ref, key, addressed_at) VALUES (?, ?, ?)").run(prRef, key, new Date().toISOString());
+  else open().prepare("DELETE FROM pr_feedback_addressed WHERE pr_ref = ? AND key = ?").run(prRef, key);
+}
+
+export function addressedKeys(prRef: string): string[] {
+  return (open().prepare("SELECT key FROM pr_feedback_addressed WHERE pr_ref = ? ORDER BY addressed_at").all(prRef) as { key: string }[]).map((r) => r.key);
 }
 
 // ---- thread status: is a pi thread still relevant to a ticket? -----------------------

@@ -481,6 +481,11 @@ a.btn.verb { text-decoration: none; }
 .pr-threads > li:last-child { border-bottom: 0; }
 .pr-thread-head { display: flex; align-items: center; gap: 8px; color: var(--ink-2); margin-bottom: 6px; }
 .pr-comment { margin: 6px 0 0 12px; padding-left: 10px; border-left: 2px solid var(--line); }
+.pr-threads > li.fb-muted { opacity: 0.6; }
+.fb-head { flex-wrap: wrap; }
+.fb-head .meta, .fb-head b, .fb-head .tag, .fb-head .btn { white-space: nowrap; }
+.fb-head .mono { min-width: 0; overflow-wrap: anywhere; }
+.pr-threads details.pr-comment > summary { cursor: pointer; color: var(--ink-2); }
 .pr-files > li { display: flex; gap: 10px; align-items: baseline; padding: 3px 0; font-size: 12.5px; }
 .pr-files .pr-file { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 /* Ticket section: Jira's description and comments, read when it opens, and the Jira verbs. */

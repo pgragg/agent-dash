@@ -118,6 +118,8 @@ export interface PrCheck {
 
 export interface PrReviewComment {
   author: string;
+  /** A GitHub App, or a login that ends in "bot". */
+  bot: boolean;
   body: string;
   createdAt: string;
   url: string;
@@ -128,6 +130,25 @@ export interface PrReviewThread {
   line: number | null;
   isOutdated: boolean;
   comments: PrReviewComment[];
+}
+
+/** A submitted review. GitHub also makes one, with no body, for each batch of thread comments. */
+export interface PrReview {
+  author: string;
+  bot: boolean;
+  state: string;
+  body: string;
+  submittedAt: string;
+  url: string;
+}
+
+/** A comment on the PR's conversation tab, not on a line. */
+export interface PrConversationComment {
+  author: string;
+  bot: boolean;
+  body: string;
+  createdAt: string;
+  url: string;
 }
 
 /** One PR in full, for the PR panel. Fetched on demand from GET /api/pr, never part of the dashboard. */
@@ -149,6 +170,13 @@ export interface PrDetail {
   /** Only threads that are not resolved. */
   threads: PrReviewThread[];
   reviewers: { login: string; state: string }[];
+  /** The last 50 reviews and conversation comments, oldest first. */
+  reviews: PrReview[];
+  comments: PrConversationComment[];
+  /** When the head commit was made. */
+  lastCommitAt: string | null;
+  /** Feedback keys that Piper marked addressed on the panel. Saved in SQLite, never on GitHub. */
+  addressed: string[];
   requestedReviewers: string[];
   additions: number;
   deletions: number;
