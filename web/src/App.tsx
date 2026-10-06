@@ -23,7 +23,7 @@ import { SlackQuotes } from "./slackQuotes.tsx";
 import { DueDateVerb, TicketPanel } from "./ticketPanel.tsx";
 import { DiagramCards, DiagramsView, DiagramView } from "./diagrams.tsx";
 import { SessionScope } from "./mermaid.tsx";
-import { type BoardMode, kanbanColumns, stageOf, useBoardMode } from "./kanban.ts";
+import { type BoardMode, kanbanColumns, type Searchable, searchCards, stageOf, useBoardMode } from "./kanban.ts";
 import { starredFirst } from "./star.ts";
 import { DEFAULT_SNOOZE, isSnoozed, SNOOZE_OPTIONS, type SnoozeOption, snoozeUntil, untilLabel } from "./snooze.ts";
 
@@ -324,6 +324,16 @@ function BoardModeToggle({ mode, setMode }: { mode: BoardMode; setMode: (m: Boar
       {option("kanban", "Kanban", "One column per SDLC stage")}
     </span>
   );
+}
+
+/** What the kanban search reads on a card: its ticket keys, then its title, runs and PRs. */
+function searchFields(s: Subject, data: Dashboard): Searchable {
+  const runs = s.ticket ? s.ticket.runs : s.run ? [s.run] : [];
+  const prs = s.ticket ? s.ticket.prs : data.prs.filter((p) => p.url === s.prUrl);
+  return {
+    keys: s.ticket ? [s.ticket.ticket.key] : [...runs.flatMap((r) => r.tickets), ...prs.flatMap((p) => p.tickets)],
+    text: [s.ticket?.ticket.summary ?? "", ...runs.flatMap((r) => [r.name ?? "", r.firstPrompt, r.lastReply]), ...prs.flatMap((p) => [p.title, p.headRef, p.url])],
+  };
 }
 
 /** The board's entries as cards, in the column of the SDLC stage that each ticket reached. */
@@ -1549,6 +1559,7 @@ const KEYS: [string, string][] = [
   ["C", "Start a new conversation with pi on its own page, with no context"],
   ["V", "Switch the board between the queue and the kanban"],
   ["↵", "On the kanban: open the selected card's workspace"],
+  ["/", "On the kanban: search the cards (ticket keys rank first)"],
   ["⌘↵", "Send the reply"],
   ["Esc", "Leave the reply box"],
   ["?", "Show or hide this help"],
@@ -1593,6 +1604,8 @@ export function App() {
   const [boardMode, setBoardMode] = useBoardMode();
   // On the kanban, the workspace opens in a drawer over the columns when you pick a card.
   const [drawer, setDrawer] = useState(() => route.view === "board" && !!route.ref);
+  const [kanbanQuery, setKanbanQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
 
   const subjects = useMemo(() => (data ? buildSubjects(data) : new Map<string, Subject>()), [data]);
   const until = (s: Subject) => (s.ticket ? data?.snoozedUntil[s.ticket.ticket.key] : undefined);
@@ -1617,6 +1630,8 @@ export function App() {
   const starredList = unsnoozed.filter(isStarred);
   const unstarred = (list: Subject[]) => list.filter((s) => !isStarred(s));
   const order = [...starredList, ...unstarred(unsnoozed), ...snoozedList];
+  // The search keeps only the matching cards, best match first, and J/K walk them in that order.
+  const kanbanOrder = boardMode === "kanban" && data ? searchCards(order, kanbanQuery, (s) => searchFields(s, data)) : order;
 
   const target = data && boardRef ? resolveBoardRef(boardRef, data, new Set(subjects.keys())) : null;
   const selected = (target && subjects.get(target.subjectId)) || queue[0] || order[0] || null;
@@ -1641,11 +1656,11 @@ export function App() {
 
   const move = useCallback(
     (delta: number) => {
-      if (!order.length) return;
-      const i = selected ? order.findIndex((s) => s.id === selected.id) : -1;
-      select(order[Math.max(0, Math.min(order.length - 1, i + delta))].id);
+      if (!kanbanOrder.length) return;
+      const i = selected ? kanbanOrder.findIndex((s) => s.id === selected.id) : -1;
+      select(kanbanOrder[Math.max(0, Math.min(kanbanOrder.length - 1, i + delta))].id);
     },
-    [order, selected, select],
+    [kanbanOrder, selected, select],
   );
 
   const doneAndAdvance = useCallback(() => {
@@ -1683,6 +1698,7 @@ export function App() {
         else setDrawer(false);
       } else if (e.key === "v") setBoardMode(boardMode === "queue" ? "kanban" : "queue");
       else if (e.key === "Enter" && boardMode === "kanban" && !drawer && selected) setDrawer(true);
+      else if (e.key === "/" && boardMode === "kanban") searchRef.current?.focus();
       else if (e.key === "r") setFocusSignal((n) => n + 1);
       else if (e.key === "n" && selected?.ticket) setNoteSignal((n) => n + 1);
       else if (e.key === "a" && selected?.ticket) setAgentSignal((n) => n + 1);
@@ -1838,10 +1854,29 @@ export function App() {
           <div className="kanban-bar">
             {newConversation}
             <BoardModeToggle mode={boardMode} setMode={setBoardMode} />
-            <span className="meta">Each card sits in the column of the furthest SDLC stage that its ticket reached.</span>
+            <input
+              ref={searchRef}
+              className="search kanban-search"
+              type="search"
+              placeholder="Search keys and text (/)"
+              aria-label="Search the cards"
+              value={kanbanQuery}
+              onChange={(e) => setKanbanQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setKanbanQuery("");
+                  e.currentTarget.blur();
+                } else if (e.key === "Enter" && kanbanOrder[0]) {
+                  select(kanbanOrder[0].id);
+                  setDrawer(true);
+                  e.currentTarget.blur();
+                }
+              }}
+            />
+            <span className="meta">{kanbanQuery.trim() ? `${kanbanOrder.length} ${kanbanOrder.length === 1 ? "match" : "matches"}, best first. ↵ opens the first.` : "Each card sits in the column of the furthest SDLC stage that its ticket reached."}</span>
           </div>
           <KanbanBoard
-            order={order}
+            order={kanbanOrder}
             dim={new Set([...done, ...quiet, ...snoozedList])}
             ranks={new Map(queue.map((s, i) => [s, i + 1]))}
             selected={selected}

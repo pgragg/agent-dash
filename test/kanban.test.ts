@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { PullRequest, SdlcEvent, Ticket, TicketGroup } from "../shared/types.ts";
-import { kanbanColumns, stageOf } from "../web/src/kanban.ts";
+import { kanbanColumns, type Searchable, searchCards, searchScore, stageOf } from "../web/src/kanban.ts";
 import { pr, ticket } from "./helpers.ts";
 
 const group = (t: Partial<Ticket> = {}, prs: PullRequest[] = []): TicketGroup => ({ ticket: ticket(t), runs: [], prs, threads: {} });
@@ -51,4 +51,24 @@ test("one column per stage in order, then No ticket; each column keeps the order
   assert.deepEqual(cols.find((c) => c.id === "pr")!.items, ["a", "c"]);
   assert.deepEqual(cols.find((c) => c.id === "in_beta")!.items, ["b"]);
   assert.deepEqual(cols.find((c) => c.id === "none")!.items, ["d"]);
+});
+
+test("search: a key match outranks any text match, and an exact key outranks a longer one", () => {
+  const cards: Record<string, Searchable> = {
+    mention: { keys: ["FSDK-9"], text: ["Follow up on FSDK-1502 and AD-1"] },
+    ad11: { keys: ["AD-11"], text: ["Kanban search"] },
+    ad1: { keys: ["AD-1"], text: ["Read local tickets"] },
+    fsdk1502: { keys: ["FSDK-1502"], text: ["Fix the docs build"] },
+  };
+  const ids = Object.keys(cards);
+  const find = (q: string) => searchCards(ids, q, (id) => cards[id]);
+  assert.deepEqual(find("fsdk-1502"), ["fsdk1502", "mention"]);
+  assert.deepEqual(find("1502"), ["fsdk1502", "mention"]);
+  assert.deepEqual(find("AD-1"), ["ad1", "ad11", "mention"]);
+  assert.deepEqual(find("KANBAN"), ["ad11"]);
+  // Every word must match; the key word still lifts its card.
+  assert.deepEqual(find("ad-1 local"), ["ad1"]);
+  assert.deepEqual(find("nothing"), []);
+  assert.deepEqual(find("  "), ids);
+  assert.ok(searchScore(cards.fsdk1502, "fsdk-1502")! > searchScore(cards.mention, "fsdk-1502 follow up on and")!);
 });
