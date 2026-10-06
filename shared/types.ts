@@ -557,3 +557,30 @@ export interface LaneGit {
   /** Changed and new files that are not committed. */
   dirty: number;
 }
+
+/** A git worktree of a repo that agent-dash knows, for the Worktrees view and its Clean up. */
+export interface WorktreeInfo {
+  /** The repo's main checkout. */
+  repo: string;
+  path: string;
+  /** Null on a detached HEAD. */
+  branch: string | null;
+  /** The lane or integration branch that owns it, or null for an orphan. */
+  owner: { ticket: string; laneId: number | null; lane: string | null } | null;
+  /** Origin's default branch, which "behind" and "contained" count against. */
+  base: string;
+  ahead: number;
+  behind: number;
+  /** Every commit of the branch (or the detached HEAD) is on `origin/<base>`. */
+  contained: boolean;
+  dirty: number;
+  pr: { url: string; state: string } | null;
+  /** When git last moved its HEAD: a commit, a checkout, a reset, or the worktree's creation. */
+  lastUsedAt: string | null;
+  /** A live pi session that started in this folder. */
+  liveSession: string | null;
+  /** Why Clean up is off, or null. */
+  blocker: string | null;
+  /** Clean up also deletes the branch, because its work is on the base or its PR merged. */
+  deletesBranch: boolean;
+}

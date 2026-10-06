@@ -6,6 +6,8 @@ import type { RunActivity, RunDialog, RunStatus } from "../../shared/types.ts";
 export interface ReportedStatus {
   sessionId: string;
   pid: number;
+  /** The folder pi started in. */
+  cwd?: string;
   itermSessionId?: string | null;
   /** The extension watches ~/.agent-dash/inbox/<sessionId>/ for replies typed in the dash. */
   inbox?: boolean;

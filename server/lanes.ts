@@ -8,7 +8,9 @@ import type { LaneGit, LaneMode, WorkLane } from "../shared/types.ts";
 const exec = promisify(execFile);
 
 export async function git(cwd: string, ...args: string[]): Promise<string> {
-  const { stdout } = await exec("git", ["-C", cwd, ...args], { maxBuffer: 16_000_000 });
+  // The dash reads worktrees that agents work in. A status that refreshes the index would take
+  // index.lock, and the agent's own git command would fail on it.
+  const { stdout } = await exec("git", ["--no-optional-locks", "-C", cwd, ...args], { maxBuffer: 16_000_000 });
   return stdout.trim();
 }
 
@@ -99,7 +101,7 @@ export async function createLanes(plan: LanePlan): Promise<void> {
   }
 }
 
-export async function listWorktrees(repo: string): Promise<{ path: string; branch: string | null }[]> {
+export async function listWorktrees(repo: string): Promise<{ path: string; branch: string | null; head: string }[]> {
   const out = await git(repo, "worktree", "list", "--porcelain");
   return out
     .split("\n\n")
@@ -108,7 +110,7 @@ export async function listWorktrees(repo: string): Promise<{ path: string; branc
       const lines = block.split("\n");
       const path = lines.find((l) => l.startsWith("worktree "))?.slice(9) ?? "";
       const ref = lines.find((l) => l.startsWith("branch "))?.slice(7) ?? null;
-      return { path, branch: ref?.replace(/^refs\/heads\//, "") ?? null };
+      return { path, branch: ref?.replace(/^refs\/heads\//, "") ?? null, head: lines.find((l) => l.startsWith("HEAD "))?.slice(5) ?? "HEAD" };
     });
 }
 

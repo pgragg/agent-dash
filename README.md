@@ -244,7 +244,23 @@ Each agent card opens on a short summary of its conversation, in three lines: **
 - **Land** (`POST /api/lanes/land?id=<n>`, `land` mode) rebases the lane onto `<key>`, runs the repo's checks in the lane (the `typecheck` and `test` scripts of `package.json`, with the package manager of its lockfile; no `package.json` means no gate), and fast-forwards `<key>`. One land runs at a time per ticket, so each one rebases onto what the one before it landed, and `<key>` stays linear and green.
   - It refuses, and changes nothing, while the lane's agent is working, while the lane has uncommitted files, when the lane has no new commits, or when the integration worktree is not clean or not on `<key>` (another tool can take the branch).
   - On a conflict it aborts the rebase, marks the lane `conflict` with the files, and sends the lane's agent a message: rebase onto `<key>`, keep both changes, commit, and stop. On red checks it marks the lane `checks_failed` and sends the end of the output. Then **Land** again.
+- **Clean up** on a lane row removes its worktree through the same check as the Worktrees view, and marks the lane `removed`. Its branch goes too when its commits landed into `<key>`, are on `origin/<base>`, or its PR merged; otherwise the branch stays.
 - **Open PR** (`POST /api/lanes/pr?ticket=<KEY>&title=<title>`) starts an agent in the integration worktree that pushes `<key>` and opens the PR into the base, after at least one lane landed. Once GitHub has that PR, the button becomes its link.
+
+## Worktrees
+
+`#/worktrees` lists every git worktree of agent-dash's own repo and of each repo that ever had a lane (`GET /api/worktrees`, read-only). Each row shows its branch, its owner (a lane, an integration branch, or **orphan**), commits ahead and behind `origin/<default>`, uncommitted files, when git last moved its HEAD, and its PR from `gh pr list --head`.
+
+**Clean up** (`POST /api/worktrees/cleanup` with `{path}`) never loses work. The server scans the worktree again, and refuses:
+
+- the repo's main checkout;
+- a folder where a live pi session started (from the status files);
+- uncommitted or new files (and `git worktree remove` runs without `--force`, so a file that appears after the scan also stops it);
+- an orphan that git used in the last 24 hours, because a session that cd'ed into it shows in no status file;
+- a detached HEAD with commits that the base does not have;
+- an integration worktree while its lanes are still active.
+
+It deletes the branch only when its work is safe: on `origin/<default>`, landed into the ticket branch, or in a merged PR (a squash merge leaves the commits off the base). Otherwise the branch stays. The dash reads worktrees with `git --no-optional-locks`, so a status read never takes `index.lock` from an agent that works there.
 
 ## Storage
 

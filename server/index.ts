@@ -24,6 +24,7 @@ import * as sdlcRoute from "./routes/sdlc.ts";
 import * as smoketestPlanRoute from "./routes/smoketestPlan.ts";
 import * as reviewRoute from "./routes/reviewRequests.ts";
 import * as lanesRoute from "./routes/lanes.ts";
+import * as worktreesRoute from "./routes/worktrees.ts";
 import { confirmDeployMessage, deployStageOf, parseEnvironment, planMessage } from "../shared/sdlc.ts";
 import { requestConversationSummaries, summariesFor } from "./conversationSummaries.ts";
 import { syncDiagrams } from "./diagramSync.ts";
@@ -258,6 +259,7 @@ const server = createServer(async (req, res) => {
     // The dashboard's PRs carry the tickets that cross-linking gave them.
     if (await reviewRoute.handle(req, res, url, { prs: async () => (await dashboard(false)).prs, onChange: broadcast })) return;
     if (await lanesRoute.handle(req, res, url, { context: ticketContext, onChange: broadcast })) return;
+    if (await worktreesRoute.handle(req, res, url, broadcast)) return;
     if (await loginRoute.handle(req, res, url)) return;
     if (await slackRoute.handle(req, res, url)) return;
     if (url.pathname === "/api/dashboard") {
