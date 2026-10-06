@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { promisify } from "node:util";
 import type { PrCheck, PrDetail } from "../../shared/types.ts";
 import { config } from "../config.ts";
-import { checkState, contextName, contextState } from "../sources/github.ts";
+import { checkState, contextName, contextState, isBot } from "../sources/github.ts";
 import { extractTickets } from "../sources/sessions.ts";
 import * as db from "../summaries/db.ts";
 
@@ -67,9 +67,6 @@ export function logTail(text: string, maxLines = TAIL_LINES, maxChars = TAIL_CHA
   const tail = lines.slice(Math.max(0, end - maxLines), end).join("\n");
   return tail.length > maxChars ? `…${tail.slice(-maxChars)}` : tail;
 }
-
-/** nitpickybot is a plain user account, so the login counts too. */
-const isBot = (author: any) => author?.__typename === "Bot" || /bot(\[bot\])?$/i.test(author?.login ?? "");
 
 /** An Actions check run's id is its job id, which the log endpoint takes. Stays on the server. */
 type CheckWithJob = PrCheck & { jobId?: number };
@@ -201,7 +198,7 @@ function readBody(req: IncomingMessage, max: number): Promise<string> {
   });
 }
 
-export async function handle(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
+export async function handle(req: IncomingMessage, res: ServerResponse, url: URL, onChange: () => void = () => {}): Promise<boolean> {
   const marking = url.pathname === "/api/pr/addressed" && req.method === "POST";
   if (!marking && (url.pathname !== "/api/pr" || req.method !== "GET")) return false;
   // Same guard as the POST routes: each request runs gh with your login, so another site must not trigger it.
@@ -228,6 +225,8 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
       return true;
     }
     db.setAddressed(key, body.key, body.addressed === true);
+    // The board counts the feedback to address, so it changes too.
+    onChange();
     json(200, { ok: true, addressed: db.addressedKeys(key) });
     return true;
   }

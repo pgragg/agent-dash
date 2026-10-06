@@ -26,7 +26,8 @@ import * as reviewRoute from "./routes/reviewRequests.ts";
 import { confirmDeployMessage, deployStageOf, parseEnvironment, planMessage } from "../shared/sdlc.ts";
 import { requestConversationSummaries, summariesFor } from "./conversationSummaries.ts";
 import { syncDiagrams } from "./diagramSync.ts";
-import { fetchMyPrs } from "./sources/github.ts";
+import { fetchMyPrs, type PullWithFeedback } from "./sources/github.ts";
+import { toAddressCount } from "../shared/feedback.ts";
 import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
 import { isLocalKey, readLocalTickets } from "./sources/localTickets.ts";
 import { SessionIndex, transcriptTurns } from "./sources/sessions.ts";
@@ -80,9 +81,16 @@ class Cached<T> {
 
 const sessions = new SessionIndex(config.sessionsDir, config.ticketPattern);
 const myTickets = new Cached<Ticket[]>([], fetchMyTickets);
-const prs = new Cached<PullRequest[]>([], () => fetchMyPrs(config.recentDays, config.ticketPattern));
+const prs = new Cached<PullWithFeedback[]>([], () => fetchMyPrs(config.recentDays, config.ticketPattern));
 const others = new Map<string, Ticket>();
 let othersHealth: SourceHealth = { ok: true };
+
+/** Counted on each build, so a feedback entry marked addressed on the panel counts at once. */
+function withToAddress({ feedback, ...pr }: PullWithFeedback): PullRequest {
+  if (!feedback) return pr;
+  const ref = `${pr.repo}/${pr.number}`.toLowerCase();
+  return { ...pr, toAddress: toAddressCount({ ...feedback, addressed: summaryDb.addressedKeys(ref) }) };
+}
 
 async function dashboard(force: boolean) {
   const now = Date.now();
@@ -102,7 +110,7 @@ async function dashboard(force: boolean) {
   // Keys match in any case, so a name such as /tmp/ad-7791.log reads as a key. With no file, it is not a ticket.
   const real = (k: string) => !isLocalKey(k) || local.has(k);
   const parsed = scanned.map((s) => (s.tickets.every(real) ? s : { ...s, tickets: s.tickets.filter(real) }));
-  const pulls = rawPulls.map((p) => (p.tickets.every(real) ? p : { ...p, tickets: p.tickets.filter(real) }));
+  const pulls = rawPulls.map(withToAddress).map((p) => (p.tickets.every(real) ? p : { ...p, tickets: p.tickets.filter(real) }));
   const mine = [...jiraMine, ...[...local.values()].filter((t) => t.statusCategory !== "done")];
   const otherKeys = otherTicketKeys(parsed, pulls, new Set(mine.map((t) => t.key)), now, config.recentDays);
   const otherLocal = otherKeys.flatMap((k) => local.get(k) ?? []);
@@ -240,7 +248,7 @@ const server = createServer(async (req, res) => {
     if (await exitRoutes.handle(req, res, url)) return;
     if (await resumeRoute.handle(req, res, url, sessions)) return;
     if (await liveControl.handle(req, res, url)) return;
-    if (await prRoute.handle(req, res, url)) return;
+    if (await prRoute.handle(req, res, url, broadcast)) return;
     if (await ticketRoute.handle(req, res, url, onDueDate)) return;
     if (await diagramRoute.handle(req, res, url, sessions, broadcast)) return;
     if (await smoketestPlanRoute.handle(req, res, url, { sessions, context: ticketContext, script: SDLC_SCRIPT, onChange: broadcast })) return;

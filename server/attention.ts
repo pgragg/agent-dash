@@ -65,7 +65,11 @@ function prItems(prs: PullRequest[], now: number): Draft[] {
     if (pr.checks === "failure") items.push({ ...base, kind: "ci_failing", score: 85 * weight, status: "CI red", reason: `${name}: CI is red${pr.failedChecks?.length ? `: ${checkList(pr.failedChecks)}` : ""}` });
     if (pr.mergeable === "CONFLICTING") items.push({ ...base, kind: "merge_conflict", score: 80 * weight, status: "conflict", reason: `${name}: merge conflict` });
     if (pr.reviewDecision === "APPROVED" && !pr.isDraft && pr.checks !== "failure" && pr.checks !== "pending" && pr.mergeable !== "CONFLICTING") {
-      items.push({ ...base, kind: "ready_to_merge", score: 70, status: "approved", reason: `${name}: approved and green — merge it` });
+      // An approval can ask for one more change, so it is not "merge it" while feedback waits for an answer.
+      const open = pr.toAddress ?? 0;
+      const comments = open === 1 ? "1 comment" : `${open} comments`;
+      if (open > 0) items.push({ ...base, kind: "approved_with_feedback", score: 75, status: `${open} to address`, reason: `${name}: approved, ${comments} to address` });
+      else items.push({ ...base, kind: "ready_to_merge", score: 70, status: "approved", reason: `${name}: approved and green — merge it` });
     } else if (pr.reviewDecision === null && !pr.isDraft && pr.mergeStateStatus === "CLEAN") {
       // The repo requires no review, so a green PR waits only for me.
       items.push({ ...base, kind: "ready_to_merge", score: 70, status: "green", reason: `${name}: needs no review and is green — merge it` });

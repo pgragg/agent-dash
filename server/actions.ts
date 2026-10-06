@@ -25,6 +25,7 @@ const SOURCE: Record<AttentionKind, Source> = {
   ci_failing: "github",
   merge_conflict: "github",
   ready_to_merge: "github",
+  approved_with_feedback: "github",
   in_review: "github",
   overdue: "jira",
   due_soon: "jira",
