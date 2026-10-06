@@ -230,6 +230,17 @@ Each agent card opens on a short summary of its conversation, in three lines: **
 - **Extension dialogs** (`ctx.ui.select`, `confirm`, `input`, `editor`) show on the page as a card, and you answer them there. See [Live control](#live-control).
 - **Limit:** the page answers a dialog only in a conversation on the page. A dialog in a terminal session shows on its card as "Waiting on a dialog in iTerm", and you answer it in the tab: a tui dialog reads the terminal's keys, and the dash cannot type into it. A dialog that was open when you typed `/reload` drops off the card, but still waits in the session. A pi that started with an extension older than version 2 does not report its dialogs, so they get no answer on the page; they wait until their timeout, or for ever if they have none.
 
+## Parallel lanes
+
+**Start a new agent** with **parallel lanes** on starts 2 to 6 agents on one ticket, each in its own git worktree, so they do not edit the same files or move the same checkout. `POST /api/agents?ticket=<KEY>` takes `lanes: [{name, message}]`, `laneMode` (`land` or `pr`) and an optional `base`; `message` is then a brief that every lane gets.
+
+- **The server makes the worktrees, not the agent.** From the folder you pick, it finds the repo's main checkout, refuses a shallow clone (a rebase there replays the graft commit), and runs `git fetch origin <base>`. The default base is origin's default branch.
+- **`land` mode**: one integration worktree per ticket, `../<repo>-<key>` on branch `<key>` from `origin/<base>`, made once. Each lane branches from it. The lanes do not push; their work lands into `<key>`, and one PR goes out from there.
+- **`pr` mode**: each lane branches from `origin/<base>`, and its agent opens its own PR.
+- **Per lane**: `git worktree add --no-track -b <key>-<lane> ../<repo>-<key>-<lane>`, a row in `lanes`, and a headless agent named `<KEY>/<lane>: …` that starts in the worktree. Its first message is the ticket context, a lane brief (its folder and branch, the other lanes and their goals, a port for a dev server, and how its work comes back), the shared brief, and its own message.
+- If a worktree fails, the server removes the ones that the same request made. A lane name whose branch or folder exists already is refused before anything changes.
+- **The Parallel lanes card** on the ticket shows one row per lane: its branch, commits ahead and behind its base, uncommitted files, and its agent's state. A lane whose worktree is gone, or whose agent checked out another branch, shows in red.
+
 ## Storage
 
 Everything you write lives in SQLite at `~/.agent-dash/agent-dash.db`:
@@ -249,6 +260,7 @@ Everything you write lives in SQLite at `~/.agent-dash/agent-dash.db`:
 | `SDLC_Event_Ticket` | One per ticket of an event: `sdlc_event_id`, `ticket`, `created_at` (when the link was made), `summary_requested_at` (when the server started the next-steps draft for it; empty until then, set at once for a smoketest that only started, and empty again when the event changes), `changed_at` (when the event last changed; set by the `sdlc_event_changed` trigger) |
 | `conversation_summaries` | One per pi conversation with a summary: `session_id`, `status` (`in_progress`, `done` or `failed`), `basis` (the prompt count, a hash of the last message, and live or ended: the state it describes), `about`, `latest`, `needs`, `error`, `requested_at`, `generated_at` |
 | `PiConversationStatusChange` | One per change to a thread's relevance: `ticket`, `session_id`, `status` (`relevant` or `resolved`), `reason` (resolved only, optional), `created_at`. Append-only; the newest row per ticket and thread is the current state. |
+| `lanes` | One per parallel lane: `ticket`, `repo` (the main checkout), `lane`, `mode` (`land` or `pr`), `base`, `branch`, `worktree`, `integration_branch` and `integration_worktree` (`land` mode), `session_id`, `goal` (its first message), `state`, `created_at`. Written by the server when it makes the worktree. See [Parallel lanes](#parallel-lanes). |
 
 ## Reply to an agent
 
