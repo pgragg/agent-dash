@@ -11,7 +11,7 @@ import type { Dashboard } from "../../shared/types.ts";
  * | `#/note:ID`       | A note, on its ticket                             |
  * | `#/pr:OWNER/REPO/N` | The PR panel (a view under PRs)                 |
  * | `#/a:ID`          | An action on the Actions view                     |
- * | `#/needs`         | The list behind "N things need you"               |
+ * | `#/needs`         | The list behind "N notifications"                 |
  * | `#/c:SESSION`     | A conversation's page                             |
  * | `#/d:ID`          | A diagram's page                                  |
  * | `#/diagrams`      | Every diagram                                     |

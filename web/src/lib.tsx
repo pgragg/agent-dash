@@ -2,7 +2,7 @@ import { Fragment, type ReactNode, useCallback, useEffect, useRef, useState } fr
 import type { Dashboard, DiagramWithSource, HistoryRun, PrDetail, ThreadStatus, Transcript } from "../../shared/types.ts";
 import { internalHref, JIRA_BROWSE, splitTrailing } from "./links.ts";
 import { EmbeddedImage, MermaidFence, setKnownDiagrams } from "./mermaid.tsx";
-import { boardHash, newlyWaiting, runsOf, type Seen, snapshot } from "./notify.ts";
+import { boardHash, newlyWaiting, notificationFor, type Pending, releasePending, runsOf, type Seen, snapshot } from "./notify.ts";
 
 // ---- time ---------------------------------------------------------------------------
 
@@ -154,24 +154,41 @@ export function useWaitNotifications(data: Dashboard | null) {
   const [permission, setPermission] = useState(supported ? Notification.permission : "denied");
   const [muted, setMuted] = useState(() => localStorage.getItem(MUTE_KEY) === "1");
   const seen = useRef<Map<string, Seen> | null>(null);
+  const pending = useRef(new Map<string, Pending>());
+  const latest = useRef(data);
 
-  useEffect(() => {
-    if (!data) return;
-    const runs = runsOf(data);
-    const fresh = newlyWaiting(seen.current, runs);
-    seen.current = snapshot(runs);
+  const release = useCallback(() => {
+    const d = latest.current;
+    if (!d) return;
+    const { send, keep } = releasePending(pending.current, runsOf(d), d.conversationSummaries, Date.now());
+    pending.current = keep;
     if (!supported || muted || Notification.permission !== "granted") return;
-    for (const r of fresh) {
-      const title = runTitle(r);
+    for (const r of send) {
+      const { title, body } = notificationFor(r, d.conversationSummaries[r.sessionId]);
       // The tag makes a second open dash tab replace this notification instead of adding one.
-      const n = new Notification(`pi: ${title.length > 80 ? `${title.slice(0, 79)}…` : title}`, { body: r.lastReply || "Waiting for you", tag: r.sessionId });
+      const n = new Notification(title, { body, tag: r.sessionId });
       n.onclick = () => {
         window.focus();
         location.hash = boardHash(r);
         n.close();
       };
     }
-  }, [data, muted, supported]);
+  }, [muted, supported]);
+
+  useEffect(() => {
+    if (!data) return;
+    latest.current = data;
+    const runs = runsOf(data);
+    for (const r of newlyWaiting(seen.current, runs)) pending.current.set(r.sessionId, { since: r.statusSince, heldAt: Date.now() });
+    seen.current = snapshot(runs);
+    release();
+  }, [data, release]);
+
+  // The time limit passes with no new data, so check it on a timer too.
+  useEffect(() => {
+    const id = setInterval(release, 5000);
+    return () => clearInterval(id);
+  }, [release]);
 
   const state: NotifyState = !supported ? "unsupported" : permission === "denied" ? "blocked" : permission === "default" ? "ask" : muted ? "muted" : "on";
   const setMute = (m: boolean) => {

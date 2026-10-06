@@ -24,7 +24,8 @@ const DIGEST_CHARS = 16_000;
  */
 export function basisOf(r: Run): string {
   const hash = createHash("sha1").update(r.lastMessage).digest("hex").slice(0, 12);
-  return `${r.userMessageCount}:${hash}:${r.status === "finished" ? "end" : "live"}`;
+  // A draft made while the agent worked cannot say what it needs once it stops.
+  return `${r.userMessageCount}:${hash}:${r.status === "finished" ? "end" : r.status === "working" ? "work" : "live"}`;
 }
 
 /**

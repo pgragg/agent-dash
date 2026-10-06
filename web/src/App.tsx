@@ -10,6 +10,7 @@ import { countPrs, groupOpenPrs } from "./prs.ts";
 import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, resumeCommand, runTitle, shortDate, stamp, useDashboard, useFlash, useNow, useWaitNotifications } from "./lib.tsx";
 import { Composer, LivePanel } from "./liveControl.tsx";
 import { needStep } from "./needs.ts";
+import { agentFinished, runsOf, summaryText } from "./notify.ts";
 import { href, humanAge, parseHash, resolveBoardRef, type Route } from "./routes.ts";
 import { FixLogin } from "./fixLogin.tsx";
 import { rowKey } from "./rowNav.ts";
@@ -46,9 +47,17 @@ interface Subject {
   /** A PR with no ticket and no run. */
   prUrl: string | null;
   /** Most urgent first. */
-  items: AttentionItem[];
+  items: Item[];
   /** Changes whenever a signal changes, so "done for now" expires on news. */
   fingerprint: string;
+}
+
+/** A signal, with the summary of its agent's conversation when it has one. */
+interface Item extends AttentionItem {
+  /** The summary for the notification. Null until it is ready, so nothing old shows. */
+  gist: string | null;
+  /** The agent stopped, and its summary says it needs nothing from you. */
+  finished: boolean;
 }
 
 const KIND: Record<AttentionKind, { title: string; tone: "waiting" | "working" | "bad" | "warn" | "good" | "muted" }> = {
@@ -77,6 +86,13 @@ const SHORT: Record<AttentionKind, string> = {
   stalled: "stalled",
 };
 
+const FINISHED = { title: "Agent finished", tone: "good", short: "finished" } as const;
+
+/** How a signal shows: "Agent finished" for an agent that needs nothing, else its kind. */
+function look(a: Item): { title: string; tone: string; short: string } {
+  return a.finished ? FINISHED : { ...KIND[a.kind], short: SHORT[a.kind] };
+}
+
 function buildSubjects(d: Dashboard): Map<string, Subject> {
   const out = new Map<string, Subject>();
   const add = (id: string, init: Omit<Subject, "id" | "items" | "fingerprint">) => {
@@ -85,12 +101,19 @@ function buildSubjects(d: Dashboard): Map<string, Subject> {
   };
   for (const g of [...d.myTickets, ...d.otherTickets]) add(`t:${g.ticket.key}`, { ticket: g, run: null, prUrl: null });
   for (const r of d.unlinkedRuns) add(`r:${r.sessionId}`, { ticket: null, run: r, prUrl: null });
+  const runs = new Map(runsOf(d).map((r) => [r.sessionId, r]));
   for (const a of d.attention) {
     const id = a.ticketKey ? `t:${a.ticketKey}` : a.sessionId ? `r:${a.sessionId}` : `p:${a.prUrl}`;
     const s = out.get(id) ?? add(id, { ticket: null, run: a.run ?? null, prUrl: a.prUrl ?? null });
-    s.items.push(a);
+    const agent = a.kind === "awaiting_input" || a.kind === "run_error";
+    const summary = agent && a.sessionId ? d.conversationSummaries[a.sessionId] : undefined;
+    const run = runs.get(a.sessionId ?? "");
+    const finished = a.kind === "awaiting_input" && agentFinished(run, summary);
+    // The server's reason says "is waiting for you", which a finished agent is not.
+    const reason = finished && run ? `“${run.name ?? run.firstPrompt.slice(0, 60)}” finished ${age(run.statusSince, Date.parse(d.generatedAt))} ago` : a.reason;
+    s.items.push({ ...a, reason, gist: summaryText(summary), finished });
   }
-  for (const s of out.values()) s.fingerprint = s.items.map((a) => `${a.kind}@${a.updatedAt}`).join("|");
+  for (const s of out.values()) s.fingerprint = s.items.map((a) => `${a.kind}${a.finished ? ":finished" : ""}@${a.updatedAt}`).join("|");
   return out;
 }
 
@@ -105,14 +128,25 @@ function actionable(s: Subject): boolean {
 }
 
 /** The item that leads: the most urgent one that needs you, else the first. */
-function lead(s: Subject): AttentionItem | undefined {
+function lead(s: Subject): Item | undefined {
   return s.items.find((a) => !a.info) ?? s.items[0];
 }
 
-/** The other kinds of signal on the subject, for tags next to the lead. */
-function otherKinds(s: Subject): AttentionKind[] {
-  const top = lead(s)?.kind;
-  return [...new Set(s.items.map((a) => a.kind))].filter((k) => k !== top);
+/** One tag per label: two runs that both wait make one tag. */
+function otherTags(s: Subject): { short: string; tone: string }[] {
+  const top = lead(s);
+  const tags = new Map(s.items.map((a) => [look(a).short, look(a).tone]));
+  if (top) tags.delete(look(top).short);
+  return [...tags].map(([short, tone]) => ({ short, tone }));
+}
+
+/** The tags next to the lead signal. */
+function OtherTags({ s }: { s: Subject }) {
+  return otherTags(s).map((t) => (
+    <span key={t.short} className={`tag tone-${t.tone}`}>
+      {t.short}
+    </span>
+  ));
 }
 
 function subjectTitle(s: Subject): string {
@@ -231,11 +265,10 @@ function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snooz
     if (selected) ref.current?.scrollIntoView({ block: "nearest" });
   }, [selected]);
   const done = isDone(s);
-  const headline = top ? KIND[top.kind].title : run ? statusText(run, now) : s.ticket?.ticket.status ?? "";
+  const headline = top ? look(top).title : run ? statusText(run, now) : s.ticket?.ticket.status ?? "";
   // On a Done ticket nothing is urgent, so the headline goes quiet and the green tag says why.
-  const tone = done ? "muted" : top ? KIND[top.kind].tone : run ? runTone(run) : "muted";
+  const tone = done ? "muted" : top ? look(top).tone : run ? runTone(run) : "muted";
   const when = top?.kind === "awaiting_input" && run ? age(run.statusSince, now) : age(top?.updatedAt ?? run?.lastActivityAt ?? s.ticket?.ticket.updatedAt, now);
-  const extra = otherKinds(s);
   return (
     <button ref={ref} className={`q-item ${card ? "k-card" : ""} ${dim ? "dim" : ""} ${starred ? "starred" : ""} ${selected ? "selected" : ""}`} onClick={onSelect} aria-current={selected}>
       {starred && (
@@ -254,11 +287,7 @@ function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snooz
         <span className="q-tags">
           {s.ticket && <span className="q-key">{s.ticket.ticket.key}</span>}
           {done && <span className="tag tone-good">done</span>}
-          {extra.map((k) => (
-            <span key={k} className={`tag tone-${KIND[k].tone}`}>
-              {SHORT[k]}
-            </span>
-          ))}
+          <OtherTags s={s} />
           {summary && !done && <span className="tag tone-muted" title="Next steps drafted">✦ next steps</span>}
           {notes > 0 && <span className="tag tone-muted" title={`${plural(notes, "note")}`}>✎ {notes}</span>}
           {snoozedUntil && <span className="tag tone-muted" title={new Date(snoozedUntil).toLocaleString()}>until {untilLabel(snoozedUntil, now)}</span>}
@@ -904,16 +933,12 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
             </>
           )}
           {top && isDone(s) ? (
-            <span className={`tag tone-${KIND[top.kind].tone}`}>{SHORT[top.kind]}</span>
+            <span className={`tag tone-${look(top).tone}`}>{look(top).short}</span>
           ) : top ? (
             <>
-              <Dot tone={KIND[top.kind].tone} />
-              <span className={`tone-text-${KIND[top.kind].tone}`}>{KIND[top.kind].title}</span>
-              {otherKinds(s).map((k) => (
-                <span key={k} className={`tag tone-${KIND[k].tone}`}>
-                  {SHORT[k]}
-                </span>
-              ))}
+              <Dot tone={look(top).tone} />
+              <span className={`tone-text-${look(top).tone}`}>{look(top).title}</span>
+              <OtherTags s={s} />
             </>
           ) : isDone(s) ? null : (
             <span>{live.length ? "Agents at work" : "Quiet"}</span>
@@ -960,8 +985,11 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
             {s.items.map((a, i) => (
               // A stable key: the verb button keeps its "Started" state when the list changes order.
               <li key={`${a.kind}:${a.prUrl ?? a.sessionId ?? a.ticketKey ?? i}`}>
-                <Dot tone={KIND[a.kind].tone} />
-                <span>{a.reason}</span>
+                <Dot tone={look(a).tone} />
+                <span>
+                  {a.reason}
+                  {a.gist && <span className="why-gist">{a.gist}</span>}
+                </span>
                 <PrVerbButton item={a} data={data} />
                 {t && (a.kind === "overdue" || a.kind === "due_soon") && <DueDateVerb ticket={t} onError={setError} compact />}
               </li>
@@ -1190,12 +1218,12 @@ function firstStep(data: Dashboard, s: Subject): NextStep | null {
   return shown?.steps[0] ?? null;
 }
 
-/** The entries behind "N things need you", in queue order: what each is, its ticket, and where to act in agent-dash. */
+/** The entries behind "N notifications", in queue order, each with where to act. */
 function NeedsView({ queue, hidden, data, now }: { queue: Subject[]; hidden: number; data: Dashboard; now: number }) {
   return (
     <article className="workspace">
       <header className="ws-head">
-        <h1>{queue.length ? `${plural(queue.length, "thing")} need you` : "Nothing needs you"}</h1>
+        <h1>{queue.length ? plural(queue.length, "notification") : "No notifications"}</h1>
         <div className="ws-meta">
           <span className="meta">
             Most urgent first, as in the queue{hidden > 0 && ` · ${hidden} done for now, not shown`}
@@ -1203,7 +1231,7 @@ function NeedsView({ queue, hidden, data, now }: { queue: Subject[]; hidden: num
         </div>
       </header>
       {queue.length === 0 ? (
-        <div className="zero big">Nothing needs you. The agents at work and the PRs out for review are on the board.</div>
+        <div className="zero big">No notifications. The agents at work and the PRs out for review are on the board.</div>
       ) : (
         <div className="card flush">
           <ol className="actions">
@@ -1211,15 +1239,16 @@ function NeedsView({ queue, hidden, data, now }: { queue: Subject[]; hidden: num
               const item = lead(s)!;
               const step = firstStep(data, s);
               const next = needStep(item, step, s.id);
-              const tone = KIND[item.kind].tone;
+              const tone = look(item).tone;
               return (
                 <li key={s.id} className="action need" id={`need:${s.id}`}>
                   <span className="q-rank">{i + 1}</span>
                   <Dot tone={tone} />
                   <div className="action-body">
                     <div className="action-summary">
-                      <b className={`tone-text-${tone}`}>{KIND[item.kind].title}</b> · {inline(item.reason)}
+                      <b className={`tone-text-${tone}`}>{look(item).title}</b> · {inline(item.reason)}
                     </div>
+                    {item.gist && <div className="need-gist">{item.gist}</div>}
                     <div className="action-meta">
                       {s.ticket ? (
                         <a className="key-link" href={href(`t:${s.ticket.ticket.key}`)} title="Open the ticket on the board">
@@ -1229,11 +1258,7 @@ function NeedsView({ queue, hidden, data, now }: { queue: Subject[]; hidden: num
                         <span className="meta">no ticket</span>
                       )}
                       <span className="meta action-ticket">{subjectTitle(s)}</span>
-                      {otherKinds(s).map((k) => (
-                        <span key={k} className={`tag tone-${KIND[k].tone}`}>
-                          {SHORT[k]}
-                        </span>
-                      ))}
+                      <OtherTags s={s} />
                     </div>
                     {step && next.ref !== `step:${step.id}` && (
                       <div className="action-meta need-step">
@@ -1352,7 +1377,7 @@ function HistoryView({ data, now }: { data: Dashboard; now: number }) {
   );
 }
 
-const NOTIFY_HINT = "A notification comes when an agent that worked for 45 s or more starts to wait for you. It needs this page open in a tab.";
+const NOTIFY_HINT = "A notification comes when an agent that worked for 45 s or more stops, after its summary is ready. It needs this page open in a tab.";
 
 function NotifyButton({ state, onEnable, onMute }: { state: NotifyState; onEnable: () => void; onMute: () => void }) {
   if (state === "unsupported") return null;
@@ -1734,14 +1759,8 @@ export function App() {
           </nav>
         </div>
         <div className="headline">
-          <a href="#/needs" className={`needs-link ${view === "needs" ? "active" : ""}`} title="See what needs you, and where to act on each">
-            {queue.length ? (
-              <>
-                <b>{plural(queue.length, "thing")}</b> need you
-              </>
-            ) : (
-              <b>Nothing needs you</b>
-            )}
+          <a href="#/needs" className={`needs-link ${view === "needs" ? "active" : ""}`} title="See your notifications, and where to act on each">
+            <b>{queue.length ? plural(queue.length, "notification") : "No notifications"}</b>
           </a>
           <span className="sep">·</span>
           <span>
