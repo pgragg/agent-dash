@@ -565,16 +565,16 @@ a.btn.verb { text-decoration: none; }
 .sdlc-dot { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; font-size: 11px; font-weight: 600; border: 1.5px solid var(--line-2); color: var(--muted); background: var(--surface); }
 .sdlc-label { font-size: 11.5px; line-height: 1.2; color: var(--muted); }
 .sdlc-stage.st-done > :is(button, a) { border-top-color: var(--good); }
-.sdlc-stage.st-done .sdlc-dot { background: var(--good); border-color: var(--good); color: #fff; }
+:is(.sdlc-stage, .lane-lamp).st-done .sdlc-dot { background: var(--good); border-color: var(--good); color: #fff; }
 .sdlc-stage.st-done .sdlc-label { color: var(--ink-2); }
 .sdlc-stage.st-failed > :is(button, a) { border-top-color: var(--bad); }
-.sdlc-stage.st-failed .sdlc-dot { background: var(--bad); border-color: var(--bad); color: #fff; }
+:is(.sdlc-stage, .lane-lamp).st-failed .sdlc-dot { background: var(--bad); border-color: var(--bad); color: #fff; }
 .sdlc-stage.st-blocked > :is(button, a) { border-top-color: var(--muted); }
-.sdlc-stage.st-blocked .sdlc-dot { background: var(--muted); border-color: var(--muted); color: #fff; }
+:is(.sdlc-stage, .lane-lamp).st-blocked .sdlc-dot { background: var(--muted); border-color: var(--muted); color: #fff; }
 .sdlc-stage.st-waiting > :is(button, a) { border-top-color: var(--warn); }
-.sdlc-stage.st-waiting .sdlc-dot { border-color: var(--warn); color: var(--warn); }
+:is(.sdlc-stage, .lane-lamp).st-waiting .sdlc-dot { border-color: var(--warn); color: var(--warn); }
 .sdlc-stage.st-running > :is(button, a) { border-top-color: var(--running); }
-.sdlc-stage.st-running .sdlc-dot { background: var(--running); border-color: var(--running); color: #2a2200; }
+:is(.sdlc-stage, .lane-lamp).st-running .sdlc-dot { background: var(--running); border-color: var(--running); color: #2a2200; }
 .sdlc-stage.st-skipped > :is(button, a) { border-top-style: dashed; }
 .sdlc-stage.st-skipped .sdlc-label { text-decoration: line-through; }
 .sdlc-stage.current .sdlc-label { color: var(--ink); font-weight: 600; }
@@ -607,6 +607,35 @@ a.btn.verb { text-decoration: none; }
 .smoke-item > summary .smoke-summary { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--ink); }
 .smoke-item > summary .meta { flex-shrink: 0; font-size: 12px; }
 .smoke-full { margin-top: 8px; }
+
+/* Smoketests card: one lane per environment stage, read like an instrument panel. */
+:root { --lane-cols: 52px 34px 34px 100px minmax(0, 1fr); }
+.lane-head { display: grid; grid-template-columns: var(--lane-cols); gap: 6px; padding: 0 10px 2px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.lanes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.lane { border-radius: 10px; border-left: 3px solid transparent; }
+.lane-next { border-left-color: var(--accent); background: var(--hover); }
+.lane-next .lane-label { font-weight: 600; color: var(--ink); }
+.lane-later { opacity: 0.6; }
+.lane-later:hover, .lane-later.open { opacity: 1; }
+.lane-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 6px 10px 6px 7px; }
+.lane-toggle { all: unset; box-sizing: border-box; display: grid; grid-template-columns: var(--lane-cols); align-items: center; gap: 6px; flex: 1 1 440px; min-width: 0; cursor: pointer; font-size: 13px; }
+.lane-toggle:hover .lane-label { text-decoration: underline; }
+.lane-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.lane-label { font-size: 12.5px; color: var(--ink-2); }
+.lane-lamp .sdlc-dot { width: 18px; height: 18px; font-size: 10px; }
+.lane-lamp.st-skipped .sdlc-dot { border-style: dashed; }
+.lane-history { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
+.run-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line-2); }
+.run-passed { background: var(--good); }
+.run-failed { background: var(--bad); }
+.run-blocked { background: var(--muted); }
+.run-running { background: var(--running); }
+.run-skipped { background: none; border: 1.5px dashed var(--muted); box-sizing: border-box; }
+.lane-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; line-height: 1.4; }
+.lane-writes { padding: 2px 6px; border-radius: 6px; background: var(--warn-bg); }
+.lane-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: auto; }
+.lane-lamp, .lane-head > span:nth-child(2), .lane-head > span:nth-child(3) { justify-self: center; }
+.lane-drawer { margin: 0 10px 8px 12px; padding: 8px 0 0 10px; border-top: 1px solid var(--line); }
 /* A plan summary can be a paragraph; its closed row is a reminder, and opening it shows the whole text. */
 .plan-row .smoke-item > summary .smoke-summary { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .smoketests select, .smoke-form select, .smoke-form input[type="datetime-local"] { height: 26px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--bg); font: 12.5px var(--sans); color: var(--ink); }

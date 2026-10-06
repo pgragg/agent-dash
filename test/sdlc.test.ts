@@ -9,7 +9,7 @@ import { buildHandoff } from "../server/handoff.ts";
 import { validateSdlcEvent, validateSdlcPlan } from "../server/sdlc.ts";
 import * as db from "../server/summaries/db.ts";
 import { buildContext, buildPrompt, redraftAfterNewEvents } from "../server/summaries/runner.ts";
-import { confirmDeployMessage, executeMessage, parseEnvironment, planMessage, sdlcProgress } from "../shared/sdlc.ts";
+import { confirmDeployMessage, executeMessage, parseEnvironment, planMessage, sdlcProgress, smoketestLanes } from "../shared/sdlc.ts";
 import type { SdlcEvent } from "../shared/types.ts";
 import { NOW, PATTERN, pr, ticket } from "./helpers.ts";
 
@@ -497,4 +497,27 @@ test("a deleted plan leaves its run, without the link", () => {
   const run = db.addSdlcEvent({ eventType: "smoketest_execution", startedAt: new Date().toISOString(), environments: ["localhost"], tickets: ["FSDK-74"], planId: p.id });
   assert.equal(db.deleteSdlcEvent(p.id), true);
   assert.equal(db.getSdlcEvent(run.id)!.planId, null);
+});
+
+test("the Smoketests card has one lane per stage pair, and the bar's next stage picks the lane to look at", () => {
+  // FSDK-2090's shape: local passed, the Beta smoketest is blocked, and a Prod plan waits.
+  const events = [
+    plan({ id: 901 }),
+    ev({ id: 902, startedAt: "2026-10-02T10:00:00.000Z" }),
+    plan({ id: 903, environments: ["fern_dev"], confirmedBy: "piper" }),
+    ev({ id: 904, environments: ["fern_dev"], outcome: "failed", startedAt: "2026-10-02T11:00:00.000Z" }),
+    ev({ id: 905, environments: ["fern_dev"], outcome: "blocked", startedAt: "2026-10-02T12:00:00.000Z" }),
+    plan({ id: 906, environments: ["postman_prod"], confirmedAt: null, confirmedBy: null, stateChanges: "merge #1" }),
+    ev({ id: 907, eventType: "deploy", environments: ["fern_dev"], outcome: null }),
+  ];
+  const p = sdlcProgress({ ticket: ticket(), prs: [pr()], events });
+  const [local, beta, prod] = smoketestLanes(p, events);
+  assert.deepEqual([local.emphasis, beta.emphasis, prod.emphasis], ["none", "next", "later"]);
+  assert.deepEqual([beta.plan.state, beta.run.state, prod.plan.state], ["done", "blocked", "waiting"]);
+  // The newest event's environment, not the stage default, and deploys are not smoketests.
+  assert.equal(beta.env, "fern_dev");
+  assert.deepEqual(beta.events.map((e) => e.id), [905, 904, 903]);
+  assert.deepEqual(beta.runs.map((e) => e.id), [904, 905]);
+  assert.equal(prod.env, "postman_prod");
+  assert.equal(smoketestLanes(sdlcProgress({ ticket: ticket(), prs: [], events: [] }), []).find((l) => l.id === "beta")?.env, "postman_beta");
 });

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { prRef } from "../../shared/refs.ts";
-import { ENV_LABEL, ENVIRONMENTS, isPlanRunning, isPlanStage, isPlanWaiting, isSmoketestRunning, mergePrs, newestPlan, SHARED_ENVS, SMOKETEST_ENV, sdlcProgress, type Stage, type StageState } from "../../shared/sdlc.ts";
+import { ENV_LABEL, ENVIRONMENTS, isPlanRunning, isPlanStage, isPlanWaiting, isSmoketestRunning, mergePrs, newestPlan, SHARED_ENVS, SMOKETEST_ENV, type SmoketestLane, sdlcProgress, smoketestLanes, type Stage, type StageState } from "../../shared/sdlc.ts";
 import type { PullRequest, Run, SdlcEnvironment, SdlcEvent, SmoketestOutcome, TicketGroup } from "../../shared/types.ts";
 import { conversationHash, launchAgent, type LaunchBody, ResumeHere } from "./agents.tsx";
 import { Chat } from "./chat.tsx";
@@ -110,14 +110,23 @@ function RunPlan({ plan, cwd, onError, primary = true }: { plan: SdlcEvent; cwd:
   );
 }
 
+/** The Smoketests card opens the lane that holds the event, so the row exists to scroll to. */
+const OPEN_EVENT = "agent-dash:open-sdlc-event";
+
 function scrollTo(id: string) {
   return (e: { preventDefault: () => void }) => {
     e.preventDefault();
-    const row = document.getElementById(id);
-    // A settled row is closed, and the link is there to show it.
-    const item = row?.querySelector<HTMLDetailsElement>(":scope > details.smoke-item");
-    if (item) item.open = true;
-    row?.scrollIntoView({ behavior: "smooth" });
+    window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: id }));
+    // Two frames: React renders the opened drawer in the first.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const row = document.getElementById(id);
+        // A settled row is closed, and the link is there to show it.
+        const item = row?.querySelector<HTMLDetailsElement>(":scope > details.smoke-item");
+        if (item) item.open = true;
+        row?.scrollIntoView({ behavior: "smooth" });
+      }),
+    );
   };
 }
 
@@ -153,7 +162,7 @@ function runningAgent(stage: Stage, runs: Run[]): string | null {
 }
 
 /** A smoketest stage, plan or execution: what to do with the newest plan of its environment. */
-function SmoketestActions({ stage, group, env, events, cwd, onError }: { stage: Stage; group: TicketGroup; env: SdlcEnvironment; events: SdlcEvent[]; cwd: string; onError: (m: string | null) => void }) {
+function SmoketestActions({ stage, group, env, events, cwd, onError, links = true }: { stage: Stage; group: TicketGroup; env: SdlcEnvironment; events: SdlcEvent[]; cwd: string; onError: (m: string | null) => void; links?: boolean }) {
   const key = group.ticket.key;
   const agent = runningAgent(stage, group.runs);
   const plan = newestPlan(events, env);
@@ -183,12 +192,12 @@ function SmoketestActions({ stage, group, env, events, cwd, onError }: { stage: 
     <>
       {verb}
       {!passed && !agent && <SkipSmoketest ticket={key} env={env} onError={onError} />}
-      {plan && (
+      {links && plan && (
         <a className="btn ghost small" href={`#sdlc:${plan.id}`} onClick={scrollTo(`sdlc:${plan.id}`)}>
           See the plan
         </a>
       )}
-      {!isPlanStage(stage.id) && stage.events.length > 0 && (
+      {links && !isPlanStage(stage.id) && stage.events.length > 0 && (
         <a className="btn ghost small" href="#smoketests" onClick={scrollTo("smoketests")}>
           See smoketests
         </a>
@@ -265,6 +274,11 @@ function StageActions({ stage, group, events, cwd, onError }: { stage: Stage; gr
   return null;
 }
 
+/** The bar's lamp text, also on the Smoketests card, so a state looks the same in both places. */
+function stageGlyph(s: Stage, n: number | string): string | number {
+  return s.state === "done" ? "✓" : s.state === "failed" ? "!" : s.state === "blocked" ? "?" : s.state === "running" ? "…" : s.state === "waiting" && isPlanStage(s.id) ? "↵" : n;
+}
+
 export function SdlcBar({ group, events, cwd, onError }: { group: TicketGroup; events: SdlcEvent[]; cwd: string; onError: (m: string | null) => void }) {
   const searched = useTicketPrs(group.ticket.key);
   const progress = sdlcProgress({ ticket: group.ticket, prs: mergePrs(group.prs, searched), events });
@@ -278,7 +292,7 @@ export function SdlcBar({ group, events, cwd, onError }: { group: TicketGroup; e
           const title = `${s.label}: ${STATE_TEXT[s.state]}${s.detail ? ` · ${s.detail}` : ""}`;
           const inner = (
             <>
-              <span className="sdlc-dot">{s.state === "done" ? "✓" : s.state === "failed" ? "!" : s.state === "blocked" ? "?" : s.state === "running" ? "…" : s.state === "waiting" && isPlanStage(s.id) ? "↵" : i + 1}</span>
+              <span className="sdlc-dot">{stageGlyph(s, i + 1)}</span>
               <span className="sdlc-label">{s.label}</span>
             </>
           );
@@ -600,39 +614,145 @@ function PlanRow({ e, now, runs, cwd, onError }: { e: SdlcEvent; now: number; ru
   );
 }
 
-export function Smoketests({ ticket, events, runs, now, cwd, onError }: { ticket: string; events: SdlcEvent[]; runs: Run[]; now: number; cwd: string; onError: (m: string | null) => void }) {
-  const smoketests = events.filter((e) => e.eventType === "smoketest_plan" || e.eventType === "smoketest_execution");
+/** One execution's history dot: its outcome, or what it is instead of one. */
+function runTone(e: SdlcEvent): SmoketestOutcome | "running" | "skipped" {
+  return e.skippedAt ? "skipped" : isSmoketestRunning(e) ? "running" : (e.outcome ?? "passed");
+}
+
+const RUN_TAG: Record<ReturnType<typeof runTone>, string> = { ...OUTCOME_TONE, running: "tone-running", skipped: "" };
+
+/** Older runs than this collapse into a count; the newest decide the stage. */
+const HISTORY_SHOWN = 12;
+
+/** What the lane's newest plan or execution says, in one or two lines. */
+function LaneLatest({ lane, now, after }: { lane: SmoketestLane; now: number; after: string | null }) {
+  const e = lane.events[0];
+  const later = after && <span className="meta"> · after {after}</span>;
+  if (!e) return <span className="meta">No smoketest yet{later}</span>;
+  const when = (
+    <span className="meta">
+      {" "}
+      · {e.environments.map((x) => ENV_LABEL[x]).join(", ")} · {age(e.startedAt, now)} ago
+    </span>
+  );
+  if (e.eventType === "smoketest_execution") {
+    return (
+      <span className="lane-text">
+        <span className={`tag ${RUN_TAG[runTone(e)]}`}>{runTone(e)}</span> {isSmoketestRunning(e) ? "An agent runs the plan" : summaryLine(e)}
+        {when}
+        {later}
+      </span>
+    );
+  }
+  const waiting = isPlanWaiting(e);
+  const tag = isPlanRunning(e) ? "planning" : waiting ? "to confirm" : "plan";
+  // A waiting plan's row is where Piper approves it, so it shows what Confirm lets the agent write.
+  const text = waiting && e.writesSummary ? `Writes: ${e.writesSummary}` : isPlanRunning(e) ? "An agent writes the plan" : (e.summary ?? firstLine(e.testDetails) ?? "");
+  return (
+    <span className={`lane-text ${waiting ? "lane-writes" : ""}`}>
+      <span className={`tag ${planStatus(e).tone}`}>{tag}</span> {text}
+      {when}
+      {later}
+    </span>
+  );
+}
+
+function Lane({ lane, group, events, now, cwd, open, onToggle, after, onError }: { lane: SmoketestLane; group: TicketGroup; events: SdlcEvent[]; now: number; cwd: string; open: boolean; onToggle: () => void; after: string | null; onError: (m: string | null) => void }) {
+  // Two environments share the Beta and Prod stages; the select picks where the next plan runs.
+  const [env, setEnv] = useState(lane.env);
+  useEffect(() => setEnv(lane.env), [lane.env]);
+  const shown = lane.runs.slice(-HISTORY_SHOWN);
+  // The row offers its verbs only where you act now; an open drawer offers them for any lane.
+  const urgent = lane.emphasis === "next" || [lane.plan.state, lane.run.state].some((x) => x === "waiting" || x === "running");
+  const actions = (
+    <span className="lane-actions">
+      {lane.envs.length > 1 && (
+        <select value={env} onChange={(e) => setEnv(e.target.value as SdlcEnvironment)} aria-label={`Environment of the ${lane.label} smoketest`}>
+          {lane.envs.map((x) => (
+            <option key={x} value={x}>
+              {ENV_LABEL[x]}
+            </option>
+          ))}
+        </select>
+      )}
+      <SmoketestActions stage={lane.run} group={group} env={env} events={events} cwd={cwd} onError={onError} links={false} />
+    </span>
+  );
+  return (
+    <li className={`lane lane-${lane.emphasis} ${open ? "open" : ""}`}>
+      <div className="lane-row">
+        <button type="button" className="lane-toggle" onClick={onToggle} aria-expanded={open} title={`${open ? "Hide" : "Show"} its plans and smoketests`}>
+          <span className="lane-label">{lane.label}</span>
+          {[lane.plan, lane.run].map((s) => (
+            <span key={s.id} className={`lane-lamp st-${s.state}`} title={`${s.label}: ${STATE_TEXT[s.state]} · ${s.detail}`}>
+              <span className="sdlc-dot">{stageGlyph(s, "")}</span>
+            </span>
+          ))}
+          <span className="lane-history">
+            {lane.runs.length > shown.length && <span className="meta">+{lane.runs.length - shown.length}</span>}
+            {shown.map((e) => (
+              <span key={e.id} className={`run-dot run-${runTone(e)}`} title={`${runTone(e)} · ${ENV_LABEL[e.environments[0]]} · ${age(e.startedAt, now)} ago · ${summaryLine(e)}`} />
+            ))}
+          </span>
+          <LaneLatest lane={lane} now={now} after={after} />
+        </button>
+        {(urgent || open) && actions}
+      </div>
+      {open && !lane.events.length && <p className="meta lane-drawer">No plan or smoketest on {lane.envs.map((x) => ENV_LABEL[x]).join(" or ")} yet.</p>}
+      {open && lane.events.length > 0 && (
+        <ol className="note-list lane-drawer">
+          {lane.events.map((e) => (e.eventType === "smoketest_plan" ? <PlanRow key={e.id} e={e} now={now} runs={group.runs} cwd={cwd} onError={onError} /> : <SmoketestRow key={e.id} e={e} now={now} runs={group.runs} onError={onError} />))}
+        </ol>
+      )}
+    </li>
+  );
+}
+
+/**
+ * One lane per smoketest stage pair of the bar, so the state of each environment reads at a
+ * glance. A lane's plans and executions open under it, one lane at a time.
+ */
+export function Smoketests({ group, events, now, cwd, onError }: { group: TicketGroup; events: SdlcEvent[]; now: number; cwd: string; onError: (m: string | null) => void }) {
+  const key = group.ticket.key;
+  const searched = useTicketPrs(key);
+  const progress = sdlcProgress({ ticket: group.ticket, prs: mergePrs(group.prs, searched), events });
+  const lanes = smoketestLanes(progress, events);
   const [recording, setRecording] = useState(false);
-  const [env, setEnv] = useState<SdlcEnvironment>("localhost");
+  const [open, setOpen] = useState<string | null>(null);
+  useEffect(() => setOpen(null), [key]);
+  useEffect(() => {
+    const show = (e: Event) => {
+      const id = Number((e as CustomEvent<string>).detail.replace("sdlc:", ""));
+      const lane = lanes.find((l) => l.events.some((x) => x.id === id));
+      if (lane) setOpen(lane.id);
+    };
+    window.addEventListener(OPEN_EVENT, show);
+    return () => window.removeEventListener(OPEN_EVENT, show);
+  }, [lanes]);
   return (
     <section className="card smoketests" id="smoketests">
       <header className="card-head">
         <h3>Smoketests</h3>
-        <span className="meta">newest first</span>
         <span className="grow" />
-        <select value={env} onChange={(e) => setEnv(e.target.value as SdlcEnvironment)} aria-label="Environment to smoketest">
-          {ENVIRONMENTS.map((x) => (
-            <option key={x.id} value={x.id}>
-              {x.label}
-            </option>
-          ))}
-        </select>
-        <PlanVerb key={env} ticket={ticket} env={env} cwd={cwd} onError={onError} />
-        <SkipSmoketest ticket={ticket} env={env} onError={onError} />
         {!recording && (
           <button className="btn ghost small" onClick={() => setRecording(true)} title="Record a smoketest you ran yourself">
             Record by hand
           </button>
         )}
       </header>
-      {recording && <RecordForm ticket={ticket} onError={onError} onDone={() => setRecording(false)} />}
-      {smoketests.length ? (
-        <ol className="note-list">
-          {smoketests.map((e) => (e.eventType === "smoketest_plan" ? <PlanRow key={e.id} e={e} now={now} runs={runs} cwd={cwd} onError={onError} /> : <SmoketestRow key={e.id} e={e} now={now} runs={runs} onError={onError} />))}
-        </ol>
-      ) : (
-        <p className="meta">No smoketest yet. Plan one: an agent writes the plan, and runs it at once when it changes no Beta or Prod state.</p>
-      )}
+      {recording && <RecordForm ticket={key} onError={onError} onDone={() => setRecording(false)} />}
+      <div className="lane-head meta" aria-hidden>
+        <span />
+        <span>Plan</span>
+        <span>Run</span>
+        <span>History</span>
+        <span>Latest</span>
+      </div>
+      <ol className="lanes">
+        {lanes.map((l) => (
+          <Lane key={l.id} lane={l} group={group} events={events} now={now} cwd={cwd} open={open === l.id} onToggle={() => setOpen(open === l.id ? null : l.id)} after={l.emphasis === "later" ? (progress.next?.label ?? null) : null} onError={onError} />
+        ))}
+      </ol>
     </section>
   );
 }

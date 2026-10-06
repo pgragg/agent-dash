@@ -1011,7 +1011,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
 
       {s.ticket && <NextSteps s={s} state={data.summaries[s.ticket.ticket.key]} notes={data.notes[s.ticket.ticket.key] ?? []} now={now} cwd={cwd} onError={setError} />}
 
-      {s.ticket && <Smoketests ticket={s.ticket.ticket.key} events={data.sdlcEvents[s.ticket.ticket.key] ?? []} runs={s.ticket.runs} now={now} cwd={cwd} onError={setError} />}
+      {s.ticket && <Smoketests group={s.ticket} events={data.sdlcEvents[s.ticket.ticket.key] ?? []} now={now} cwd={cwd} onError={setError} />}
 
       {s.ticket && <StartAgent key={s.id} s={s} cwd={cwd} setCwd={setCwd} onError={setError} focusSignal={agentSignal} />}
 
