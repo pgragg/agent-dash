@@ -464,6 +464,8 @@ export interface Dashboard {
   conversationSummaries: Record<string, ConversationSummary>;
   /** Review requests sent from agent-dash by PR URL, newest first. Also for PRs with no ticket. */
   reviewRequests: Record<string, SdlcEvent[]>;
+  /** Parallel lanes by ticket key, oldest first, without removed ones. */
+  lanes: Record<string, WorkLane[]>;
   sources: { jira: SourceHealth; github: SourceHealth; sessions: SourceHealth };
   extensionInstalled: boolean;
 }
@@ -507,4 +509,45 @@ export interface SlackQuote {
   user: string;
   ts: string;
   text: string;
+}
+
+/**
+ * How a lane's work comes back. "land": into the ticket's integration branch, one lane at a time,
+ * and one PR from there. "pr": each lane opens its own PR into the base.
+ */
+export type LaneMode = "land" | "pr";
+
+export type LaneState = "working" | "removed";
+
+/** One of N agents on a ticket, each in its own git worktree. The server makes the worktree and this record. */
+export interface WorkLane {
+  id: number;
+  ticket: string;
+  /** The repo's main checkout, which holds the `.git` folder. */
+  repo: string;
+  lane: string;
+  mode: LaneMode;
+  /** The branch on origin that the work goes into, for example `main`. */
+  base: string;
+  branch: string;
+  worktree: string;
+  /** In "land" mode, the ticket's branch and worktree that the lanes land into. */
+  integrationBranch: string | null;
+  integrationWorktree: string | null;
+  sessionId: string | null;
+  goal: string;
+  state: LaneState;
+  createdAt: string;
+  /** Read from the worktree on each build. Null when the worktree is gone. */
+  git: LaneGit | null;
+}
+
+export interface LaneGit {
+  /** The branch checked out now. It differs from the lane's branch when the agent switched. */
+  head: string | null;
+  /** Commits on the lane that its base does not have, and the reverse. */
+  ahead: number;
+  behind: number;
+  /** Changed and new files that are not committed. */
+  dirty: number;
 }

@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { splitSummary } from "../../shared/nextSteps.ts";
 import { prRef } from "../../shared/refs.ts";
 import { READ_FEEDBACK, REVIEW_AND_MERGE } from "../../shared/prVerbs.ts";
-import type { Action, ActionKind, AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState } from "../../shared/types.ts";
+import type { Action, ActionKind, AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, LaneMode, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState } from "../../shared/types.ts";
 import { conversationHash, launchAgent, ResumeHere, resuming } from "./agents.tsx";
+import { FIRST_LANES, type LaneDraft, LanesCard, LanesEditor, type LaneRun } from "./lanes.tsx";
 import { filterHistory, groupByDay } from "./history.ts";
 import { PrPanel, PrVerbButton } from "./prPanel.tsx";
 import { ciTag } from "./prView.ts";
@@ -285,6 +286,12 @@ function statusText(run: HistoryRun, now: number): string {
 
 function runTone(run: HistoryRun): string {
   return run.endedInError ? "bad" : run.status === "awaiting_input" ? "waiting" : run.status === "working" ? "working" : "muted";
+}
+
+/** A lane's agent state, from the ticket's runs. Null until pi saves the first message. */
+function laneRun(s: Subject, sessionId: string, now: number): LaneRun | null {
+  const run = s.ticket?.runs.find((r) => r.sessionId === sessionId);
+  return run ? { tone: runTone(run), text: statusText(run, now) } : null;
 }
 
 // ---- queue (left rail) --------------------------------------------------------------
@@ -610,21 +617,29 @@ function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd:
   const folders = workFolders(s);
   const [message, setMessage] = useState("");
   const [starting, setStarting] = useState(false);
-  const [started, setStarted] = useState<{ at: number; sessionId: string | null } | null>(null);
+  const [started, setStarted] = useState<{ at: number; sessionId: string | null; lanes?: boolean } | null>(null);
   const [terminal, setTerminal] = useState(false);
   const [context, setContext] = useState<string | null>(null);
+  const [parallel, setParallel] = useState(false);
+  const [lanes, setLanes] = useState<LaneDraft[]>(FIRST_LANES);
+  const [laneMode, setLaneMode] = useState<LaneMode>("land");
+  const [base, setBase] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     if (focusSignal) ref.current?.focus();
   }, [focusSignal]);
+  const ready = parallel ? lanes.every((l) => l.name.trim() && l.message.trim()) : !!message.trim();
   const start = async () => {
-    if (!message.trim()) return;
+    if (!ready) return;
     setStarting(true);
     try {
-      const sessionId = await launchAgent(key, { message, cwd, terminal });
+      // Lanes are always headless; their sessions show on the Parallel lanes card.
+      const body = parallel ? { message, cwd, lanes, laneMode, base: base.trim() || undefined } : { message, cwd, terminal };
+      const sessionId = await launchAgent(key, body);
       onError(null);
       setMessage("");
-      setStarted({ at: Date.now(), sessionId });
+      if (parallel) setLanes(FIRST_LANES);
+      setStarted({ at: Date.now(), sessionId, lanes: parallel });
     } catch (err) {
       onError((err as Error).message);
     }
@@ -641,7 +656,7 @@ function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd:
           ref={ref}
           rows={3}
           value={message}
-          placeholder={`First message for the new agent on ${key}…`}
+          placeholder={parallel ? `Brief that every lane on ${key} gets (optional)…` : `First message for the new agent on ${key}…`}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -661,17 +676,23 @@ function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd:
               ))}
             </datalist>
           </label>
-          <label className="meta" title="Open pi in a new iTerm tab instead of on this page">
-            <input type="checkbox" checked={terminal} onChange={(e) => setTerminal(e.target.checked)} /> in iTerm
+          <label className="meta" title="Start one agent per lane, each in its own git worktree of this folder's repo">
+            <input type="checkbox" checked={parallel} onChange={(e) => setParallel(e.target.checked)} /> parallel lanes
           </label>
-          <button className="btn primary" onClick={start} disabled={starting || !message.trim() || !cwd.trim()}>
-            {starting ? "Starting…" : "Start agent"} <Kbd>⌘↵</Kbd>
+          {!parallel && (
+            <label className="meta" title="Open pi in a new iTerm tab instead of on this page">
+              <input type="checkbox" checked={terminal} onChange={(e) => setTerminal(e.target.checked)} /> in iTerm
+            </label>
+          )}
+          <button className="btn primary" onClick={start} disabled={starting || !ready || !cwd.trim()}>
+            {starting ? "Starting…" : parallel ? `Start ${lanes.length} lanes` : "Start agent"} <Kbd>⌘↵</Kbd>
           </button>
         </div>
+        {parallel && <LanesEditor ticket={key} lanes={lanes} setLanes={setLanes} mode={laneMode} setMode={setLaneMode} base={base} setBase={setBase} />}
       </div>
       {started && Date.now() - started.at < 30_000 && (
         <p className="meta started">
-          {started.sessionId ? <>Started. It shows under Agents once pi saves the first message, or <a href={conversationHash(started.sessionId)}>open its page</a>.</> : "Started in a new iTerm tab. It shows under Agents once it is running."}
+          {started.lanes ? "Started. Each lane shows under Parallel lanes, with its own worktree and agent." : started.sessionId ? <>Started. It shows under Agents once pi saves the first message, or <a href={conversationHash(started.sessionId)}>open its page</a>.</> : "Started in a new iTerm tab. It shows under Agents once it is running."}
         </p>
       )}
       <details
@@ -1181,6 +1202,8 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
       {s.ticket && <NextSteps s={s} state={data.summaries[s.ticket.ticket.key]} notes={data.notes[s.ticket.ticket.key] ?? []} now={now} cwd={cwd} onError={setError} />}
 
       {s.ticket && <Smoketests group={s.ticket} events={data.sdlcEvents[s.ticket.ticket.key] ?? []} now={now} cwd={cwd} onError={setError} />}
+
+      {s.ticket && (data.lanes[s.ticket.ticket.key]?.length ?? 0) > 0 && <LanesCard lanes={data.lanes[s.ticket.ticket.key]} runFor={(id) => laneRun(s, id, now)} />}
 
       {s.ticket && <StartAgent key={s.id} s={s} cwd={cwd} setCwd={setCwd} onError={setError} focusSignal={agentSignal} />}
 

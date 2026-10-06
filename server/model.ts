@@ -230,6 +230,7 @@ export function buildDashboard(input: ModelInput): Dashboard {
     reviewDrafts: {},
     conversationSummaries: {},
     reviewRequests: {},
+    lanes: {},
     sources: input.sources,
     extensionInstalled: input.extensionInstalled,
   };
