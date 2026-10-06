@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { buildConfig, effectiveSettings, readSettingsFile, setupNeeded, ticketPatternOf } from "../server/config.ts";
+import { buildConfig, effectiveSettings, findConfigFile, readSettingsFile, setupNeeded, ticketPatternOf } from "../server/config.ts";
 import { handle } from "../server/routes/settings.ts";
 import { DEFAULT_SETTINGS, validateSettings } from "../shared/settings.ts";
 
@@ -104,5 +105,39 @@ test("team settings: no name says the user, no channel turns review requests off
     assert.equal(wantsReviewRequest({ repo: "a/b", state: "open" }), true);
   } finally {
     setTeam(saved);
+  }
+});
+
+test("a worktree with no config file reads the main checkout's, read-only; its own file or AGENT_DASH_CONFIG wins", () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "agent-dash-wt-")));
+  const main = join(root, "main");
+  const git = (...a: string[]) => execFileSync("git", a, { cwd: main, stdio: "pipe" });
+  execFileSync("git", ["init", "-q", main]);
+  git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x");
+  git("worktree", "add", "-q", join(root, "wt"));
+  const wt = join(root, "wt");
+  assert.deepEqual(findConfigFile(wt, ""), { file: join(wt, "agent-dash.config.json"), readOnly: false });
+  writeFileSync(join(main, "agent-dash.config.json"), "{}");
+  assert.deepEqual(findConfigFile(wt, ""), { file: join(main, "agent-dash.config.json"), readOnly: true });
+  assert.deepEqual(findConfigFile(main, ""), { file: join(main, "agent-dash.config.json"), readOnly: false });
+  assert.deepEqual(findConfigFile(wt, "/x/c.json"), { file: "/x/c.json", readOnly: false });
+  writeFileSync(join(wt, "agent-dash.config.json"), "{}");
+  assert.deepEqual(findConfigFile(wt, ""), { file: join(wt, "agent-dash.config.json"), readOnly: false });
+});
+
+test("Save is refused on a read-only config file, and the file stays as it was", async () => {
+  const ro = join(dir, "ro.json");
+  writeFileSync(ro, "{}");
+  const s = createServer(async (req, res) => {
+    if (!(await handle(req, res, new URL(req.url ?? "/", "http://localhost"), ro, true))) res.writeHead(404).end();
+  });
+  await new Promise<void>((r) => s.listen(0, "127.0.0.1", r));
+  const url = `http://127.0.0.1:${(s.address() as AddressInfo).port}/api/settings`;
+  try {
+    assert.equal((await (await fetch(url)).json()).readOnly, true);
+    assert.equal((await fetch(url, { method: "POST", headers: { "X-Agent-Dash": "1" }, body: JSON.stringify({ userName: "X" }) })).status, 409);
+    assert.equal(readFileSync(ro, "utf8"), "{}");
+  } finally {
+    s.close();
   }
 });

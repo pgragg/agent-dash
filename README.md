@@ -491,7 +491,8 @@ Company-wide values (the Jira server, the Slack org, the deploy repos, the Postm
 
 - **A save needs a restart.** The server reads the file once, at start. After **Save**, the page says that the server still runs with the old values until you restart it.
 - **An env var wins over the file**, for a test server or a one-off run. The page marks each field that an env var sets now. A list env var takes commas or `|`.
-- **`AGENT_DASH_CONFIG`** names another config file. `pnpm test` uses `test/config.json`, so your own settings never change a test. A test server in a worktree has no `agent-dash.config.json`: point `AGENT_DASH_CONFIG` at the main checkout's file.
+- **`AGENT_DASH_CONFIG`** names another config file. `pnpm test` uses `test/config.json`, so your own settings never change a test.
+- **A server in a git worktree** with no `agent-dash.config.json` of its own reads the main checkout's file, so a test server runs with your settings. From there the Settings page is read-only, so a test server never changes the file that your real dashboard uses.
 
 Other env vars, all optional: `AGENT_DASH_STATUS_DIR`, `AGENT_DASH_INBOX_DIR`, `AGENT_DASH_CONVERSATIONS_DIR`, `AGENT_DASH_REMOTE_TTL_MS`, `AGENT_DASH_MCP_ADAPTER` (pi-mcp-adapter's `dist` folder, for posting to Slack).
 

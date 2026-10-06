@@ -81,6 +81,11 @@ export function SettingsView() {
         </div>
       </header>
       {!state && !error && <p className="meta">Reading the settings…</p>}
+      {state?.readOnly && (
+        <div className="toast settings-note" role="status">
+          This server runs in a worktree, so it uses the main checkout's settings. Change them from the main checkout's server.
+        </div>
+      )}
       {state?.restartNeeded && (
         <div className="toast settings-note" role="status">
           {saved ? "Saved. " : ""}The server still runs with the old values. Restart agent-dash to use the saved ones.
@@ -110,6 +115,7 @@ export function SettingsView() {
                     value={draft[f.key] ?? ""}
                     placeholder={toText(f, DEFAULT_SETTINGS[f.key]) || "(not set)"}
                     spellCheck={false}
+                    readOnly={state.readOnly}
                     aria-invalid={!!errors[f.key]}
                     onChange={(e) => {
                       setSaved(false);
@@ -127,7 +133,7 @@ export function SettingsView() {
             })}
           </div>
         ))}
-      {state && (
+      {state && !state.readOnly && (
         <div className="settings-bar">
           <button className="btn" disabled={saving || !dirty} onClick={save}>
             {saving ? "Saving…" : "Save"}

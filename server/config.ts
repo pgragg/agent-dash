@@ -1,14 +1,38 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { DEFAULT_SETTINGS, SETTING_FIELDS, type SettingKey, type Settings, splitList, validateSettings } from "../shared/settings.ts";
 import { setTeam } from "../shared/team.ts";
 
 const home = homedir();
 const env = process.env;
 
+const NAME = "agent-dash.config.json";
+
+/** The main checkout of a git worktree, from its `.git` file; null in a main checkout or outside git. */
+export function mainCheckoutOf(root: string): string | null {
+  try {
+    // In a worktree `.git` is a file; in a main checkout it is a folder, and the read throws.
+    const gitdir = resolve(root, /^gitdir: (.+)$/m.exec(readFileSync(join(root, ".git"), "utf8"))![1].trim());
+    return dirname(resolve(gitdir, readFileSync(join(gitdir, "commondir"), "utf8").trim()));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The repo's own file, else the main checkout's, so a test server in a worktree runs with the
+ * owner's settings. The main checkout's file is read-only from there: a test server must not change it.
+ */
+export function findConfigFile(root: string, explicit = env.AGENT_DASH_CONFIG): { file: string; readOnly: boolean } {
+  if (explicit) return { file: resolve(explicit), readOnly: false };
+  const own = join(root, NAME);
+  const main = existsSync(own) ? null : mainCheckoutOf(root);
+  return main && existsSync(join(main, NAME)) ? { file: join(main, NAME), readOnly: true } : { file: own, readOnly: false };
+}
+
 /** Per-user settings live outside git, so a clone never runs with someone else's paths. */
-export const CONFIG_FILE = resolve(env.AGENT_DASH_CONFIG ?? new URL("../agent-dash.config.json", import.meta.url).pathname);
+export const { file: CONFIG_FILE, readOnly: CONFIG_READ_ONLY } = findConfigFile(new URL("..", import.meta.url).pathname);
 
 export const expandHome = (p: string): string => (p === "~" ? home : p.startsWith("~/") ? join(home, p.slice(2)) : p);
 const expandPath = (p: string): string => (p ? expandHome(p) : "");
