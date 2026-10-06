@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { splitSummary } from "../../shared/nextSteps.ts";
 import { prRef } from "../../shared/refs.ts";
 import { READ_FEEDBACK, REVIEW_AND_MERGE } from "../../shared/prVerbs.ts";
-import type { Action, ActionKind, AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, LaneMode, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState } from "../../shared/types.ts";
+import type { AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, LaneMode, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState } from "../../shared/types.ts";
 import { conversationHash, launchAgent, ResumeHere, resuming } from "./agents.tsx";
 import { FIRST_LANES, type LaneDraft, LanesCard, LanesEditor, type LaneRun, WorktreesView } from "./lanes.tsx";
 import { filterHistory, groupByDay } from "./history.ts";
@@ -232,7 +232,7 @@ function RowHead({ a, summary, pageTicket, status = a.status }: { a: Item; summa
   );
 }
 
-function TypeChip({ kind }: { kind: ActionKind }) {
+function TypeChip({ kind }: { kind: AttentionKind }) {
   return <span className="tag type-chip">{rowType(kind)}</span>;
 }
 
@@ -1346,81 +1346,6 @@ function PrsView({ data, now }: { data: Dashboard; now: number }) {
   );
 }
 
-// ---- Actions view -----------------------------------------------------------------
-
-const ACTION_KIND: Record<ActionKind, { short: string; tone: string }> = {
-  ...(Object.fromEntries(Object.entries(KIND).map(([k, v]) => [k, { short: SHORT[k as AttentionKind], tone: v.tone }])) as Record<AttentionKind, { short: string; tone: string }>),
-  next_step: { short: "next step", tone: "muted" },
-};
-
-/** What the action's button opens, in words. */
-function targetLabel(target: string): string {
-  if (target.startsWith("pr:")) return prName(`https://github.com/${target.slice(3).replace(/\/(\d+)$/, "/pull/$1")}`);
-  if (target.startsWith("r:")) return "Open agent";
-  if (target.startsWith("step:")) return "Open step";
-  return "Open on board";
-}
-
-function ActionRow({ a, now }: { a: Action; now: number }) {
-  const kind = ACTION_KIND[a.kind];
-  return (
-    <li className="action" id={`a:${a.id}`}>
-      <Dot tone={kind.tone} />
-      <div className="action-body">
-        <div className="action-summary">{inline(a.summary)}</div>
-        <div className="action-meta">
-          <TypeChip kind={a.kind} />
-          <span className={`tag tone-${kind.tone}`}>{kind.short}</span>
-          {a.ticketKey ? (
-            <a className="key-link" href={href(`t:${a.ticketKey}`)} title="Open the ticket on the board">
-              {a.ticketKey}
-            </a>
-          ) : (
-            <span className="meta">no ticket</span>
-          )}
-          {a.ticketSummary && <span className="meta action-ticket">{a.ticketSummary}</span>}
-        </div>
-      </div>
-      <a className="meta action-age" href={href(`a:${a.id}`)} title={`On this list since ${stamp(a.createdAt)} · link to this action`}>
-        {humanAge(a.createdAt, now) === "just now" ? "added just now" : `added ${humanAge(a.createdAt, now)} ago`}
-      </a>
-      <a className="btn small" href={href(a.target)}>
-        {a.kind === "ready_to_merge" ? REVIEW_AND_MERGE : a.kind === "approved_with_feedback" ? READ_FEEDBACK : targetLabel(a.target)} →
-      </a>
-    </li>
-  );
-}
-
-function ActionsView({ data, now, focus }: { data: Dashboard; now: number; focus: string | null }) {
-  useFlash(focus);
-  const actions = data.actions;
-  const steps = actions.filter((a) => a.kind === "next_step").length;
-  return (
-    <article className="workspace">
-      <header className="ws-head">
-        <h1>Next actions</h1>
-        <div className="ws-meta">
-          <span className="meta">
-            {plural(actions.length - steps, "signal")} from the queue · {plural(steps, "drafted next step")} · first to do first
-          </span>
-        </div>
-      </header>
-      {focus && !actions.some((a) => `a:${a.id}` === focus) && <div className="toast">Action {focus.slice(2)} is done or gone: its signal cleared, or its ticket was redrafted.</div>}
-      {actions.length === 0 ? (
-        <div className="zero big">Nothing to do. Draft next steps on a ticket to get its recommended actions here.</div>
-      ) : (
-        <div className="card flush">
-          <ol className="actions">
-            {actions.map((a) => (
-              <ActionRow key={a.id} a={a} now={now} />
-            ))}
-          </ol>
-        </div>
-      )}
-    </article>
-  );
-}
-
 // ---- Needs you view ---------------------------------------------------------------
 
 /** The first step of the ticket's newest finished next-steps draft. */
@@ -1986,9 +1911,6 @@ export function App() {
             <a href={selected ? href(selected.id) : "#/"} className={view === "board" ? "active" : ""} aria-current={view === "board" ? "page" : undefined}>
               Board {queue.length > 0 && <span className="count">{queue.length}</span>}
             </a>
-            <a href="#/actions" className={view === "actions" ? "active" : ""} aria-current={view === "actions" ? "page" : undefined}>
-              Actions {data.actions.length > 0 && <span className="count">{data.actions.length}</span>}
-            </a>
             <a href="#/prs" className={view === "prs" ? "active" : ""} aria-current={view === "prs" ? "page" : undefined}>
               PRs {openPrs > 0 && <span className="count">{openPrs}</span>}
             </a>
@@ -2034,10 +1956,6 @@ export function App() {
       {route.view === "needs" ? (
         <main className="main">
           <NeedsView queue={queue} hidden={done.length} data={data} now={now} onDismiss={doneForNow.markDone} />
-        </main>
-      ) : route.view === "actions" ? (
-        <main className="main">
-          <ActionsView data={data} now={now} focus={route.action} />
         </main>
       ) : route.view === "prs" ? (
         <main className="main">

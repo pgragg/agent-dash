@@ -1,14 +1,14 @@
 import { prRef } from "../../shared/refs.ts";
-import type { ActionKind, AttentionItem, ConversationSummary } from "../../shared/types.ts";
+import type { AttentionItem, AttentionKind, ConversationSummary } from "../../shared/types.ts";
 
 /**
  * What a signal row says about its object: a type chip, a short name, and where the name links.
  * Kept free of React so the tests can import it.
  */
 
-export type RowType = "Agent" | "PR" | "Smoketest" | "Due date" | "Ticket" | "Next step";
+export type RowType = "Agent" | "PR" | "Smoketest" | "Due date" | "Ticket";
 
-export function rowType(kind: ActionKind): RowType {
+export function rowType(kind: AttentionKind): RowType {
   switch (kind) {
     case "awaiting_input":
     case "run_error":
@@ -18,8 +18,6 @@ export function rowType(kind: ActionKind): RowType {
       return "Due date";
     case "stalled":
       return "Ticket";
-    case "next_step":
-      return "Next step";
     default:
       return "PR";
   }

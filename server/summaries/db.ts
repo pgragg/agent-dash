@@ -54,18 +54,6 @@ CREATE INDEX IF NOT EXISTS notes_by_ticket ON notes (ticket, id);
 -- Append-only: each row is one change; the newest row per (ticket, session_id) is the current state.
 ${THREAD_TABLE}
 
--- One row per action on the Actions view, from it first showing to it going away.
--- key names what the action is about ("ci_failing pr:<url>"), so the same action keeps its row and age.
-CREATE TABLE IF NOT EXISTS actions (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  key        TEXT NOT NULL,
-  kind       TEXT NOT NULL,
-  ticket     TEXT,
-  created_at TEXT NOT NULL,
-  cleared_at TEXT
-);
-CREATE UNIQUE INDEX IF NOT EXISTS actions_open_by_key ON actions (key) WHERE cleared_at IS NULL;
-
 -- One row per thing that happened to a change on its way to prod: a smoketest plan, a smoketest
 -- execution, a deploy that Argo or Piper confirmed, or a Slack message that asked for a PR review.
 -- The other SDLC stages read GitHub and Jira, so they have no rows.
@@ -507,51 +495,6 @@ export function currentThreadStatuses(): ThreadStatusChange[] {
 
 export function threadHistory(ticket: string, sessionId: string): ThreadStatusChange[] {
   return (open().prepare(`SELECT ${THREAD_COLUMNS} FROM PiConversationStatusChange WHERE ticket = ? AND session_id = ? ORDER BY id`).all(ticket, sessionId) as unknown as ThreadStatusChange[]).map((r) => ({ ...r }));
-}
-
-// ---- actions: what to do next, with the time each one first showed ---------------------
-
-export interface ActionKey {
-  key: string;
-  kind: string;
-  ticket: string | null;
-  /** When the action really started, if that is older than now: a next step dates from its summary. */
-  createdAt?: string;
-}
-
-/**
- * Opens a row for each new key, and clears each open row whose key is gone, unless `keepMissing`
- * says its source could not be read. It writes only on a change, because each write to the
- * database reloads the page, which calls this again.
- */
-export function syncActions(current: ActionKey[], keepMissing: (key: string) => boolean = () => false, now = new Date()): Map<string, { id: number; createdAt: string }> {
-  const d = open();
-  const rows = d.prepare("SELECT id, key, created_at AS createdAt FROM actions WHERE cleared_at IS NULL").all() as unknown as { id: number; key: string; createdAt: string }[];
-  const byKey = new Map(rows.map((r) => [r.key, { id: r.id, createdAt: r.createdAt }]));
-  const wanted = new Set(current.map((a) => a.key));
-  const added = current.filter((a) => !byKey.has(a.key));
-  const gone = rows.filter((r) => !wanted.has(r.key) && !keepMissing(r.key));
-  if (!added.length && !gone.length) return byKey;
-
-  d.exec("BEGIN IMMEDIATE");
-  try {
-    const insert = d.prepare("INSERT INTO actions (key, kind, ticket, created_at) VALUES (?, ?, ?, ?) RETURNING id, created_at AS createdAt");
-    for (const a of added) {
-      if (byKey.has(a.key)) continue; // The same key twice in one call.
-      const row = insert.get(a.key, a.kind, a.ticket, a.createdAt ?? now.toISOString()) as { id: number; createdAt: string };
-      byKey.set(a.key, { id: row.id, createdAt: row.createdAt });
-    }
-    const clear = d.prepare("UPDATE actions SET cleared_at = ? WHERE id = ?");
-    for (const r of gone) {
-      clear.run(now.toISOString(), r.id);
-      byKey.delete(r.key);
-    }
-    d.exec("COMMIT");
-  } catch (err) {
-    d.exec("ROLLBACK");
-    throw err;
-  }
-  return byKey;
 }
 
 // ---- diagrams: the diagrams and charts that agents made ------------------------------

@@ -21,7 +21,7 @@ pnpm build && pnpm start # http://127.0.0.1:7777
 
 ## The page
 
-The navbar at the top switches between the views: **Board** (`#/`, the queue and workspace below), **Actions** (`#/actions`), **PRs** (`#/prs`), **History** (`#/history`) and **Diagrams** (`#/diagrams`). A conversation has its own page (`#/c:<sessionId>`), and so does each diagram (`#/d:<id>`). Each object has its own [address](#addresses).
+The navbar at the top switches between the views: **Board** (`#/`, the queue and workspace below), **PRs** (`#/prs`), **History** (`#/history`) and **Diagrams** (`#/diagrams`). A conversation has its own page (`#/c:<sessionId>`), and so does each diagram (`#/d:<id>`). Each object has its own [address](#addresses).
 
 ### Board
 
@@ -52,17 +52,6 @@ A click on **N notifications** in the top bar opens `#/needs`: the same N entrie
 - **The next step in agent-dash**: one button that opens the place to act. An agent signal opens the agent card (`#/r:`), a PR signal opens the [PR panel](#pr-panel) with its [verb button](#pr-verbs) next to it, **Overdue** and **Due soon** open the ticket (its "why" list has **New due date…**), and **Stalled** opens the drafted step (`#/step:`), else the ticket. The ticket's first drafted next step also shows under the row.
 
 The rules are in `web/src/needs.ts`.
-
-### Actions
-
-One short list of what to do next, first to do first. It has two kinds of action:
-
-- **Signals** from the queue that need you: an agent waits, CI is red, a ticket is overdue, and so on. Context only signals (a healthy PR out for review) are not actions.
-- **Drafted next steps** of each open ticket, from its newest finished summary. They come after the signals, and each ticket's first step comes before any second step.
-
-Each row shows the action, its ticket (which opens the ticket on the board), how long the action has been on the list ("added 3 hours ago"), and a button that opens the object to act on, in agent-dash: the agent card (`#/r:`), the step (`#/step:`), the ticket (`#/t:`), or the [PR panel](#pr-panel) (`#/pr:`). The age is a link to the action itself (`#/a:<id>`).
-
-Each action is a row in the SQLite `actions` table. The server syncs the table on each dashboard load: a new action gets a row, and an action that went away gets `cleared_at`. If it comes back later, it gets a new row, so its age starts again. A source that could not be read (for example a GitHub timeout) clears none of its actions. A next step's row dates from when its summary was saved.
 
 ### PRs
 
@@ -182,13 +171,12 @@ Every object in agent-dash has an address in the URL hash. A link opens the obje
 | `#/step:<id>` | A drafted next step, in its ticket's Next steps card |
 | `#/note:<id>` | A note, in its ticket's Notes card |
 | `#/pr:<owner>/<repo>/<number>` | The [PR panel](#pr-panel) |
-| `#/a:<id>` | The action on the Actions view |
 | `#/needs` | The [Notifications](#notifications) list |
 | `#/c:<sessionId>` | The conversation's page. A conversation that is older than the board's window shows its chat from the log. |
 | `#/d:<id>` | The [diagram's](#diagrams) page |
 | `#/diagrams` | Every diagram |
 
-An object that is not on the page any more (an old run, a merged PR, a cleared action) shows a note that says so.
+An object that is not on the page any more (an old run, a merged PR) shows a note that says so.
 
 ## Diagrams
 
@@ -273,7 +261,6 @@ Everything you write lives in SQLite at `~/.agent-dash/agent-dash.db`:
 | `notes` | One per note: `ticket`, `created_at`, `body` |
 | `tickets` | One per ticket with local state: `key`, `snoozed_until` (when a snoozed ticket comes back to the board) |
 | `review_drafts` | One per open PR: `pr_url`, `status` (`in_progress`, `done` or `failed`), `text` (the drafted Slack message), `error`, `requested_at` |
-| `actions` | One per action on the Actions view: `key` (what it is about, such as `ci_failing pr:<url>`), `kind`, `ticket`, `created_at`, `cleared_at` (set when it goes away) |
 | `exits` | One per time you leave the dash for another tool: `at`, `kind`, `host`, `view`, `section`, `ticket`. Append-only. See [Exits](#exits). |
 | `diagrams` | One per diagram an agent made: `key` (session id and source hash), `session_id`, `ticket`, `kind`, `title`, `origin` (`reply`, or the file path as the agent wrote it), `hash`, `source`, `created_at` (when the agent wrote it) |
 | `SDLC_Event` | One per smoketest plan, smoketest execution, confirmed deploy, or review request: `event_type` (`smoketest_plan`, `smoketest_execution`, `deploy` or `review_request`; an older `smoketest` row becomes `smoketest_execution` when the table is copied), on a plan `test_details` (the plan), `planned_at` (when the agent last recorded it), `state_changes` (the Beta or Prod writes it needs; empty for none), `writes_summary` (a short summary of those writes by environment), `summary` (a very short summary of the plan), `confirmed_at` and `confirmed_by` (`piper` or `auto`), on an execution `plan_id`, `pr_url`, `channel`, `message` and `message_url` (the Slack permalink) on a review request, `started_at`, `finished_at`, `outcome` (`passed`, `failed`, `blocked`, or empty), `test_details`, `test_results`, `skipped_at` (set on a smoketest that you skipped), `session_id` (the agent that runs it, when agent-dash started it), `created_at`. A smoketest execution with a `session_id`, no `finished_at` and no `outcome` is running; a plan with no `planned_at` is being written. |

@@ -292,24 +292,6 @@ export interface ThreadStatusChange {
   createdAt: string;
 }
 
-export type ActionKind = AttentionKind | "next_step";
-
-/** A thing to do next, from a queue signal that needs you or a drafted next step. One row in SQLite. */
-export interface Action {
-  /** The `actions` row id. */
-  id: number;
-  kind: ActionKind;
-  summary: string;
-  ticketKey: string | null;
-  ticketSummary: string | null;
-  /** When the row was written: how long the action has been open. */
-  createdAt: string;
-  /** Higher comes first. */
-  score: number;
-  /** The agent-dash object to act on, as a ref ("t:KEY", "r:SESSION", "step:ID", "pr:OWNER/REPO/N"). Never Jira or GitHub. */
-  target: string;
-}
-
 export type DiagramKind = "mermaid" | "svg" | "png" | "jpeg" | "gif" | "webp";
 
 /** A stored copy, so a diagram opens after its conversation, file, or ticket is gone. */
@@ -452,8 +434,6 @@ export interface Dashboard {
   snoozedUntil: Record<string, string>;
   /** Starred ticket keys, first starred first. They go to the top of the board and the PRs view. */
   starred: string[];
-  /** Open actions, first to do first. */
-  actions: Action[];
   /** Every diagram an agent made, newest first, without its source. */
   diagrams: Diagram[];
   /** SDLC events (smoketests, confirmed deploys) by ticket key, newest first. */

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { rankAttention } from "../server/attention.ts";
-import { actionCandidates } from "../server/actions.ts";
 import { feedbackOf } from "../server/sources/github.ts";
 import { feedback, feedbackCounts, toAddressCount } from "../shared/feedback.ts";
 import { verbFor } from "../shared/prVerbs.ts";
@@ -43,7 +42,6 @@ test("an approval with feedback to address is not 'merge it'", () => {
   assert.equal(item.reason, "sdk-gen-fern-platform#172: approved, 6 comments to address");
   assert.ok(item.score > 70 && item.score < 80);
   assert.equal(verbFor(item, { url: "u", repo: "o/r", number: 172 }), null, "its button is a link to the panel, not an agent");
-  assert.equal(actionCandidates({ attention: [{ ...item, ticketUrl: null }], myTickets: [], otherTickets: [], summaries: {} }).length, 1);
 });
 
 test("an approval with an empty body and no open thread is still 'approved and green — merge it'", () => {

@@ -426,7 +426,7 @@ a.pr-group-title:hover { text-decoration: underline; text-underline-offset: 3px;
 .h-row.one-line > .shrink { flex: 0 1 auto; min-width: 0; }
 .h-row.one-line > .grow { flex: 1 1 0; }
 
-/* Actions view: one row per thing to do, with a link into the board or the PRs view. */
+/* Notifications: one row per entry that needs you, with a link to the place to act. */
 .actions { list-style: none; margin: 0; padding: 0; }
 .action { display: flex; align-items: center; gap: 12px; padding: 11px 18px; border-bottom: 1px solid var(--line); }
 .action:last-child { border-bottom: 0; }
@@ -441,8 +441,7 @@ a.pr-group-title:hover { text-decoration: underline; text-underline-offset: 3px;
 .why-gist, .need-gist { display: block; white-space: pre-line; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
 .need-gist { margin-top: 4px; }
 .need-step-body { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
-.action-age { flex: none; text-decoration: none; white-space: nowrap; }
-.action-age:hover { text-decoration: underline; }
+.action-age { flex: none; white-space: nowrap; }
 .action > .btn { flex: none; text-decoration: none; }
 
 /* The object that a link points at. */

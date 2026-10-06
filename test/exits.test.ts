@@ -75,7 +75,7 @@ test("the ticket is the selected one, else the nearest box's key link, never a n
   assert.equal(pickTicket("#/t:FSDK-9", ["#/t:FSDK-1"], [], "FSDK-2"), "FSDK-9");
   assert.equal(pickTicket("#/", null, ["https://github.com/o/r/pull/1", `${jira}FSDK-1770`], "FSDK-2046"), "FSDK-1770");
   assert.equal(pickTicket("#/prs", [`${jira}FSDK-3`], [`${jira}FSDK-1`], null), "FSDK-3");
-  assert.equal(pickTicket("#/actions", ["#/t:FSDK-4"], [], null), "FSDK-4");
+  assert.equal(pickTicket("#/needs", ["#/t:FSDK-4"], [], null), "FSDK-4");
   // A PR group with no ticket must not take the first group's key from the page.
   assert.equal(pickTicket("#/prs", [], [`${jira}FSDK-1`], null), null);
   assert.equal(pickTicket("#/", null, [], `FSDK-5`), "FSDK-5");

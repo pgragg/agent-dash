@@ -6,8 +6,9 @@ import { href, humanAge, parseHash, resolveBoardRef } from "../web/src/routes.ts
 import { NOW, minutesAgo, run, ticket } from "./helpers.ts";
 
 test("each kind of hash opens its view", () => {
-  assert.deepEqual(parseHash("#/actions"), { view: "actions", action: null });
-  assert.deepEqual(parseHash("#/a:12"), { view: "actions", action: "a:12" });
+  // An unknown hash, such as a link to the old Actions view, opens the board.
+  assert.equal(parseHash("#/actions").view, "board");
+  assert.equal(parseHash("#/a:12").view, "board");
   assert.deepEqual(parseHash("#/pr:o/r/7"), { view: "prs", pr: "pr:o/r/7" });
   assert.deepEqual(parseHash("#/prs"), { view: "prs", pr: null });
   assert.deepEqual(parseHash("#/c:abc"), { view: "conversation", id: "abc" });
