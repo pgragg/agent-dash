@@ -457,6 +457,11 @@ export function activeLanes(): LaneRecord[] {
   return open().prepare(`SELECT ${LANE_COLUMNS} FROM lanes WHERE state != 'removed' ORDER BY id`).all() as unknown as LaneRecord[];
 }
 
+/** Every repo that ever had a lane, so the Worktrees view also finds what a removed lane left. */
+export function laneRepos(): string[] {
+  return (open().prepare("SELECT DISTINCT repo FROM lanes").all() as { repo: string }[]).map((r) => r.repo);
+}
+
 export function getLane(id: number): LaneRecord | null {
   return (open().prepare(`SELECT ${LANE_COLUMNS} FROM lanes WHERE id = ?`).get(id) as unknown as LaneRecord | undefined) ?? null;
 }

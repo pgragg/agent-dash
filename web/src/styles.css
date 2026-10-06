@@ -712,6 +712,9 @@ a.btn.verb { text-decoration: none; }
 .wl-row { font-size: 13px; }
 .wl-line { display: flex; align-items: center; gap: 10px; }
 .wl-note { margin: 2px 0 4px 34px; font-size: 12.5px; }
-.wl-row .wl-branch { font: 12.5px var(--mono); color: var(--ink-2); }
+.wl-row .wl-branch { font: 12.5px var(--mono); color: var(--ink-2); white-space: nowrap; }
+.wl-row .nowrap { white-space: nowrap; }
+.worktrees .wl-row { padding: 4px 0; border-top: 1px solid var(--line); }
+.worktrees .wl-note { margin-left: 0; }
 .composer-bar label.meta, .wl-bar label.meta { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; margin-right: 10px; }
 .composer-bar label.meta input, .wl-bar label.meta input { display: inline-block; width: auto; padding: 0; margin: 0; }

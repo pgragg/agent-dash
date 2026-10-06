@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createLanes, LaneError, laneGit, listWorktrees, planLanes } from "../server/lanes.ts";
 import { land, openPr, startLanes } from "../server/routes/lanes.ts";
 import { landLane } from "../server/land.ts";
+import { cleanupBlocker, deletesBranch, removeWorktree, scanWorktrees } from "../server/worktrees.ts";
 import * as db from "../server/summaries/db.ts";
 import { landBlocker, laneAgentName, laneBrief, laneGitText, lanesProblem } from "../shared/lanes.ts";
 
+const NOW_MS = Date.parse("2026-10-06T12:00:00Z");
 const root = realpathSync(mkdtempSync(join(tmpdir(), "agent-dash-lanes-")));
 db.open(join(root, "test.db"));
 const sh = (cwd: string, ...args: string[]) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -269,4 +271,100 @@ test("Land is on only for a land-mode lane with new commits, no uncommitted file
   assert.equal(landBlocker({ ...l, state: "landing" }, false), "it is landing now");
   // A lane that hit a conflict lands again once its agent fixed it.
   assert.equal(landBlocker({ ...l, state: "conflict" as never }, false), null);
+});
+
+// ---- AD-22: Clean up -----------------------------------------------------------------------
+
+/** Makes git think the worktree was last used `days` ago. */
+function age(path: string, days: number): void {
+  const gitDir = sh(path, "rev-parse", "--path-format=absolute", "--git-dir");
+  const t = new Date(Date.now() - days * 86_400_000);
+  utimesSync(join(gitDir, "logs", "HEAD"), t, t);
+}
+
+test("clean up: never the main checkout, a live agent's folder, uncommitted files, a fresh orphan, or a lone detached HEAD", () => {
+  const f = { main: false, branch: "x", dirty: 0, ahead: 0, contained: true, prState: null, lastUsedAt: new Date(NOW_MS - 3 * 86_400_000).toISOString(), liveSession: null, owned: false };
+  assert.equal(cleanupBlocker(f, NOW_MS), null);
+  assert.equal(cleanupBlocker({ ...f, main: true }, NOW_MS), "the repo's main checkout");
+  assert.equal(cleanupBlocker({ ...f, liveSession: "s" }, NOW_MS), "a live agent works here");
+  assert.equal(cleanupBlocker({ ...f, dirty: 1 }, NOW_MS), "1 uncommitted file");
+  assert.equal(cleanupBlocker({ ...f, lastUsedAt: new Date(NOW_MS - 3_600_000).toISOString() }, NOW_MS), "used in the last 24 hours");
+  // A lane's own worktree has its agent's status, so the quiet time does not apply.
+  assert.equal(cleanupBlocker({ ...f, owned: true, lastUsedAt: new Date(NOW_MS).toISOString() }, NOW_MS), null);
+  assert.equal(cleanupBlocker({ ...f, branch: null, contained: false, ahead: 2 }, NOW_MS), "a detached HEAD with 2 commits that the base does not have");
+  assert.equal(cleanupBlocker({ ...f, owned: true, lanesUseIt: true }, NOW_MS), "its lanes still land here; clean them up first");
+  assert.equal(deletesBranch({ branch: "x", contained: false, prState: "MERGED" }), true);
+  assert.equal(deletesBranch({ branch: "x", contained: false, prState: "CLOSED" }), false);
+  assert.equal(deletesBranch({ branch: "x", contained: false, prState: null, landed: true }), true);
+});
+
+test("clean up: orphans with merged work go with their branch, unmerged branches stay, and dirty or fresh ones say why not", async () => {
+  const app = repo("orphans");
+  const add = (name: string, from = "origin/main") => {
+    const path = join(root, "orphans", `app-${name}`);
+    sh(app, "worktree", "add", "-q", "-b", name, path, from);
+    return path;
+  };
+  const merged = add("merged");
+  const squashed = add("squashed");
+  writeFileSync(join(squashed, "s.txt"), "s\n");
+  sh(squashed, "add", "-A");
+  sh(squashed, "commit", "-qm", "squashed work");
+  const unmerged = add("unmerged");
+  writeFileSync(join(unmerged, "u.txt"), "u\n");
+  sh(unmerged, "add", "-A");
+  sh(unmerged, "commit", "-qm", "only here");
+  const dirty = add("dirty");
+  writeFileSync(join(dirty, "wip.txt"), "wip\n");
+  const fresh = add("fresh");
+  const busy = add("busy");
+  for (const p of [merged, squashed, unmerged, dirty, busy]) age(p, 3);
+
+  const scanNow = () =>
+    scanWorktrees({ repos: [app], lanes: [], live: [{ sessionId: "live-1", cwd: join(busy, "src") }], now: Date.now(), pr: async (_slug, b) => (b === "squashed" ? { url: "https://github.com/o/r/pull/9", state: "MERGED" } : null) });
+  // PRs are only looked up on GitHub; the scan itself reads local refs only.
+  sh(app, "remote", "set-url", "origin", "https://github.com/o/r.git");
+  const byName = async () => new Map((await scanNow()).map((w) => [w.branch, w]));
+  let w = await byName();
+  assert.equal(w.get("main")!.blocker, "the repo's main checkout");
+  assert.equal(w.get("merged")!.blocker, null);
+  assert.equal(w.get("merged")!.deletesBranch, true);
+  // A squash merge leaves the branch's commits off main; the merged PR says the work is safe.
+  assert.equal(w.get("squashed")!.contained, false);
+  assert.equal(w.get("squashed")!.deletesBranch, true);
+  assert.deepEqual(w.get("squashed")!.pr, { url: "https://github.com/o/r/pull/9", state: "MERGED" });
+  assert.equal(w.get("unmerged")!.blocker, null);
+  assert.equal(w.get("unmerged")!.deletesBranch, false);
+  assert.equal(w.get("dirty")!.blocker, "1 uncommitted file");
+  assert.equal(w.get("fresh")!.blocker, "used in the last 24 hours");
+  assert.equal(w.get("busy")!.blocker, "a live agent works here");
+
+  assert.deepEqual(await removeWorktree(w.get("merged")!), { ok: true, deletedBranch: true });
+  assert.deepEqual(await removeWorktree(w.get("unmerged")!), { ok: true, deletedBranch: false });
+  assert.match(sh(app, "branch", "--list", "unmerged"), /unmerged/);
+  assert.equal(existsSync(unmerged), false);
+  assert.deepEqual(await removeWorktree(w.get("dirty")!), { ok: false, error: `cannot clean up ${dirty}: 1 uncommitted file` });
+  assert.equal(existsSync(join(dirty, "wip.txt")), true);
+
+  // A file that appears after the scan: git itself refuses, because there is no --force.
+  w = await byName();
+  writeFileSync(join(fresh, "late.txt"), "late\n");
+  assert.equal((await removeWorktree({ ...w.get("fresh")!, blocker: null })).ok, false);
+  assert.equal(existsSync(join(fresh, "late.txt")), true);
+});
+
+test("clean up: a landed lane goes with its branch, and the integration worktree waits for its lanes", async () => {
+  const { app, rows } = await threeLanes("cleanup-lanes");
+  const deps = { context: async () => "", onChange: () => {}, agentWorking: async () => false, inbox: () => {} };
+  await land(rows.find((r) => r.lane === "c")!.id, deps);
+  const scan = async () => new Map((await scanWorktrees({ repos: [app], lanes: db.activeLanes().filter((l) => l.repo === app), live: [], now: Date.now(), pr: async () => null })).map((w) => [w.path, w]));
+  let w = await scan();
+  const c = w.get(rows.find((r) => r.lane === "c")!.worktree)!;
+  const a = w.get(rows.find((r) => r.lane === "a")!.worktree)!;
+  assert.deepEqual(c.owner, { ticket: rows[0].ticket, laneId: rows.find((r) => r.lane === "c")!.id, lane: "c" });
+  assert.equal(c.blocker, null);
+  assert.equal(c.deletesBranch, true);
+  assert.equal(a.deletesBranch, false);
+  assert.equal(w.get(rows[0].integrationWorktree!)!.blocker, "its lanes still land here; clean them up first");
+  assert.deepEqual(await removeWorktree(c), { ok: true, deletedBranch: true });
 });

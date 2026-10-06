@@ -4,7 +4,7 @@ import { prRef } from "../../shared/refs.ts";
 import { READ_FEEDBACK, REVIEW_AND_MERGE } from "../../shared/prVerbs.ts";
 import type { Action, ActionKind, AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, LaneMode, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState } from "../../shared/types.ts";
 import { conversationHash, launchAgent, ResumeHere, resuming } from "./agents.tsx";
-import { FIRST_LANES, type LaneDraft, LanesCard, LanesEditor, type LaneRun } from "./lanes.tsx";
+import { FIRST_LANES, type LaneDraft, LanesCard, LanesEditor, type LaneRun, WorktreesView } from "./lanes.tsx";
 import { filterHistory, groupByDay } from "./history.ts";
 import { PrPanel, PrVerbButton } from "./prPanel.tsx";
 import { ciTag } from "./prView.ts";
@@ -1998,6 +1998,9 @@ export function App() {
             <a href="#/diagrams" className={view === "diagrams" || view === "diagram" ? "active" : ""} aria-current={view === "diagrams" ? "page" : undefined}>
               Diagrams {data.diagrams.length > 0 && <span className="count">{data.diagrams.length}</span>}
             </a>
+            <a href="#/worktrees" className={view === "worktrees" ? "active" : ""} aria-current={view === "worktrees" ? "page" : undefined}>
+              Worktrees
+            </a>
           </nav>
         </div>
         <div className="headline">
@@ -2047,6 +2050,10 @@ export function App() {
       ) : route.view === "diagrams" ? (
         <main className="main">
           <DiagramsView data={data} now={now} />
+        </main>
+      ) : route.view === "worktrees" ? (
+        <main className="main">
+          <WorktreesView now={now} />
         </main>
       ) : route.view === "diagram" ? (
         <main className="main">
