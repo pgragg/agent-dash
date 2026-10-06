@@ -253,6 +253,50 @@ export function newestPlan(events: SdlcEvent[], env: SdlcEnvironment): SdlcEvent
   return tagged(events, "smoketest_plan", group)[0] ?? null;
 }
 
+/** A row of the Smoketests card: one smoketest stage pair of the bar, and its events. */
+export interface SmoketestLane {
+  id: "local" | "beta" | "prod";
+  label: string;
+  envs: SdlcEnvironment[];
+  plan: Stage;
+  run: Stage;
+  /** Plans and executions, newest first. */
+  events: SdlcEvent[];
+  /** Executions only, oldest first: the history strip reads left to right. */
+  runs: SdlcEvent[];
+  /** The environment of the newest event, else the stage default. */
+  env: SdlcEnvironment;
+  /** "later": both stages come after the bar's next stage, so the row is not where to look now. */
+  emphasis: "next" | "later" | "none";
+}
+
+const LANES: { id: SmoketestLane["id"]; label: string; plan: StageId; run: StageId }[] = [
+  { id: "local", label: "Local", plan: "local_smoketest_plan", run: "local_smoketest" },
+  { id: "beta", label: "Beta", plan: "beta_smoketest_plan", run: "beta_smoketest" },
+  { id: "prod", label: "Prod", plan: "prod_smoketest_plan", run: "prod_smoketest" },
+];
+
+export function smoketestLanes(p: SdlcProgress, events: SdlcEvent[]): SmoketestLane[] {
+  const nextAt = p.next ? p.stages.indexOf(p.next) : p.stages.length;
+  return LANES.map((l) => {
+    const envs = STAGE_ENVS[l.id];
+    const at = p.stages.findIndex((s) => s.id === l.plan);
+    const mine = newestFirst(events.filter((e) => (e.eventType === "smoketest_plan" || e.eventType === "smoketest_execution") && e.environments.some((x) => envs.includes(x))));
+    const emphasis = p.next?.id === l.plan || p.next?.id === l.run ? "next" : at > nextAt ? "later" : "none";
+    return {
+      id: l.id,
+      label: l.label,
+      envs,
+      plan: p.stages[at],
+      run: p.stages[at + 1],
+      events: mine,
+      runs: mine.filter((e) => e.eventType === "smoketest_execution").reverse(),
+      env: mine[0]?.environments.find((x) => envs.includes(x)) ?? envs[0],
+      emphasis,
+    };
+  });
+}
+
 /** For a summary run's or an agent's context: one line per stage. */
 export function progressLines(p: SdlcProgress): string[] {
   const mark: Record<StageState, string> = { done: "[x]", failed: "[!] failed", blocked: "[?] blocked", running: "[~] running", waiting: "[~] waiting", skipped: "[-] skipped", todo: "[ ]" };
