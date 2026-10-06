@@ -84,7 +84,7 @@ export function releasePending(pending: Map<string, Pending>, runs: Run[], summa
     const r = byId.get(id);
     if (!r || r.status !== "awaiting_input" || r.statusSince !== p.since) continue;
     const s = summaries[id];
-    // A run with no message never gets a summary, so it does not wait for one.
+    // A run with no message never gets a summary, so it does not wait.
     if (!r.lastMessage || readySummary(s) || (s?.status === "failed" && !s.stale) || now - p.heldAt >= waitMs) send.push(r);
     else keep.set(id, p);
   }

@@ -40,7 +40,7 @@ test("a run is drafted when it has no summary or a newer message; a working run 
   assert.deepEqual(runsToDraft([newer], new Map([row(waiting, { status: "in_progress", requestedAt: "2026-10-05T09:00:00.000Z" })]), retry).length, 1);
   // The end of the conversation changes what it needs.
   assert.notEqual(basisOf(waiting), basisOf({ ...waiting, status: "finished" }));
-  // So does the stop: a draft made while the agent worked is stale when it waits.
+  // So does the stop: a draft made during work is stale when it waits.
   assert.notEqual(basisOf(waiting), basisOf({ ...waiting, status: "working" }));
 });
 
