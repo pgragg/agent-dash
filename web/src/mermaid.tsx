@@ -37,7 +37,11 @@ export function Mermaid({ code }: { code: string }) {
   if (error) {
     return (
       <div className="mermaid-error">
-        <span className="meta">This mermaid code does not render: {error.split("\n")[0]}</span>
+        <span className="meta">
+          {/dynamically imported module|module script failed/i.test(error)
+            ? "agent-dash was rebuilt after this page loaded. Reload the page to show this diagram."
+            : `This mermaid code does not render: ${error.split("\n")[0]}`}
+        </span>
         <pre>{code}</pre>
       </div>
     );
