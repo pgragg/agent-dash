@@ -3,3 +3,7 @@ web/dist/
 .env*
 *.log
 .DS_Store
+
+# Per-user settings: edit them on the Settings page (#/settings). The example is committed.
+agent-dash.config.json
+agent-dash.config.json.tmp

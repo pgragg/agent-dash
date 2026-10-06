@@ -17,6 +17,8 @@ pnpm install-extension   # once: exact run status and replies (see below)
 pnpm build && pnpm start # http://127.0.0.1:7777
 ```
 
+Then open **Settings** (`#/settings`) and set your Jira server, login and token file, your ticket projects, and the other paths that you use. They go in `agent-dash.config.json`, which git ignores. See [Configuration](#configuration).
+
 `dash` (in `~/.zshrc`) does the same, and opens Chrome. `pnpm dev` runs the server with `--watch` and Vite on http://127.0.0.1:7778.
 
 ## The page
@@ -39,7 +41,7 @@ The navbar at the top switches between the views: **Board** (`#/`, the queue and
 - **New since you last looked**: in the ticket's "why" list, a row that came after your last look at the ticket has a blue edge and a **new** chip, and each group heading counts them ("Needs you · 3 · 2 new"). A row is new when its time (`since`) is after the last look; a ticket you never looked at is all new. The page saves when you last looked at each entry in localStorage (`agent-dash:seen`), every 5 s while its workspace shows in a focused tab. The marks stay while you are away from the tab, and are read again when you come back, so what came while you were away is new.
 - **New conversation** (`C`), at the top of the queue, opens a new page (`#/c`). Type the first message and pick the folder (default `~`), and **Start** runs a plain pi with no ticket and no context file. That pi has no terminal: the page goes to `#/c:<sessionId>`, and you talk to the agent there (see [Conversations on the page](#conversations-on-the-page)).
 - **Keyboard**: `J`/`K` move, `E` done for now, `Z` snooze, `R` reply, `N` note, `A` new agent, `C` new conversation, `O` open the iTerm tab (or the page of a conversation), `S` draft next steps, `T` show or hide the ticket section, `V` queue or kanban, `/` search the kanban, `⌘↵` send, `?` help. On the PRs and History views, `J`/`K` select a row and `↵` opens it (the PR, or the chat).
-- **Fix login**: when Jira or GitHub is down, the top bar shows **Fix Jira login** or **Fix GitHub login**. It runs `~/pi/auth/pi-auth ensure <target>` on the server (`POST /api/login?source=jira|github`, with the `X-Agent-Dash` guard), then refreshes. The target comes from a fixed list, never from the request. pi-auth can open your Chrome; it changes nothing remote. If pi-auth has no target for the source, the button tells you how to log in by hand.
+- **Fix login**: when Jira or GitHub is down, the top bar shows **Fix Jira login** or **Fix GitHub login**. It runs `<pi-auth binary> ensure <target>` on the server (the binary is a [setting](#configuration); with none, the button says so) (`POST /api/login?source=jira|github`, with the `X-Agent-Dash` guard), then refreshes. The target comes from a fixed list, never from the request. pi-auth can open your Chrome; it changes nothing remote. If pi-auth has no target for the source, the button tells you how to log in by hand.
 - `#/t:ABC-123` or `#/r:<sessionId>` in the URL selects an entry. See [Addresses](#addresses) for the other objects.
 
 ### Parked agents
@@ -75,7 +77,7 @@ Your open PRs, grouped by ticket. A PR links to a ticket as on the board, so a P
 **Review requests.** Under each PR is a drafted Slack message in the team's format, for example `PR: bind slack token env vars https://github.com/postman-eng/cloud9-parcels-production-deployments/pull/13612`. You can edit it. **Post to Slack** (or `⌘↵` in the message) posts it to #proj-fern-aws-migration-devs as you, and the click is your approval. After Slack takes the message, the server records a `review_request` [SDLC event](#sdlc-progress-and-smoketests) with the PR, the text and the permalink, on the PR's tickets, so the ticket's **Review requested** stage turns done. The PR then shows "Review requested … Open in Slack", and **Post again** opens the draft again. If the post fails, nothing is recorded, and the PR shows Slack's reason.
 
 - **Drafts.** When the PRs view loads, it calls `POST /api/review-drafts`. The server takes each open PR from its own list that has no draft, marks it in progress, and drafts at most 6 at once in the background: it reads the PR body and files with `gh pr view`, then runs one tool-less `pi -p --no-session` turn with a cheap model (`AGENT_DASH_DRAFT_MODEL`, default `anthropic/claude-haiku-4-5`). The model writes only the phrase; the server adds `PR:` and the link. Each finished draft reloads the page. A failed or stuck draft is tried again on a page load after 5 minutes; meanwhile the message starts from the PR title. **Redraft** (`POST /api/review-drafts?pr=<url>`) asks for a new draft.
-- **Posting.** `POST /api/review-requests` with `{prUrl, text}`, with the `X-Agent-Dash` guard. The PR must be one of the dashboard's PRs. The server runs `scripts/slack-post.ts`, which posts through Slack's hosted MCP with your own OAuth grant from pi-mcp-adapter (`~/pi/slack/README.md`), because copied Slack cookies get the session revoked. The grant needs the `chat:write` scope. The adapter config hides the send tool from pi agents (`excludeTools`), so only this button posts. If the grant has no `chat:write`, the PR shows how to sign in again: `node ~/pi/slack/bin/mcp-slack-login.mjs --force` (it asks Slack again even with a good token), then click Allow in Chrome.
+- **Posting.** `POST /api/review-requests` with `{prUrl, text}`, with the `X-Agent-Dash` guard. The PR must be one of the dashboard's PRs. The server runs `scripts/slack-post.ts`, which posts through Slack's hosted MCP with your own OAuth grant from pi-mcp-adapter, because copied Slack cookies get the session revoked. The grant needs the `chat:write` scope. The adapter config hides the send tool from pi agents (`excludeTools`), so only this button posts. If the grant has no `chat:write`, the PR shows how to sign in again, with the **Slack sign-in command** [setting](#configuration).
 
 ### PR panel
 
@@ -191,6 +193,7 @@ Every object in agent-dash has an address in the URL hash. A link opens the obje
 | `#/c:<sessionId>` | The conversation's page. A conversation that is older than the board's window shows its chat from the log. |
 | `#/d:<id>` | The [diagram's](#diagrams) page |
 | `#/diagrams` | Every diagram |
+| `#/settings` | The [settings](#configuration) |
 
 An object that is not on the page any more (an old run, a merged PR) shows a note that says so.
 
@@ -310,8 +313,8 @@ The server listens on `127.0.0.1` only, because the page shows prompts and repli
 |---|---|---|
 | pi sessions | `~/.pi/agent/sessions/**/*.jsonl` | Re-parses only the files that changed. A cold scan of about 700 sessions takes about 1 s. |
 | Run status | `~/.agent-dash/status/<sessionId>.json`, written by `extension/agent-dash-status.ts` | Without it, status is a guess from the log, marked `?` |
-| Jira | `POST /rest/api/3/search/jql` with the token in `~/pi/secrets/jira/.env.personal` | Open tickets assigned to you, excluding the deprecated `FSM` project. The [Ticket](#the-ticket-section) section reads one ticket's description, comments and transitions with GETs, only when it opens. |
-| Local tickets | `~/pi/projects/27_agent_dash/project_management/<status>/AD-<n>-<slug>.md` (`AGENT_DASH_LOCAL_TICKETS_DIR`) | agent-dash's own tickets, `AD-1`, `AD-2`, …, are files, not Jira issues. The folder is the status (`todo`, `in-progress`, `in-review`, `done`, `canceled`), and the `# AD-<n> — Title` heading is the title. They are read on each build, never asked of Jira. The Ticket section shows the file and has no Jira verbs, and the key's link (`/api/local-ticket?key=AD-<n>`) shows the file as text. An `AD-` key with no file is not a ticket and links to nothing. |
+| Jira | `POST /rest/api/3/search/jql` with the token in the Jira token file [setting](#configuration) (or `JIRA_API_TOKEN`) | Open tickets assigned to you, excluding the projects to leave out. The [Ticket](#the-ticket-section) section reads one ticket's description, comments and transitions with GETs, only when it opens. |
+| Local tickets | `<local tickets folder>/<status>/AD-<n>-<slug>.md` (a [setting](#configuration); none means no local tickets) | agent-dash's own tickets, `AD-1`, `AD-2`, …, are files, not Jira issues. The folder is the status (`todo`, `in-progress`, `in-review`, `done`, `canceled`), and the `# AD-<n> — Title` heading is the title. They are read on each build, never asked of Jira. The Ticket section shows the file and has no Jira verbs, and the key's link (`/api/local-ticket?key=AD-<n>`) shows the file as text. An `AD-` key with no file is not a ticket and links to nothing. |
 | GitHub | `gh api graphql` with your `gh` login | Your PRs updated in the last 14 days, with CI (and the names of the failing checks), review, and merge state. The [PR panel](#pr-panel) reads one PR in full on demand. |
 
 Jira and GitHub answers are cached for 2 minutes. After the first load, a stale answer is shown at once and refreshed in the background. **refresh** forces a new fetch.
@@ -332,7 +335,7 @@ A ticket key (`FSDK-123`, `EFSUP-45`, any case) is scored by where it appears in
 
 A run links to its strongest keys: at most 3, each with a score of at least 3 and at least a third of the top score.
 
-A key in `AGENT_DASH_IGNORE_TICKETS` (comma-separated, default `FSDK-1`) never links. Use it for a real key that code uses as sample data. Examples in this repo use `ABC-123`, which no project pattern matches.
+Only keys of the ticket projects [setting](#configuration) link. A key in the keys to ignore setting never links. Use it for a real key that code uses as sample data. Examples in this repo use `ABC-123`, which no project pattern matches.
 
 PRs link to tickets by the key in their title or branch. Then two rules cross the gap:
 - A run that opened a PR (`gh pr create` in the log) takes the PR's tickets.
@@ -429,13 +432,38 @@ If a run exits without saving, the server takes its last reply (pi -p prints it)
 
 **Slack quotes.** When a summary links to a Slack message, the card shows a closed **Slack** list under the summary with the message text, its channel, its author and the time, so you can read it without going to Slack. The summary run sets `AGENT_DASH_SLACK_HITS`, so `slack-search.ts` also saves each match to `slack.jsonl` in the run's work folder. `GET /api/summaries/slack?id=<id>` returns the saved matches that the summary links to. It takes the folder from the database row, never from the request. A summary from before this change has no saved matches and shows no list.
 
-`scripts/slack-search.ts "<query>"` searches Slack read-only. It opens Slack once with the saved login in `~/pi/secrets/slack/` and calls Slack's `search.messages` from inside the page, because clicking through the search box from a headless browser is unreliable.
+`scripts/slack-search.ts "<query>"` searches Slack read-only. It opens Slack once with the saved login in the Slack login state [setting](#configuration) (an `agent-browser state save` file; with none, it says that Slack search is not set up) and calls Slack's `search.messages` from inside the page, because clicking through the search box from a headless browser is unreliable.
 
 Optional: `AGENT_DASH_SUMMARY_MODEL` and `AGENT_DASH_SUMMARY_THINKING` choose the model and thinking level of summary runs.
 
 ## Configuration
 
-Environment variables, all optional: `AGENT_DASH_PORT`, `AGENT_DASH_SESSIONS_DIR`, `AGENT_DASH_STATUS_DIR`, `AGENT_DASH_INBOX_DIR`, `AGENT_DASH_CONVERSATIONS_DIR`, `AGENT_DASH_PROJECTS` (default `FSDK|EFSUP|AD`), `AGENT_DASH_LOCAL_TICKETS_DIR`, `AGENT_DASH_EXCLUDE_PROJECTS` (default `FSM`), `AGENT_DASH_IGNORE_TICKETS` (default `FSDK-1`), `AGENT_DASH_RECENT_DAYS` (default 14), `JIRA_SERVER`, `JIRA_LOGIN`, `JIRA_API_TOKEN`, `AGENT_DASH_PI_AUTH` (default `~/pi/auth/pi-auth`).
+Your own paths and accounts live in `agent-dash.config.json` at the repo root. Git ignores it, so a clone never runs with someone else's paths. Edit it on the **Settings** page (`#/settings`), or by hand: `agent-dash.config.example.json` shows every key. A path can start with `~/`.
+
+| Setting | Key | Env var that wins over it | Default |
+|---|---|---|---|
+| Port | `port` | `AGENT_DASH_PORT` | `7777` |
+| pi sessions folder | `sessionsDir` | `AGENT_DASH_SESSIONS_DIR` | `~/.pi/agent/sessions` |
+| Recent days | `recentDays` | `AGENT_DASH_RECENT_DAYS` | `14` |
+| Jira server | `jiraServer` | `JIRA_SERVER` | none: Jira is off |
+| Jira login | `jiraLogin` | `JIRA_LOGIN` | none |
+| Jira token file (a `JIRA_API_TOKEN=…` line) | `jiraTokenFile` | `AGENT_DASH_JIRA_ENV`; `JIRA_API_TOKEN` wins over the file | none |
+| Jira projects to leave out | `jiraExcludeProjects` | `AGENT_DASH_EXCLUDE_PROJECTS` | none |
+| Ticket projects (key prefixes that link) | `ticketProjects` | `AGENT_DASH_PROJECTS` | none: no key links |
+| Keys to ignore | `ignoreTickets` | `AGENT_DASH_IGNORE_TICKETS` | none |
+| Local tickets folder | `localTicketsDir` | `AGENT_DASH_LOCAL_TICKETS_DIR` | none |
+| pi-auth binary for **Fix login** | `piAuth` | `AGENT_DASH_PI_AUTH` | none |
+| Slack login state for Slack search | `slackStateFile` | | none: no Slack search |
+| Slack org or team id | `slackOrgId` | | the first logged-in team |
+| Slack workspace URL, for permalinks | `slackWorkspaceUrl` | | none |
+| Slack sign-in command, shown when posting needs a new sign-in | `slackReloginCommand` | | none |
+| Local smoketest guide, read first by a local plan | `smoketestGuide` | | none |
+
+- **A save needs a restart.** The server reads the file once, at start. After **Save**, the page says that the server still runs with the old values until you restart it.
+- **An env var wins over the file**, for a test server or a one-off run. The page marks each field that an env var sets now. A list env var takes commas or `|`.
+- **`AGENT_DASH_CONFIG`** names another config file. `pnpm test` uses `test/config.json`, so your own settings never change a test. A test server in a worktree has no `agent-dash.config.json`: point `AGENT_DASH_CONFIG` at the main checkout's file.
+
+Other env vars, all optional: `AGENT_DASH_STATUS_DIR`, `AGENT_DASH_INBOX_DIR`, `AGENT_DASH_CONVERSATIONS_DIR`, `AGENT_DASH_REMOTE_TTL_MS`, `AGENT_DASH_MCP_ADAPTER` (pi-mcp-adapter's `dist` folder, for posting to Slack).
 
 ## Develop
 

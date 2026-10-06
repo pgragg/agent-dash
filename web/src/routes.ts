@@ -16,6 +16,7 @@ import type { Dashboard } from "../../shared/types.ts";
  * | `#/d:ID`          | A diagram's page                                  |
  * | `#/diagrams`      | Every diagram                                     |
  * | `#/worktrees`     | Every git worktree, with Clean up                 |
+ * | `#/settings`      | The config file: your own paths and accounts      |
  *
  * On the page, the element of a run, step, note, or PR has its ref as its DOM id.
  */
@@ -29,7 +30,8 @@ export type Route =
   | { view: "conversation"; id: string | null }
   | { view: "diagrams" }
   | { view: "diagram"; id: number }
-  | { view: "worktrees" };
+  | { view: "worktrees" }
+  | { view: "settings" };
 
 export function parseHash(hash: string): Route {
   const path = decodeURIComponent(hash.replace(/^#\/?/, ""));
@@ -40,6 +42,7 @@ export function parseHash(hash: string): Route {
   if (path === "history") return { view: "history" };
   if (path === "diagrams") return { view: "diagrams" };
   if (path === "worktrees") return { view: "worktrees" };
+  if (path === "settings") return { view: "settings" };
   if (/^d:\d+$/.test(path)) return { view: "diagram", id: Number(path.slice(2)) };
   if (path === "c" || path.startsWith("c:")) return { view: "conversation", id: path.slice(2) || null };
   return { view: "board", ref: path || null };

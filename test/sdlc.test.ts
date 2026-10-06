@@ -315,9 +315,10 @@ test("the agent finishes its running event once, with the script", () => {
 });
 
 test("verb messages name the environment and the record command; the summary prompt carries the order", async () => {
-  const m = planMessage("FSDK-1", "localhost", "/dash/scripts/sdlc-event.ts", 12);
+  const m = planMessage("FSDK-1", "localhost", "/dash/scripts/sdlc-event.ts", 12, "/notes/Local smoketesting.md");
   assert.match(m, /^Plan a smoketest of FSDK-1 on localhost\. Write the plan only: do not run the test yet\./);
-  assert.match(m, /Local smoketesting\.md/);
+  assert.match(m, /Read \/notes\/Local smoketesting\.md first/);
+  assert.match(planMessage("FSDK-1", "localhost", "/s", 1), /Pick the local stack/);
   assert.match(m, /node \/dash\/scripts\/sdlc-event\.ts plan --id 12 --summary "<plan summary>" --plan-file <file> --state-changes none/);
   assert.match(m, /--writes-summary "<writes summary>" --plan-file <file> --state-changes-file <file>/);
   assert.match(m, /--state-changes-file <file>/);

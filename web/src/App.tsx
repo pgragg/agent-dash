@@ -7,6 +7,7 @@ import { READ_FEEDBACK, REVIEW_AND_MERGE } from "../../shared/prVerbs.ts";
 import type { AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, LaneMode, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState } from "../../shared/types.ts";
 import { conversationHash, launchAgent, ResumeHere, resuming } from "./agents.tsx";
 import { ParkedView } from "./parked.tsx";
+import { SettingsView } from "./settings.tsx";
 import { FIRST_LANES, type LaneDraft, LanesCard, LanesEditor, type LaneRun, WorktreesView } from "./lanes.tsx";
 import { filterHistory, groupByDay } from "./history.ts";
 import { PrPanel, PrVerbButton } from "./prPanel.tsx";
@@ -1952,6 +1953,9 @@ export function App() {
             <a href="#/worktrees" className={view === "worktrees" ? "active" : ""} aria-current={view === "worktrees" ? "page" : undefined}>
               Worktrees
             </a>
+            <a href="#/settings" className={view === "settings" ? "active" : ""} aria-current={view === "settings" ? "page" : undefined}>
+              Settings
+            </a>
           </nav>
         </div>
         <div className="headline">
@@ -2010,6 +2014,10 @@ export function App() {
       ) : route.view === "worktrees" ? (
         <main className="main">
           <WorktreesView now={now} />
+        </main>
+      ) : route.view === "settings" ? (
+        <main className="main">
+          <SettingsView />
         </main>
       ) : route.view === "diagram" ? (
         <main className="main">
