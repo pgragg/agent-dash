@@ -129,7 +129,9 @@ function buildSubjects(d: Dashboard): Map<string, Subject> {
     // The server's reason says "is waiting for you", which a finished agent is not.
     const reason = review && name ? `${name} waits on a PR review` : finished && name ? `${name} finished ${age(run.statusSince, Date.parse(d.generatedAt))} ago` : a.reason;
     const status = review ? "waits on review" : finished ? "finished" : a.status;
-    s.items.push({ ...a, info: a.info || review, reason, status, gist: summaryText(summary), finished, waitsOnReview: review });
+    // A finished agent needs nothing, so it is not on your queue, unless its smoketest still needs you (a plan to Confirm, a failed run).
+    const idle = finished && !smoketestRow(a.sessionId, a.ticketKey ? (d.sdlcEvents[a.ticketKey] ?? []) : [], { asked: false, finished: true })?.needsYou;
+    s.items.push({ ...a, info: a.info || review || idle, reason, status, gist: summaryText(summary), finished, waitsOnReview: review });
   }
   for (const s of out.values()) s.fingerprint = s.items.map((a) => `${a.kind}${a.finished ? ":finished" : ""}${a.waitsOnReview ? ":review" : ""}@${a.updatedAt}`).join("|");
   return out;
@@ -143,6 +145,11 @@ function isDone(s: Subject): boolean {
 /** Something here needs you, not only someone else. */
 function actionable(s: Subject): boolean {
   return s.items.some((a) => !a.info);
+}
+
+/** Only agents that finished and need nothing: not your move, and not someone else's either. */
+function onlyFinished(s: Subject): boolean {
+  return s.items.length > 0 && s.items.every((a) => a.finished && a.info);
 }
 
 /** The item that leads: the most urgent one that needs you, else the first. */
@@ -1767,13 +1774,14 @@ export function App() {
   const queue = starredFirst(ranked.filter((s) => !doneForNow.isDone(s)), isStarred);
   const done = ranked.filter((s) => doneForNow.isDone(s));
   // Only context left, such as a PR out for review: the ball is with someone else.
-  const othersTurn = all.filter((s) => s.items.length && !actionable(s) && !isDone(s)).sort((a, b) => lead(b)!.score - lead(a)!.score);
+  const othersTurn = all.filter((s) => s.items.length && !actionable(s) && !isDone(s) && !onlyFinished(s)).sort((a, b) => lead(b)!.score - lead(a)!.score);
+  const finishedList = all.filter((s) => !actionable(s) && !isDone(s) && onlyFinished(s)).sort((a, b) => lead(b)!.score - lead(a)!.score);
   const working = all.filter((s) => !s.items.length && liveRuns(s).length && !isDone(s));
   // Closed in Jira, but agents still open on it: worth a glance to close the tabs, never a task.
   const doneInJira = all.filter((s) => isDone(s) && (s.items.length || liveRuns(s).length));
   const quiet = data ? data.myTickets.map((g) => subjects.get(`t:${g.ticket.key}`)!).filter((s) => !ticketSnoozed(s) && !s.items.length && !liveRuns(s).length) : [];
   // A starred ticket shows once, in the Starred section at the top of the rail; a snooze still hides it.
-  const unsnoozed = [...queue, ...othersTurn, ...working, ...done, ...doneInJira, ...quiet];
+  const unsnoozed = [...queue, ...othersTurn, ...working, ...finishedList, ...done, ...doneInJira, ...quiet];
   const starredList = unsnoozed.filter(isStarred);
   const unstarred = (list: Subject[]) => list.filter((s) => !isStarred(s));
   const order = [...starredList, ...unstarred(unsnoozed), ...snoozedList];
@@ -2038,7 +2046,7 @@ export function App() {
           </div>
           <KanbanBoard
             order={kanbanOrder}
-            dim={new Set([...done, ...quiet, ...snoozedList])}
+            dim={new Set([...done, ...finishedList, ...quiet, ...snoozedList])}
             ranks={new Map(queue.map((s, i) => [s, i + 1]))}
             selected={selected}
             onSelect={(s) => {
@@ -2068,7 +2076,7 @@ export function App() {
             </div>
             <RailSection title="Starred" count={starredList.length} hint="Tickets you starred, pinned to the top">
               {starredList.map((s) => (
-                <QueueItem key={s.id} s={s} starred rank={queue.includes(s) ? queue.indexOf(s) + 1 : undefined} dim={done.includes(s) || quiet.includes(s)} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
+                <QueueItem key={s.id} s={s} starred rank={queue.includes(s) ? queue.indexOf(s) + 1 : undefined} dim={done.includes(s) || finishedList.includes(s) || quiet.includes(s)} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
               ))}
             </RailSection>
             <RailSection title="Up next" count={unstarred(queue).length}>
@@ -2093,6 +2101,11 @@ export function App() {
             </RailSection>
             <RailSection title="Agents at work" count={unstarred(working).length} hint="Live runs that need nothing from you yet">
               {unstarred(working).map((s) => (
+                <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
+              ))}
+            </RailSection>
+            <RailSection title="Agents finished" count={unstarred(finishedList).length} hint="Agents that stopped and need nothing from you">
+              {unstarred(finishedList).map((s) => (
                 <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
               ))}
             </RailSection>
