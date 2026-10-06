@@ -30,6 +30,7 @@ import { syncDiagrams } from "./diagramSync.ts";
 import { sweep as sweepParks } from "./park.ts";
 import { fetchMyPrs, type PullWithFeedback } from "./sources/github.ts";
 import { toAddressCount } from "../shared/feedback.ts";
+import { approvalCount } from "../shared/ownerApproval.ts";
 import { fetchMyTickets, fetchTickets } from "./sources/jira.ts";
 import { isLocalKey, readLocalTickets } from "./sources/localTickets.ts";
 import { SessionIndex, transcriptTurns } from "./sources/sessions.ts";
@@ -91,7 +92,7 @@ let othersHealth: SourceHealth = { ok: true };
 function withToAddress({ feedback, ...pr }: PullWithFeedback): PullRequest {
   if (!feedback) return pr;
   const ref = `${pr.repo}/${pr.number}`.toLowerCase();
-  return { ...pr, toAddress: toAddressCount({ ...feedback, addressed: summaryDb.addressedKeys(ref) }) };
+  return { ...pr, toAddress: toAddressCount({ ...feedback, addressed: summaryDb.addressedKeys(ref) }), approvals: approvalCount(feedback.reviews) };
 }
 
 async function dashboard(force: boolean) {

@@ -1,3 +1,4 @@
+import { awaitsOwner, ownerWaitText } from "../shared/ownerApproval.ts";
 import { checkList } from "../shared/prVerbs.ts";
 import type { AttentionItem, PullRequest, Run, Ticket } from "../shared/types.ts";
 
@@ -64,7 +65,8 @@ function prItems(prs: PullRequest[], now: number): Draft[] {
     if (pr.reviewDecision === "CHANGES_REQUESTED") items.push({ ...base, kind: "changes_requested", score: 95 * weight, status: "changes requested", reason: `${name}: a reviewer asked for changes` });
     if (pr.checks === "failure") items.push({ ...base, kind: "ci_failing", score: 85 * weight, status: "CI red", reason: `${name}: CI is red${pr.failedChecks?.length ? `: ${checkList(pr.failedChecks)}` : ""}` });
     if (pr.mergeable === "CONFLICTING") items.push({ ...base, kind: "merge_conflict", score: 80 * weight, status: "conflict", reason: `${name}: merge conflict` });
-    if (pr.reviewDecision === "APPROVED" && !pr.isDraft && pr.checks !== "failure" && pr.checks !== "pending" && pr.mergeable !== "CONFLICTING") {
+    const ownerWait = awaitsOwner(pr);
+    if (pr.reviewDecision === "APPROVED" && !ownerWait && !pr.isDraft && pr.checks !== "failure" && pr.checks !== "pending" && pr.mergeable !== "CONFLICTING") {
       // An approval can ask for one more change, so it is not "merge it" while feedback waits for an answer.
       const open = pr.toAddress ?? 0;
       const comments = open === 1 ? "1 comment" : `${open} comments`;
@@ -75,7 +77,12 @@ function prItems(prs: PullRequest[], now: number): Draft[] {
       items.push({ ...base, kind: "ready_to_merge", score: 70, status: "green", reason: `${name}: needs no review and is green — merge it` });
     }
     // Healthy and waiting for a reviewer: the ball is with them, until it has sat too long.
-    if (pr.reviewDecision === "REVIEW_REQUIRED" && !pr.isDraft && pr.checks !== "failure" && pr.mergeable !== "CONFLICTING") {
+    if (ownerWait) {
+      const quiet = now - Date.parse(pr.updatedAt);
+      const wait = ownerWaitText(pr.approvals);
+      if (quiet > REVIEW_NUDGE_MS) items.push({ ...base, kind: "in_review", score: 45, status: wait, reason: `${name}: ${wait}, no activity for ${ago(quiet)} — nudge the reviewer` });
+      else items.push({ ...base, kind: "in_review", score: 15, info: true, status: wait, reason: `${name}: ${wait}` });
+    } else if (pr.reviewDecision === "REVIEW_REQUIRED" && !pr.isDraft && pr.checks !== "failure" && pr.mergeable !== "CONFLICTING") {
       const quiet = now - Date.parse(pr.updatedAt);
       const ci = pr.checks === "success" ? ", CI green" : pr.checks === "pending" ? ", CI running" : "";
       if (quiet > REVIEW_NUDGE_MS) items.push({ ...base, kind: "in_review", score: 45, status: `no review ${ago(quiet)}`, reason: `${name}: no review activity for ${ago(quiet)} — nudge the reviewer` });

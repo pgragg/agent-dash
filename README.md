@@ -402,6 +402,8 @@ Higher scores come first. An entry ranks by its highest-scoring item. The rules 
 | Ticket due within 2 days | 50, + priority |
 | In-progress ticket with no run for 3 days and no open PR | 25, + priority |
 
+An approved PR that GitHub still blocks (green CI, no conflict, but `mergeStateStatus` is `BLOCKED`, for example by a code-owner rule) is out for review, not ready to merge: it shows **1 approval, awaiting approval by repo owner**.
+
 Draft PRs score half. A run counts first for a ticket that is still open. Everything on a Done ticket is context only, so a Done ticket never enters the queue. Tickets that are On Hold, Blocked, Waiting or Deferred score 25 less.
 
 ## Next-steps summaries

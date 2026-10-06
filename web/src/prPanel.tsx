@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { type FeedbackNote, mergeVerbs, type PrVerb, READ_FEEDBACK, REVIEW_AND_MERGE, verbFor } from "../../shared/prVerbs.ts";
+import { approvalCount, awaitsOwner, ownerWaitText } from "../../shared/ownerApproval.ts";
 import { prRef } from "../../shared/refs.ts";
 import type { AttentionItem, AttentionKind, Dashboard, PrCheck, PrDetail, PullRequest } from "../../shared/types.ts";
 import { age, api, Markdown, plural, prName, runTitle } from "./lib.tsx";
@@ -352,7 +353,8 @@ function Panel({ refId, path, url, data, now }: { refId: string; path: string; u
   const opener = openerRun(data, pr?.url ?? url);
   const state = detail?.state ?? pr?.state;
   const draft = (detail?.isDraft ?? pr?.isDraft) && state === "open";
-  const review = REVIEW[detail?.reviewDecision ?? pr?.reviewDecision ?? ""];
+  const ownerWait = pr && awaitsOwner(pr);
+  const review: [string, string] | undefined = ownerWait ? [ownerWaitText(detail ? approvalCount(detail.reviewers.map((r) => ({ author: r.login, bot: false, state: r.state }))) : pr.approvals), "muted"] : REVIEW[detail?.reviewDecision ?? pr?.reviewDecision ?? ""];
   const title = detail?.title ?? pr?.title ?? prName(url);
   const body = detail ? stripHtml(detail.body) : "";
   const mark = async (key: string, addressed: boolean) => {
