@@ -5,7 +5,19 @@ import type { PrDetail, PrReviewThread } from "./types.ts";
  * approval that asks for a change is not "merge it". Free of Node and React, one copy for both.
  */
 
-export type FeedbackState = "to_address" | "replied" | "outdated" | "addressed";
+export type FeedbackState = "to_address" | "replied" | "outdated" | "addressed" | "report";
+
+/**
+ * Bot comments that report a status and ask for nothing: Atlantis plan and apply output, and
+ * deploy previews. Only conversation comments match; a bot thread on a line of code is a finding.
+ */
+const STATUS_REPORTS: RegExp[] = [
+  /^Ran (Plan|Apply) for (dir: |\d+ projects:)/, // Atlantis
+  /^\[vc\]: #/, // Vercel
+  /^[^\n]*Deploy Preview for /, // Netlify
+];
+
+export const isStatusReport = (c: { bot: boolean; body: string }) => c.bot && STATUS_REPORTS.some((re) => re.test(c.body.trimStart()));
 
 /** One entry of the panel's Feedback section: a review body, a conversation comment, or an unresolved thread. */
 export interface FeedbackEntry {
@@ -45,7 +57,7 @@ export function feedback(d: FeedbackSource): FeedbackEntry[] {
   }
   for (const c of d.comments) {
     if (mine(c.author)) continue;
-    out.push({ key: c.url, kind: "comment", author: c.author, bot: c.bot, at: c.createdAt, state: said(c.url, c.createdAt), body: c.body, commitSince: commitSince(c.createdAt) });
+    out.push({ key: c.url, kind: "comment", author: c.author, bot: c.bot, at: c.createdAt, state: isStatusReport(c) ? "report" : said(c.url, c.createdAt), body: c.body, commitSince: commitSince(c.createdAt) });
   }
   for (const t of d.threads) {
     const first = t.comments[0];
@@ -63,6 +75,7 @@ const STATE_WORDS: [FeedbackState, string][] = [
   ["replied", "replied"],
   ["outdated", "outdated"],
   ["addressed", "marked addressed"],
+  ["report", "report"],
 ];
 
 /** "2 to address · 1 replied": only the states that have entries. */

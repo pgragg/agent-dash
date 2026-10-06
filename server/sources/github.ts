@@ -14,7 +14,7 @@ const QUERY = `query($q: String!) {
         repository { nameWithOwner }
         author { login }
         reviews(last: 30) { nodes { author { login __typename } state body submittedAt url } }
-        comments(last: 30) { nodes { author { login __typename } createdAt url } }
+        comments(last: 30) { nodes { author { login __typename } body createdAt url } }
         reviewThreads(first: 50) { nodes { isResolved isOutdated comments(last: 1) { nodes { author { login __typename } createdAt url } } } }
         commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state contexts(first: 50) { nodes { ... on CheckRun { name conclusion } ... on StatusContext { context state } } } } } } }
       }
@@ -64,14 +64,15 @@ export type PullWithFeedback = PullRequest & { feedback?: Omit<FeedbackSource, "
 
 /**
  * The feedback of an open PR as the rule reads it. Only the last comment of a thread decides its
- * state, and the rule needs no comment text, so the search asks for neither.
+ * state, and its text is not read, so the search asks for neither. A conversation comment's text
+ * tells a bot's status report from a request.
  */
 export function feedbackOf(n: any): Omit<FeedbackSource, "addressed"> {
   const person = (a: any) => ({ author: a?.login ?? "ghost", bot: isBot(a) });
   return {
     author: n.author?.login ?? null,
     reviews: (n.reviews?.nodes ?? []).filter(Boolean).map((r: any) => ({ ...person(r.author), state: r.state, body: r.body ?? "", submittedAt: r.submittedAt, url: r.url })),
-    comments: (n.comments?.nodes ?? []).filter(Boolean).map((c: any) => ({ ...person(c.author), body: "", createdAt: c.createdAt, url: c.url })),
+    comments: (n.comments?.nodes ?? []).filter(Boolean).map((c: any) => ({ ...person(c.author), body: c.body ?? "", createdAt: c.createdAt, url: c.url })),
     threads: (n.reviewThreads?.nodes ?? [])
       .filter((t: any) => t && !t.isResolved)
       .map((t: any) => ({ path: "", line: null, isOutdated: !!t.isOutdated, comments: (t.comments?.nodes ?? []).map((c: any) => ({ ...person(c.author), body: "", createdAt: c.createdAt, url: c.url })) })),
