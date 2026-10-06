@@ -28,7 +28,7 @@ export function useLoad<T>(load: () => Promise<T>, key: unknown): { value: T | n
   return { value, error };
 }
 
-/** `firstPrompt` closes the chat's first message under that label: a prompt that agent-dash wrote is for the agent, not for Piper. */
+/** `firstPrompt` closes the first message: agent-dash wrote it for the agent, not for Piper. */
 export function Chat({ sessionId, refreshKey, firstPrompt }: { sessionId: string; refreshKey: unknown; firstPrompt?: string }) {
   const { value, error } = useLoad(() => api.transcript(sessionId), `${sessionId} ${refreshKey}`);
   const [all, setAll] = useState(false);

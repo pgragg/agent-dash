@@ -540,7 +540,7 @@ function PlanRow({ e, now, runs, cwd, onError }: { e: SdlcEvent; now: number; ru
   const waiting = isPlanWaiting(e);
   const running = isPlanRunning(e);
   const open = running || waiting;
-  // A waiting plan's chat is long and repeats its summaries, so it opens only on request.
+  // A waiting plan's chat repeats its summaries at length, so it opens on request.
   const [chat, setChat] = useState(running);
   const status = planStatus(e);
   const full = (
