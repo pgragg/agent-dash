@@ -18,6 +18,7 @@ test("each kind of hash opens its view", () => {
   assert.deepEqual(parseHash("#/documents"), { view: "documents" });
   assert.deepEqual(parseHash("#/diagrams"), { view: "documents" });
   assert.deepEqual(parseHash("#/d:12"), { view: "diagram", id: 12 });
+  assert.deepEqual(parseHash("#/help/local-url"), { view: "localUrl" });
   // Old links escaped the colon.
   assert.deepEqual(parseHash("#/t%3AFSDK-1"), { view: "board", ref: "t:FSDK-1" });
   assert.equal(href("pr:o/r/7"), "#/pr:o/r/7");

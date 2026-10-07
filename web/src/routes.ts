@@ -18,6 +18,7 @@ import type { Dashboard } from "../../shared/types.ts";
  * | `#/d:ID`          | The document of a diagram, from an older link     |
  * | `#/worktrees`     | Every git worktree, with Clean up                 |
  * | `#/settings`      | The config file: your own paths and accounts      |
+ * | `#/help/local-url` | How to open agent-dash at your own HTTPS URL     |
  *
  * On the page, the element of a run, step, note, or PR has its ref as its DOM id.
  */
@@ -33,7 +34,8 @@ export type Route =
   | { view: "document"; id: number }
   | { view: "diagram"; id: number }
   | { view: "worktrees" }
-  | { view: "settings" };
+  | { view: "settings" }
+  | { view: "localUrl" };
 
 export function parseHash(hash: string): Route {
   const path = decodeURIComponent(hash.replace(/^#\/?/, ""));
@@ -46,6 +48,7 @@ export function parseHash(hash: string): Route {
   if (path === "documents" || path === "diagrams") return { view: "documents" };
   if (path === "worktrees") return { view: "worktrees" };
   if (path === "settings") return { view: "settings" };
+  if (path === "help/local-url") return { view: "localUrl" };
   if (/^doc:\d+$/.test(path)) return { view: "document", id: Number(path.slice(4)) };
   if (/^d:\d+$/.test(path)) return { view: "diagram", id: Number(path.slice(2)) };
   if (path === "c" || path.startsWith("c:")) return { view: "conversation", id: path.slice(2) || null };

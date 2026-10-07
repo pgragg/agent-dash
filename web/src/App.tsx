@@ -8,6 +8,7 @@ import { READ_FEEDBACK, REVIEW_AND_MERGE } from "../../shared/prVerbs.ts";
 import type { AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, LaneMode, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState } from "../../shared/types.ts";
 import { conversationHash, launchAgent, ResumeHere, resuming } from "./agents.tsx";
 import { ParkedView } from "./parked.tsx";
+import { CADDY_HTTP, CADDY_HTTPS, caddyCommands, cleanHost, cleanPort, rootScript, undoCommands } from "./localUrl.ts";
 import { SettingsView, SetupBanner } from "./settings.tsx";
 import { FIRST_LANES, type LaneDraft, LanesCard, LanesEditor, type LaneRun, WorktreesView } from "./lanes.tsx";
 import { filterHistory, groupByDay } from "./history.ts";
@@ -1733,8 +1734,101 @@ function Help({ onClose }: { onClose: () => void }) {
             </div>
           ))}
         </dl>
+        <h4>Advanced</h4>
+        <a href="#/help/local-url" onClick={onClose}>
+          Open agent-dash at your own URL
+        </a>
       </div>
     </div>
+  );
+}
+
+// ---- help: your own URL --------------------------------------------------------------
+
+function Commands({ text, label }: { text: string; label: string }) {
+  return (
+    <div className="lu-code">
+      <CopyButton text={text} label={label} className="btn ghost small" />
+      <pre>{text}</pre>
+    </div>
+  );
+}
+
+function LocalUrlView() {
+  const [hostText, setHostText] = useState("agent-dash.test");
+  const [portText, setPortText] = useState("7777");
+  const host = cleanHost(hostText);
+  const port = cleanPort(portText);
+  return (
+    <article className="workspace local-url">
+      <header className="ws-head">
+        <h1>Open agent-dash at your own URL</h1>
+        <div className="ws-meta">
+          <span className="meta">
+            agent-dash listens on <code>http://127.0.0.1:{port ?? 7777}</code>. These steps give it a name with HTTPS, such as <code>https://agent-dash.test</code>. The name works on your Mac only: nothing goes to public DNS, and no other computer can open it. You need macOS, Homebrew, and an admin password.
+          </span>
+        </div>
+      </header>
+
+      <section className="card">
+        <label className="lu-field">
+          <span className="setting-label">Your URL</span>
+          <input value={hostText} onChange={(e) => setHostText(e.target.value)} spellCheck={false} aria-invalid={!host} />
+        </label>
+        <label className="lu-field">
+          <span className="setting-label">agent-dash port</span>
+          <input value={portText} onChange={(e) => setPortText(e.target.value)} spellCheck={false} aria-invalid={!port} />
+        </label>
+        <p className="meta">
+          {host ? (
+            <>
+              Use a name that ends in <code>.test</code>, or a name on a domain that you own. <code>.test</code> is reserved, so it can never be a real site. The port is 7777 unless you set <code>AGENT_DASH_PORT</code>.
+            </>
+          ) : (
+            "Type a host name only, such as agent-dash.test: letters, digits, dots and dashes, with no path."
+          )}
+        </p>
+      </section>
+
+      {host && port && (
+        <>
+          <h3 className="section-title">How it works</h3>
+          <p>
+            <code>/etc/hosts</code> sends <code>{host}</code> to 127.0.0.1. pf, the macOS firewall, sends ports 443 and 80 to Caddy on {CADDY_HTTPS} and {CADDY_HTTP}. Caddy makes a certificate from its own local CA and sends each request to agent-dash. Caddy runs as you, so only step 2 needs sudo.
+          </p>
+
+          <h3 className="section-title">1. Start Caddy (no sudo)</h3>
+          <p className="meta">
+            This adds the site to Homebrew's Caddyfile. If that file already has a global options block (a <code>{"{ }"}</code> block with no name), put the four options in it, because Caddy accepts only one, at the top.
+          </p>
+          <Commands text={caddyCommands(host, port)} label="Copy" />
+
+          <h3 className="section-title">2. Point the name and the ports at Caddy (sudo)</h3>
+          <p className="meta">
+            Save this as <code>local-url.sh</code>, then run <code>sudo sh local-url.sh</code>. It adds the name to <code>/etc/hosts</code>, loads the pf redirect now and at each boot, and adds Caddy's CA to the System keychain. You can run it again.
+          </p>
+          <Commands text={rootScript(host)} label="Copy" />
+
+          <h3 className="section-title">3. Open it</h3>
+          <p>
+            Open <a href={`https://${host}`}>https://{host}</a>. agent-dash must be running: if it is not, Caddy shows a 502.
+          </p>
+
+          <h3 className="section-title">Good to know</h3>
+          <ul className="lu-notes">
+            <li>Every request to 127.0.0.1 on port 80 or 443 now goes to Caddy. If another local server uses those ports, move it, or give it its own site in the Caddyfile.</li>
+            <li>To add a second name, add its two site blocks to the Caddyfile, add the name to <code>/etc/hosts</code>, and run <code>brew services restart caddy</code>. pf needs no change.</li>
+            <li>Firefox has its own certificate store and does not trust Caddy's CA. Chrome and Safari use the macOS keychain.</li>
+            <li>
+              To check it: <code>curl -sI https://{host}</code> gives 200, and <code>sudo pfctl -a com.apple/250.local-url -s nat</code> shows the two rules. Caddy's log is <code>$(brew --prefix)/var/log/caddy.log</code>.
+            </li>
+          </ul>
+
+          <h3 className="section-title">Undo</h3>
+          <Commands text={undoCommands(host)} label="Copy" />
+        </>
+      )}
+    </article>
   );
 }
 
@@ -2029,6 +2123,10 @@ export function App() {
       ) : route.view === "settings" ? (
         <main className="main">
           <SettingsView />
+        </main>
+      ) : route.view === "localUrl" ? (
+        <main className="main">
+          <LocalUrlView />
         </main>
       ) : route.view === "document" ? (
         <main className="main">
