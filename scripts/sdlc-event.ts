@@ -7,6 +7,8 @@
  *     --details-file details.md --results-file results.md
  *   node scripts/sdlc-event.ts deploy --ticket ABC-123 --env postman_beta --details "<app>: Synced, Healthy, 1.2.3"
  *
+ * A deploy that is live but does not give its benefit yet takes `--outcome unhealthy`, and shows yellow.
+ *
  * `smoketest` records a smoketest_execution. A smoketest that agent-dash started has a plan first;
  * the agent records the plan, then finishes the execution that the accepted plan starts:
  *
@@ -28,7 +30,7 @@ import { startExecution, validateSdlcEvent, validateSdlcFinish, validateSdlcPlan
 import * as db from "../server/summaries/db.ts";
 import { user } from "../shared/team.ts";
 
-const USAGE = `usage: node scripts/sdlc-event.ts smoketest|deploy --ticket KEY [--ticket KEY] --env ENV [--env ENV] [--started ISO] [--finished ISO] [--outcome passed|failed|blocked] [--summary TEXT] [--details TEXT | --details-file F] [--results TEXT | --results-file F]
+const USAGE = `usage: node scripts/sdlc-event.ts smoketest|deploy --ticket KEY [--ticket KEY] --env ENV [--env ENV] [--started ISO] [--finished ISO] [--outcome passed|failed|blocked (smoketest) | unhealthy (deploy)] [--summary TEXT] [--details TEXT | --details-file F] [--results TEXT | --results-file F]
        node scripts/sdlc-event.ts plan --id N --summary TEXT (--plan TEXT | --plan-file F) (--state-changes none | (--state-changes TEXT | --state-changes-file F) --writes-summary TEXT)
        node scripts/sdlc-event.ts finish --id N --outcome passed|failed|blocked [--finished ISO] [--summary TEXT] [--details TEXT | --details-file F] [--results TEXT | --results-file F]`;
 

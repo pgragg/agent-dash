@@ -384,6 +384,8 @@ export type SdlcEnvironment = "localhost" | "fern_dev" | "fern_prod" | "postman_
 export type SdlcEventType = "smoketest_plan" | "smoketest_execution" | "deploy" | "review_request";
 
 export type SmoketestOutcome = "passed" | "failed" | "blocked";
+/** "unhealthy" is for a deploy only: the change runs in the environment, but it does not give its benefit yet. */
+export type SdlcOutcome = SmoketestOutcome | "unhealthy";
 
 /** One thing that happened to a ticket's change on its way to prod. One `SDLC_Event` row. */
 export interface SdlcEvent {
@@ -391,8 +393,8 @@ export interface SdlcEvent {
   eventType: SdlcEventType;
   startedAt: string;
   finishedAt: string | null;
-  /** No outcome counts as passed, except on a dash-started smoketest: that one is still running. "blocked": the test could not run or could not see the result. */
-  outcome: SmoketestOutcome | null;
+  /** No outcome counts as passed, except on a dash-started smoketest: that one is still running. "blocked": the test could not run or could not see the result. "unhealthy": see SdlcOutcome. */
+  outcome: SdlcOutcome | null;
   /** On a plan: the plan itself. */
   testDetails: string | null;
   testResults: string | null;

@@ -55,7 +55,9 @@ export function validateSdlcEvent(input: SdlcEventInput, ticketPattern: RegExp, 
   const envs = Array.isArray(input.environments) ? input.environments.map((e) => parseEnvironment(String(e))) : [];
   if (!envs.length) throw new Error("name at least one environment under test");
   if (envs.includes(null)) throw new Error(`unknown environment in ${JSON.stringify(input.environments)}`);
-  if (input.outcome !== undefined && input.outcome !== null && !OUTCOMES.includes(input.outcome as SmoketestOutcome)) throw new Error("outcome must be passed, failed or blocked");
+  // A deploy is confirmed (no outcome) or live without its benefit yet ("unhealthy").
+  const allowed: string[] = input.eventType === "deploy" ? ["unhealthy"] : OUTCOMES;
+  if (input.outcome !== undefined && input.outcome !== null && !allowed.includes(input.outcome as string)) throw new Error(input.eventType === "deploy" ? "a deploy outcome must be unhealthy, or none" : "outcome must be passed, failed or blocked");
   const startedAt = isoOrNull(input.startedAt, "startedAt") ?? now.toISOString();
   const finishedAt = isoOrNull(input.finishedAt, "finishedAt");
   if (finishedAt && finishedAt < startedAt) throw new Error("finishedAt is before startedAt");

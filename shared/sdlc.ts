@@ -44,7 +44,8 @@ export type StageId =
  * "waiting": a deploy PR merged, unconfirmed in Argo; or a smoketest plan that waits for Piper's confirmation.
  * "running": a smoketest has no result yet, or its plan is still being written.
  */
-export type StageState = "done" | "failed" | "blocked" | "running" | "waiting" | "skipped" | "todo";
+/** "unhealthy": the deploy is live, but the change does not give its benefit yet. It counts as reached. */
+export type StageState = "done" | "unhealthy" | "failed" | "blocked" | "running" | "waiting" | "skipped" | "todo";
 
 export interface Stage {
   id: StageId;
@@ -165,7 +166,8 @@ function smoketestStage(id: StageId, events: SdlcEvent[], envs: SdlcEnvironment[
 
 function deployStage(id: StageId, events: SdlcEvent[], prs: PullRequest[], stage: "beta" | "prod"): Omit<Stage, "label"> {
   const found = tagged(events, "deploy", STAGE_ENVS[stage]);
-  if (found[0]) return { id, state: "done", detail: (found[0].testDetails ?? "Deploy confirmed").split("\n")[0], events: found };
+  // The newest deploy decides: a healthy check after an unhealthy one shows as done.
+  if (found[0]) return { id, state: found[0].outcome === "unhealthy" ? "unhealthy" : "done", detail: (found[0].testDetails ?? "Deploy confirmed").split("\n")[0], events: found };
   const deployPrs = prs.filter((p) => deployStageOf(p) === stage);
   const merged = deployPrs.find((p) => p.state === "merged");
   if (merged) return { id, state: "waiting", detail: `Deploy PR #${merged.number} merged; confirm the deploy in Argo`, events: [] };
@@ -221,7 +223,7 @@ export function sdlcProgress({ ticket, prs, events }: { ticket: Ticket; prs: Pul
   ];
   const stages: Stage[] = raw.map((s) => ({ ...s, label: STAGE_LABELS[s.id] }));
   // A stage skipped on purpose is passed, so the order goes on after it.
-  const current = stages.reduce((at, s, i) => (s.state === "done" || s.state === "skipped" ? i : at), 0);
+  const current = stages.reduce((at, s, i) => (s.state === "done" || s.state === "unhealthy" || s.state === "skipped" ? i : at), 0);
   for (const s of stages.slice(0, current)) if (s.state === "todo") s.state = "skipped";
   const next = stages[current + 1] ?? null;
   let hint = next ? hints()[next.id] : null;
@@ -301,7 +303,7 @@ export function smoketestLanes(p: SdlcProgress, events: SdlcEvent[]): SmoketestL
 
 /** For a summary run's or an agent's context: one line per stage. */
 export function progressLines(p: SdlcProgress): string[] {
-  const mark: Record<StageState, string> = { done: "[x]", failed: "[!] failed", blocked: "[?] blocked", running: "[~] running", waiting: "[~] waiting", skipped: "[-] skipped", todo: "[ ]" };
+  const mark: Record<StageState, string> = { done: "[x]", unhealthy: "[~] unhealthy", failed: "[!] failed", blocked: "[?] blocked", running: "[~] running", waiting: "[~] waiting", skipped: "[-] skipped", todo: "[ ]" };
   return [
     ...p.stages.map((s, i) => `${i + 1}. ${mark[s.state]} ${s.label}${s.detail ? ` — ${s.detail}` : ""}`),
     "",
@@ -397,5 +399,7 @@ ${prs} Use Argo CD, read-only (the argocd CLI, or an argocd skill if you have on
 
 If the deploy is confirmed, record it:
 ${recordCommand(script, key, "deploy", env)} --details "<Argo app>: Synced, Healthy, <version>"
-If it is not, record nothing, and tell ${user()} what you found.`;
+If the change is live but does not give its benefit yet (for example, a dependency outside the change is broken), record it as unhealthy:
+${recordCommand(script, key, "deploy", env)} --outcome unhealthy --details "<what is live>; <what still does not work>"
+If it is not deployed, record nothing, and tell ${user()} what you found.`;
 }
