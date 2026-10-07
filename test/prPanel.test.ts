@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { TicketGroup } from "../shared/types.ts";
-import { internalHref, splitTrailing } from "../web/src/links.ts";
+import { dashClick, internalHref, splitTrailing } from "../web/src/links.ts";
 import { ciTag, feedback, feedbackCounts, openerRun, panelTarget, verbStart } from "../web/src/prView.ts";
 import { minutesAgo, run, ticket } from "./helpers.ts";
 
@@ -18,6 +18,17 @@ test("a PR link opens the PR panel, a known Jira key opens the ticket, anything 
   // Any Jira host: JIRA_SERVER can point anywhere.
   assert.equal(internalHref("https://jira.example.com/browse/FSDK-1?focusedCommentId=3", known), "#/t:FSDK-1");
   assert.equal(internalHref("https://jira.example.com/browse/FSDK-12", known), null);
+});
+
+test("a click opens the dash route, and a modified or middle click opens it in a new tab; a right-click stays with the browser", () => {
+  const click = { button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false };
+  assert.equal(dashClick(click), "here");
+  assert.equal(dashClick({ ...click, metaKey: true }), "tab");
+  assert.equal(dashClick({ ...click, ctrlKey: true }), "tab");
+  assert.equal(dashClick({ ...click, shiftKey: true }), "tab");
+  assert.equal(dashClick({ ...click, button: 1 }), "tab");
+  assert.equal(dashClick({ ...click, button: 2 }), null);
+  assert.equal(dashClick({ ...click, altKey: true }), null);
 });
 
 test("a sentence's full stop after a bare URL stays text", () => {
