@@ -35,6 +35,7 @@ import { Documentation, DocumentsView, DocumentView, TicketSummaryDoc, WriteTick
 import { SessionScope } from "./mermaid.tsx";
 import { type BoardMode, kanbanColumns, type Searchable, searchCards, stageOf, useBoardMode } from "./kanban.ts";
 import { starredFirst } from "./star.ts";
+import { FullScreenButton, ResizeHandle, useViewWidth } from "./resizeView.tsx";
 import { rowName, rowType } from "./whyRow.ts";
 import { DEFAULT_SNOOZE, isSnoozed, SNOOZE_OPTIONS, type SnoozeOption, snoozeUntil, untilLabel } from "./snooze.ts";
 
@@ -1709,6 +1710,7 @@ const KEYS: [string, string][] = [
   ["A", "Start a new agent with this ticket's context"],
   ["C", "Start a new conversation with the agent on its own page, with no context"],
   ["V", "Switch the board between the queue and the kanban"],
+  ["F", "Show the ticket view across the full window, or leave full screen"],
   ["↵", "On the kanban: open the selected card's workspace"],
   ["/", "On the kanban: search the cards (ticket keys rank first)"],
   ["⌘↵", "Send the reply"],
@@ -1753,6 +1755,9 @@ export function App() {
   const [agentSignal, setAgentSignal] = useState(0);
   const [snoozeSignal, setSnoozeSignal] = useState(0);
   const [boardMode, setBoardMode] = useBoardMode();
+  const viewWidth = useViewWidth();
+  const mainRef = useRef<HTMLElement>(null);
+  const kanbanRef = useRef<HTMLDivElement>(null);
   // On the kanban, the workspace opens in a drawer over the columns when you pick a card.
   const [drawer, setDrawer] = useState(() => route.view === "board" && !!route.ref);
   const [kanbanQuery, setKanbanQuery] = useState("");
@@ -1851,8 +1856,10 @@ export function App() {
       else if (e.key === "?") setHelp((h) => !h);
       else if (e.key === "Escape") {
         if (help) setHelp(false);
+        else if (viewWidth.full) viewWidth.setFull(false);
         else setDrawer(false);
-      } else if (e.key === "v") setBoardMode(boardMode === "queue" ? "kanban" : "queue");
+      } else if (e.key === "f" && (boardMode === "queue" || drawer)) viewWidth.setFull(!viewWidth.full);
+      else if (e.key === "v") setBoardMode(boardMode === "queue" ? "kanban" : "queue");
       else if (e.key === "Enter" && boardMode === "kanban" && !drawer && selected) setDrawer(true);
       else if (e.key === "/" && boardMode === "kanban") searchRef.current?.focus();
       else if (e.key === "r") setFocusSignal((n) => n + 1);
@@ -1871,7 +1878,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [move, doneAndAdvance, selected, data, view, help, boardMode, setBoardMode, drawer]);
+  }, [move, doneAndAdvance, selected, data, view, help, boardMode, setBoardMode, drawer, viewWidth]);
 
   useEffect(() => {
     const waiting = data?.counts.awaiting_input ?? 0;
@@ -2036,7 +2043,7 @@ export function App() {
           {route.id ? <ConversationView key={route.id} sessionId={route.id} data={data} now={now} /> : <NewConversationForm />}
         </main>
       ) : boardMode === "kanban" ? (
-        <div className="kanban-view">
+        <div className="kanban-view" ref={kanbanRef}>
           <div className="kanban-bar">
             {newConversation}
             <BoardModeToggle mode={boardMode} setMode={setBoardMode} />
@@ -2076,16 +2083,22 @@ export function App() {
             isStarred={isStarred}
           />
           {drawer && selected && (
-            <aside className="kanban-drawer" aria-label="Workspace">
-              <button className="btn ghost small drawer-close" onClick={() => setDrawer(false)} title="Close the workspace (Esc)">
-                Close <Kbd>Esc</Kbd>
-              </button>
-              {workspace}
+            <aside className={`kanban-drawer ${viewWidth.full ? "full" : ""}`} aria-label="Workspace" style={viewWidth.full ? undefined : { width: `min(${viewWidth.width}px, 100%)` }}>
+              {!viewWidth.full && <ResizeHandle side="left" scale={1} view={viewWidth} max={() => kanbanRef.current?.clientWidth ?? window.innerWidth} />}
+              <div className="drawer-scroll">
+                <div className="drawer-tools">
+                  <FullScreenButton view={viewWidth} />
+                  <button className="btn ghost small" onClick={() => setDrawer(false)} title="Close the workspace (Esc)">
+                    Close <Kbd>Esc</Kbd>
+                  </button>
+                </div>
+                {workspace}
+              </div>
             </aside>
           )}
         </div>
       ) : (
-        <div className="columns">
+        <div className={`columns ${viewWidth.full ? "full" : ""}`}>
           <nav className="rail">
             <div className="new-conversation">
               {newConversation}
@@ -2151,8 +2164,15 @@ export function App() {
             </footer>
           </nav>
 
-          <main className="main">
-            {workspace}
+          <main className="main" ref={mainRef}>
+            <div className="ws-frame" style={viewWidth.full ? undefined : { maxWidth: viewWidth.width }}>
+              {!viewWidth.full && <ResizeHandle side="left" scale={2} view={viewWidth} max={() => mainRef.current?.clientWidth ?? window.innerWidth} />}
+              {!viewWidth.full && <ResizeHandle side="right" scale={2} view={viewWidth} max={() => mainRef.current?.clientWidth ?? window.innerWidth} />}
+              <div className="ws-tools">
+                <FullScreenButton view={viewWidth} />
+              </div>
+              {workspace}
+            </div>
           </main>
         </div>
       )}
