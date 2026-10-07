@@ -753,7 +753,6 @@ a.btn.verb { text-decoration: none; }
 .settings .setting-guide code { font-size: 12px; overflow-wrap: anywhere; }
 
 /* Documentation: a ticket's markdown documents. A document's headings get their size from their level. */
-.section-head { display: flex; align-items: center; gap: 10px; }
 .doc { padding: 12px 18px; }
 .doc .doc-head { margin-bottom: 0; white-space: nowrap; }
 .doc .doc-head > * { flex: none; }

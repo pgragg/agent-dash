@@ -32,7 +32,7 @@ import { ConversationGist } from "./gist.tsx";
 import { SlackQuotes } from "./slackQuotes.tsx";
 import { DueDateVerb, MoveButton, TicketPanel, useTicketDetail } from "./ticketPanel.tsx";
 import { DiagramCards, DiagramsView, DiagramView } from "./diagrams.tsx";
-import { Documentation } from "./documents.tsx";
+import { Documentation, TicketSummaryDoc, WriteTicketSummary } from "./documents.tsx";
 import { SessionScope } from "./mermaid.tsx";
 import { type BoardMode, kanbanColumns, type Searchable, searchCards, stageOf, useBoardMode } from "./kanban.ts";
 import { starredFirst } from "./star.ts";
@@ -1223,6 +1223,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
             </>
           )}
           <span className="grow" />
+          {t && !documents.some((d) => d.type === "ticket-summary") && <WriteTicketSummary key={`summary-${t.key}`} ticket={t.key} cwd={cwd} onError={setError} />}
           {t && <StarButton key={`star-${t.key}`} ticket={t.key} starred={data.starred.includes(t.key)} onError={setError} />}
           {t && <SnoozeControl key={t.key} ticket={t.key} until={data.snoozedUntil[t.key]} now={now} signal={snoozeSignal} onSnoozed={onSnoozed} onError={setError} />}
           {actionable(s) &&
@@ -1241,6 +1242,8 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
       </header>
 
       {t && <TicketPanel key={t.key} ticket={t} onError={setError} />}
+
+      {s.ticket && <TicketSummaryDoc key={`summary-${s.id}`} documents={documents} runs={runs} cwd={cwd} now={now} anchor={anchor} onError={setError} />}
 
       {error && (
         <div className="toast" role="alert">
@@ -1261,7 +1264,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
 
       {s.ticket && <Notes ticket={s.ticket.ticket.key} notes={data.notes[s.ticket.ticket.key] ?? []} now={now} onError={setError} focusSignal={noteSignal} />}
 
-      {s.ticket && <Documentation key={`docs-${s.id}`} ticket={s.ticket.ticket.key} documents={documents} runs={runs} cwd={cwd} now={now} anchor={anchor} onError={setError} />}
+      {s.ticket && <Documentation key={`docs-${s.id}`} documents={documents} runs={runs} cwd={cwd} now={now} anchor={anchor} onError={setError} />}
 
       {featured.length > 0 && (
         <div className="stack">
