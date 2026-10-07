@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { splitSummary } from "../../shared/nextSteps.ts";
-import type { ConversationSummary, Diagram, ParkedRun, DiagramKind, NextStep, Note, ReviewDraft, SdlcEnvironment, SdlcEvent, SdlcEventType, SmoketestOutcome, ThreadStatus, ThreadStatusChange, TicketSummary, WorkLane } from "../../shared/types.ts";
+import type { ConversationSummary, Diagram, DocumentType, ParkedRun, DiagramKind, NextStep, Note, ReviewDraft, SdlcEnvironment, SdlcEvent, SdlcEventType, SmoketestOutcome, ThreadStatus, ThreadStatusChange, TicketDocument, TicketDocumentWithBody, TicketSummary, WorkLane } from "../../shared/types.ts";
 
 export const DB_PATH = process.env.AGENT_DASH_DB ?? join(homedir(), ".agent-dash/agent-dash.db");
 
@@ -131,6 +131,38 @@ CREATE TABLE IF NOT EXISTS diagrams (
 );
 CREATE INDEX IF NOT EXISTS diagrams_by_ticket ON diagrams (ticket, id);
 CREATE INDEX IF NOT EXISTS diagrams_by_session ON diagrams (session_id, id);
+
+-- One markdown document per row, mostly on a ticket. A ticket has at most one 'ticket-summary'.
+-- edit_* is an agent edit that has not saved yet; its save clears them. An empty body is a
+-- document whose first version an agent still writes.
+CREATE TABLE IF NOT EXISTS documents (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket          TEXT,
+  type            TEXT NOT NULL DEFAULT 'document' CHECK (type IN ('document', 'ticket-summary')),
+  title           TEXT NOT NULL,
+  body            TEXT NOT NULL,
+  session_id      TEXT,
+  -- The diagram that the migration made it from, so it runs once per diagram.
+  diagram_id      INTEGER UNIQUE REFERENCES diagrams (id),
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL,
+  edit_prompt     TEXT,
+  edit_session_id TEXT,
+  edit_started_at TEXT
+);
+CREATE INDEX IF NOT EXISTS documents_by_ticket ON documents (ticket, id);
+CREATE UNIQUE INDEX IF NOT EXISTS one_ticket_summary ON documents (ticket) WHERE type = 'ticket-summary';
+
+-- The images in a document, so its markdown says ![alt](image:<id>) and stays small enough for an agent to read.
+CREATE TABLE IF NOT EXISTS document_images (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  document_id INTEGER NOT NULL REFERENCES documents (id),
+  kind        TEXT NOT NULL CHECK (kind IN ('svg', 'png', 'jpeg', 'gif', 'webp')),
+  hash        TEXT NOT NULL,
+  data        TEXT NOT NULL, -- SVG text, or base64 for a raster image
+  created_at  TEXT NOT NULL,
+  UNIQUE (document_id, hash)
+);
 
 -- Local state per ticket. Jira stays the source of truth for everything else about it.
 -- snoozed_until hides the ticket from the board until that time. starred_at pins it to the top.
@@ -284,6 +316,7 @@ export function open(path = DB_PATH): DatabaseSync {
   // WAL lets the server read while a summary run writes from its own process. The timeout comes
   // first, so a write from another process makes the WAL switch wait instead of crash the server.
   db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL;");
+  const firstDocuments = !db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'documents'").get();
   db.exec(SCHEMA);
   const diagramColumns = new Set((db.prepare("PRAGMA table_info(diagrams)").all() as { name: string }[]).map((c) => c.name));
   for (const c of ["edited_at", "deleted_at"]) if (!diagramColumns.has(c)) db.exec(`ALTER TABLE diagrams ADD COLUMN ${c} TEXT`);
@@ -315,6 +348,7 @@ export function open(path = DB_PATH): DatabaseSync {
   db.exec(`CREATE TRIGGER IF NOT EXISTS sdlc_event_changed AFTER UPDATE ON SDLC_Event WHEN NEW.event_type != 'smoketest_plan' BEGIN
     UPDATE SDLC_Event_Ticket SET summary_requested_at = NULL, changed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE sdlc_event_id = NEW.id;
   END`);
+  if (firstDocuments) migrateDiagramsToDocuments(db);
   // Summaries saved before steps were stored get their rows once.
   for (const r of db.prepare("SELECT id, ticket, summary FROM summaries WHERE status = 'done' AND id NOT IN (SELECT summary_id FROM next_steps)").all() as unknown as Row[]) {
     insertSteps(r.id, r.ticket, r.summary ?? "");
@@ -588,6 +622,145 @@ export function dropReplacedDiagrams(sessionId: string, keep: Set<string>): numb
 /** A conversation can get its ticket later, from a PR that names one. */
 export function setDiagramTicket(sessionId: string, ticket: string): number {
   return Number(open().prepare("UPDATE diagrams SET ticket = ? WHERE session_id = ? AND ticket IS NOT ?").run(ticket, sessionId, ticket).changes);
+}
+
+// ---- documents: markdown documents on a ticket ---------------------------------------
+
+/**
+ * Runs once, when the documents table is new: each diagram that is not deleted becomes a document
+ * with that one diagram. A mermaid diagram is a fence; an image is a document image.
+ */
+function migrateDiagramsToDocuments(d: DatabaseSync): void {
+  const insertDoc = d.prepare("INSERT INTO documents (ticket, type, title, body, session_id, diagram_id, created_at, updated_at) VALUES (?, 'document', ?, ?, ?, ?, ?, ?) RETURNING id");
+  const insertImage = d.prepare("INSERT INTO document_images (document_id, kind, hash, data, created_at) VALUES (?, ?, ?, ?, ?) RETURNING id");
+  const setBody = d.prepare("UPDATE documents SET body = ? WHERE id = ?");
+  // The read is inside the transaction: the server and an agent's script can open the database at the same time.
+  d.exec("BEGIN IMMEDIATE");
+  try {
+    const rows = d
+      .prepare(
+        `SELECT id, session_id, ticket, kind, title, source, hash, created_at, coalesce(edited_at, created_at) AS updated_at FROM diagrams
+         WHERE deleted_at IS NULL AND id NOT IN (SELECT diagram_id FROM documents WHERE diagram_id IS NOT NULL) ORDER BY id`,
+      )
+      .all() as unknown as { id: number; session_id: string; ticket: string | null; kind: DiagramKind; title: string; source: string; hash: string; created_at: string; updated_at: string }[];
+    for (const r of rows) {
+      const body = r.kind === "mermaid" ? `\`\`\`mermaid\n${r.source.trimEnd()}\n\`\`\`\n` : "";
+      const { id } = insertDoc.get(r.ticket, r.title, body, r.session_id, r.id, r.created_at, r.updated_at) as { id: number };
+      if (r.kind === "mermaid") continue;
+      const image = insertImage.get(id, r.kind, r.hash, r.source, r.created_at) as { id: number };
+      setBody.run(`![${r.title.replace(/[[\]]/g, "")}](image:${image.id})\n`, id);
+    }
+    d.exec("COMMIT");
+  } catch (err) {
+    d.exec("ROLLBACK");
+    throw err;
+  }
+}
+
+interface DocumentRow {
+  id: number;
+  ticket: string | null;
+  type: DocumentType;
+  title: string;
+  body?: string;
+  sessionId: string | null;
+  diagramId: number | null;
+  createdAt: string;
+  updatedAt: string;
+  hasBody: number;
+  editPrompt: string | null;
+  editSessionId: string | null;
+  editStartedAt: string | null;
+}
+
+const DOCUMENT_COLUMNS = `id, ticket, type, title, session_id AS sessionId, diagram_id AS diagramId, created_at AS createdAt, updated_at AS updatedAt,
+  body != '' AS hasBody, edit_prompt AS editPrompt, edit_session_id AS editSessionId, edit_started_at AS editStartedAt`;
+
+function toDocument({ hasBody, editPrompt, editSessionId, editStartedAt, body: _body, ...r }: DocumentRow): TicketDocument {
+  return { ...r, hasBody: !!hasBody, edit: editSessionId ? { prompt: editPrompt ?? "", sessionId: editSessionId, startedAt: editStartedAt ?? r.updatedAt } : null };
+}
+
+/** Without bodies. A ticket summary first, then the newest change first. */
+export function listDocuments(): TicketDocument[] {
+  return (open().prepare(`SELECT ${DOCUMENT_COLUMNS} FROM documents ORDER BY type = 'ticket-summary' DESC, updated_at DESC, id DESC`).all() as unknown as DocumentRow[]).map(toDocument);
+}
+
+export function getDocument(id: number): TicketDocumentWithBody | null {
+  const row = open().prepare(`SELECT ${DOCUMENT_COLUMNS}, body FROM documents WHERE id = ?`).get(id) as unknown as DocumentRow | undefined;
+  return row ? { ...toDocument(row), body: row.body ?? "" } : null;
+}
+
+export function ticketSummaryDocument(ticket: string): TicketDocument | null {
+  const row = open().prepare(`SELECT ${DOCUMENT_COLUMNS} FROM documents WHERE ticket = ? AND type = 'ticket-summary'`).get(ticket) as unknown as DocumentRow | undefined;
+  return row ? toDocument(row) : null;
+}
+
+export interface NewDocument {
+  ticket: string | null;
+  type: DocumentType;
+  title: string;
+  body: string;
+  sessionId?: string | null;
+  /** An agent that writes its first version: the body starts empty. */
+  edit?: { prompt: string; sessionId: string };
+}
+
+/** Null when the ticket already has a ticket summary. */
+export function addDocument(n: NewDocument, now = new Date()): TicketDocument | null {
+  const at = now.toISOString();
+  const row = open()
+    .prepare(
+      `INSERT INTO documents (ticket, type, title, body, session_id, created_at, updated_at, edit_prompt, edit_session_id, edit_started_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING id`,
+    )
+    .get(n.ticket, n.type, n.title, n.body, n.sessionId ?? n.edit?.sessionId ?? null, at, at, n.edit?.prompt ?? null, n.edit?.sessionId ?? null, n.edit ? at : null) as { id: number } | undefined;
+  return row ? toDocument(open().prepare(`SELECT ${DOCUMENT_COLUMNS} FROM documents WHERE id = ?`).get(row.id) as unknown as DocumentRow) : null;
+}
+
+/** The new version, in place of the old one. It ends the agent edit, if one runs. */
+export function saveDocument(id: number, change: { body: string; title?: string }, now = new Date()): boolean {
+  return (
+    open()
+      .prepare("UPDATE documents SET body = ?, title = coalesce(?, title), updated_at = ?, edit_prompt = NULL, edit_session_id = NULL, edit_started_at = NULL WHERE id = ?")
+      .run(change.body, change.title ?? null, now.toISOString(), id).changes > 0
+  );
+}
+
+/** False when the document is gone, or an edit is already waiting for its save. */
+export function startDocumentEdit(id: number, prompt: string, sessionId: string, now = new Date()): boolean {
+  return open().prepare("UPDATE documents SET edit_prompt = ?, edit_session_id = ?, edit_started_at = ? WHERE id = ? AND edit_session_id IS NULL").run(prompt, sessionId, now.toISOString(), id).changes > 0;
+}
+
+/** Ends an edit that will not save. A document with no first version goes, so it can be made again. */
+export function clearDocumentEdit(id: number): boolean {
+  const row = open().prepare("UPDATE documents SET edit_prompt = NULL, edit_session_id = NULL, edit_started_at = NULL WHERE id = ? AND edit_session_id IS NOT NULL RETURNING body").get(id) as { body: string } | undefined;
+  if (row && !row.body) deleteDocument(id);
+  return !!row;
+}
+
+export function deleteDocument(id: number): void {
+  const d = open();
+  d.exec("BEGIN IMMEDIATE");
+  try {
+    d.prepare("DELETE FROM document_images WHERE document_id = ?").run(id);
+    d.prepare("DELETE FROM documents WHERE id = ?").run(id);
+    d.exec("COMMIT");
+  } catch (err) {
+    d.exec("ROLLBACK");
+    throw err;
+  }
+}
+
+/** The same image twice in one document is one row. */
+export function addDocumentImage(documentId: number, image: { kind: Exclude<DiagramKind, "mermaid">; hash: string; data: string }, now = new Date()): number {
+  const d = open();
+  d.prepare("INSERT OR IGNORE INTO document_images (document_id, kind, hash, data, created_at) VALUES (?, ?, ?, ?, ?)").run(documentId, image.kind, image.hash, image.data, now.toISOString());
+  return (d.prepare("SELECT id FROM document_images WHERE document_id = ? AND hash = ?").get(documentId, image.hash) as { id: number }).id;
+}
+
+export function getDocumentImage(id: number): { kind: Exclude<DiagramKind, "mermaid">; data: string } | null {
+  const row = open().prepare("SELECT kind, data FROM document_images WHERE id = ?").get(id) as { kind: Exclude<DiagramKind, "mermaid">; data: string } | undefined;
+  return row ? { ...row } : null;
 }
 
 export function inProgress(): SummaryRecord[] {

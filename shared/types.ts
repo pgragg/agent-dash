@@ -365,6 +365,32 @@ export interface DiagramWithSource extends Diagram {
   conversation: { title: string; cwd: string; startedAt: string; lastActivityAt: string } | null;
 }
 
+/** `ticket-summary`: the start, middle and end states of a ticket. A ticket has at most one. */
+export type DocumentType = "document" | "ticket-summary";
+
+/** A markdown document on a ticket, without its body. Its images are rows of their own, so the body stays small. */
+export interface TicketDocument {
+  id: number;
+  ticket: string | null;
+  type: DocumentType;
+  title: string;
+  /** The conversation that made it, if one did. */
+  sessionId: string | null;
+  /** The diagram that it was made from, by the migration. */
+  diagramId: number | null;
+  createdAt: string;
+  updatedAt: string;
+  /** False while an agent writes the first version. */
+  hasBody: boolean;
+  /** An agent edit that has not saved yet: your prompt, its agent, and when it started. */
+  edit: { prompt: string; sessionId: string; startedAt: string } | null;
+}
+
+export interface TicketDocumentWithBody extends TicketDocument {
+  /** Markdown. An embedded image is `![alt](image:N)`, served by `/api/document/image?id=N`. */
+  body: string;
+}
+
 export interface TicketGroup {
   ticket: Ticket;
   /** Oldest first. Resolved threads stay here; `threads` says which ones they are. */
@@ -486,6 +512,8 @@ export interface Dashboard {
   starred: string[];
   /** Every diagram an agent made, newest first, without its source. */
   diagrams: Diagram[];
+  /** Every document, without its body. A ticket's ticket summary first, then the newest change first. */
+  documents: TicketDocument[];
   /** SDLC events (smoketests, confirmed deploys) by ticket key, newest first. */
   sdlcEvents: Record<string, SdlcEvent[]>;
   /** Drafted Slack review requests by PR URL. */

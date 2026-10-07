@@ -54,6 +54,8 @@ Read the Jira description, move the status, and set a due date. → [The ticket 
 
 ![Ticket section with Move to and Set due date](images/ticket.png)
 
+Keep the ticket's documentation on its page: markdown with mermaid diagrams and images. One click has an agent write a ticket summary, with the start, middle and end states and user stories. **Edit** with a prompt has an agent rewrite a document in place. → [Documentation](../README.md#documentation)
+
 ### PRs and reviews
 
 See your open PRs by ticket, each with a drafted review request. **Post to Slack** sends it. → [PRs](../README.md#prs)

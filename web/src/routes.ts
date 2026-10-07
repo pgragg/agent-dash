@@ -9,6 +9,7 @@ import type { Dashboard } from "../../shared/types.ts";
  * | `#/r:SESSION`     | A run on the board, under its ticket if it has one |
  * | `#/step:ID`       | A drafted next step, on its ticket                |
  * | `#/note:ID`       | A note, on its ticket                             |
+ * | `#/doc:ID`        | A document, open, on its ticket                   |
  * | `#/pr:OWNER/REPO/N` | The PR panel (a view under PRs)                 |
  * | `#/needs`         | The list behind "N notifications"                 |
  * | `#/parked`        | The waiting agents that agent-dash parked          |
@@ -53,11 +54,11 @@ export function href(ref: string): string {
   return `#/${encodeURIComponent(ref).replace(/%3A/gi, ":").replace(/%2F/gi, "/")}`;
 }
 
-type BoardData = Pick<Dashboard, "myTickets" | "otherTickets" | "summaries" | "notes">;
+type BoardData = Pick<Dashboard, "myTickets" | "otherTickets" | "summaries" | "notes"> & { documents?: Pick<Dashboard["documents"][number], "id" | "ticket">[] };
 
 /**
  * Which board entry a ref selects, and which element in it to show. A ref for a run on a
- * ticket, a step, or a note opens the ticket. Null when the object is not on the board.
+ * ticket, a step, a note, or a document opens the ticket. Null when the object is not on the board.
  */
 export function resolveBoardRef(ref: string, d: BoardData, subjects: Set<string>): { subjectId: string; anchor: string | null } | null {
   if (subjects.has(ref)) return { subjectId: ref, anchor: null };
@@ -75,6 +76,10 @@ export function resolveBoardRef(ref: string, d: BoardData, subjects: Set<string>
       if ([s.latest, s.lastDone].some((x) => x?.steps.some((st) => st.id === id))) return subjects.has(`t:${key}`) ? { subjectId: `t:${key}`, anchor: ref } : null;
     }
     return null;
+  }
+  if (kind === "doc") {
+    const ticket = d.documents?.find((x) => x.id === Number(rest))?.ticket;
+    return ticket && subjects.has(`t:${ticket}`) ? { subjectId: `t:${ticket}`, anchor: ref } : null;
   }
   if (kind === "note") {
     const id = Number(rest);
