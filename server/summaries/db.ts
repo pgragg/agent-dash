@@ -316,7 +316,6 @@ export function open(path = DB_PATH): DatabaseSync {
   // WAL lets the server read while a summary run writes from its own process. The timeout comes
   // first, so a write from another process makes the WAL switch wait instead of crash the server.
   db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL;");
-  const firstDocuments = !db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'documents'").get();
   db.exec(SCHEMA);
   const diagramColumns = new Set((db.prepare("PRAGMA table_info(diagrams)").all() as { name: string }[]).map((c) => c.name));
   for (const c of ["edited_at", "deleted_at"]) if (!diagramColumns.has(c)) db.exec(`ALTER TABLE diagrams ADD COLUMN ${c} TEXT`);
@@ -348,7 +347,7 @@ export function open(path = DB_PATH): DatabaseSync {
   db.exec(`CREATE TRIGGER IF NOT EXISTS sdlc_event_changed AFTER UPDATE ON SDLC_Event WHEN NEW.event_type != 'smoketest_plan' BEGIN
     UPDATE SDLC_Event_Ticket SET summary_requested_at = NULL, changed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE sdlc_event_id = NEW.id;
   END`);
-  if (firstDocuments) migrateDiagramsToDocuments(db);
+  documentsFromDiagrams(db);
   // Summaries saved before steps were stored get their rows once.
   for (const r of db.prepare("SELECT id, ticket, summary FROM summaries WHERE status = 'done' AND id NOT IN (SELECT summary_id FROM next_steps)").all() as unknown as Row[]) {
     insertSteps(r.id, r.ticket, r.summary ?? "");
@@ -591,46 +590,45 @@ export function listDiagrams({ withDeleted = false } = {}): Diagram[] {
 
 export type StoredDiagram = Diagram & { source: string | null; deletedAt: string | null };
 
-/** A deleted one too, so its page can restore it. Without `raw`, raster base64 stays put: the page loads the image as a file. */
-export function getDiagram(id: number, raw = false): StoredDiagram | null {
-  const source = raw ? "source" : "CASE WHEN kind IN ('mermaid', 'svg') THEN source END AS source";
-  const row = open().prepare(`SELECT ${DIAGRAM_COLUMNS}, deleted_at AS deletedAt, ${source} FROM diagrams WHERE id = ?`).get(id) as unknown as StoredDiagram | undefined;
+/** With its source: mermaid or SVG text, or base64 for a raster image. A message shows its image from here. */
+export function getDiagram(id: number): StoredDiagram | null {
+  const row = open().prepare(`SELECT ${DIAGRAM_COLUMNS}, deleted_at AS deletedAt, source FROM diagrams WHERE id = ?`).get(id) as unknown as StoredDiagram | undefined;
   return row ? { ...row } : null;
 }
 
-/** Your fix for an agent's mistake. The caller checks that the source fits the kind. */
-export function updateDiagram(id: number, change: { title?: string; source?: string; deleted?: boolean }, now = new Date()): boolean {
-  const at = now.toISOString();
-  const sets: [string, string | null][] = [];
-  if (change.title !== undefined) sets.push(["title", change.title]);
-  if (change.source !== undefined) sets.push(["source", change.source]);
-  if (sets.length) sets.push(["edited_at", at]);
-  if (change.deleted !== undefined) sets.push(["deleted_at", change.deleted ? at : null]);
-  if (!sets.length) return false;
-  return Number(open().prepare(`UPDATE diagrams SET ${sets.map(([c]) => `${c} = ?`).join(", ")} WHERE id = ?`).run(...sets.map(([, v]) => v), id).changes) > 0;
-}
-
-/** Drops a conversation's diagrams from file writes that a newer write of the same file replaced. Your edit is yours, so it stays. */
+/**
+ * Drops a conversation's diagrams from file writes that a newer write of the same file replaced, with
+ * their documents. A document that was changed after it was made is someone's work, so it stays.
+ */
 export function dropReplacedDiagrams(sessionId: string, keep: Set<string>): number {
-  const rows = open().prepare("SELECT key FROM diagrams WHERE session_id = ? AND origin != 'reply' AND kind IN ('mermaid', 'svg') AND edited_at IS NULL").all(sessionId) as { key: string }[];
-  const del = open().prepare("DELETE FROM diagrams WHERE key = ?");
+  const d = open();
+  const rows = d.prepare("SELECT id, key FROM diagrams WHERE session_id = ? AND origin != 'reply' AND kind IN ('mermaid', 'svg') AND edited_at IS NULL").all(sessionId) as { id: number; key: string }[];
   let n = 0;
-  for (const r of rows) if (!keep.has(r.key)) n += Number(del.run(r.key).changes);
+  for (const r of rows) {
+    if (keep.has(r.key)) continue;
+    const doc = d.prepare("SELECT id, updated_at = created_at AND edit_session_id IS NULL AS untouched FROM documents WHERE diagram_id = ?").get(r.id) as { id: number; untouched: number } | undefined;
+    if (doc?.untouched) {
+      d.prepare("DELETE FROM document_images WHERE document_id = ?").run(doc.id);
+      d.prepare("DELETE FROM documents WHERE id = ?").run(doc.id);
+    } else if (doc) d.prepare("UPDATE documents SET diagram_id = NULL WHERE id = ?").run(doc.id);
+    n += Number(d.prepare("DELETE FROM diagrams WHERE id = ?").run(r.id).changes);
+  }
   return n;
 }
 
-/** A conversation can get its ticket later, from a PR that names one. */
+/** A conversation can get its ticket later, from a PR that names one. Its diagrams' documents move with it. */
 export function setDiagramTicket(sessionId: string, ticket: string): number {
+  open().prepare("UPDATE documents SET ticket = ? WHERE diagram_id IN (SELECT id FROM diagrams WHERE session_id = ?) AND ticket IS NOT ?").run(ticket, sessionId, ticket);
   return Number(open().prepare("UPDATE diagrams SET ticket = ? WHERE session_id = ? AND ticket IS NOT ?").run(ticket, sessionId, ticket).changes);
 }
 
 // ---- documents: markdown documents on a ticket ---------------------------------------
 
 /**
- * Runs once, when the documents table is new: each diagram that is not deleted becomes a document
- * with that one diagram. A mermaid diagram is a fence; an image is a document image.
+ * Each diagram that has no document and is not deleted becomes a document with that one diagram:
+ * a mermaid diagram is a fence, an image is a document image. Runs at open and after each log scan.
  */
-function migrateDiagramsToDocuments(d: DatabaseSync): void {
+export function documentsFromDiagrams(d = open()): number {
   const insertDoc = d.prepare("INSERT INTO documents (ticket, type, title, body, session_id, diagram_id, created_at, updated_at) VALUES (?, 'document', ?, ?, ?, ?, ?, ?) RETURNING id");
   const insertImage = d.prepare("INSERT INTO document_images (document_id, kind, hash, data, created_at) VALUES (?, ?, ?, ?, ?) RETURNING id");
   const setBody = d.prepare("UPDATE documents SET body = ? WHERE id = ?");
@@ -651,6 +649,7 @@ function migrateDiagramsToDocuments(d: DatabaseSync): void {
       setBody.run(`![${r.title.replace(/[[\]]/g, "")}](image:${image.id})\n`, id);
     }
     d.exec("COMMIT");
+    return rows.length;
   } catch (err) {
     d.exec("ROLLBACK");
     throw err;
@@ -738,13 +737,17 @@ export function clearDocumentEdit(id: number): boolean {
   return !!row;
 }
 
-export function deleteDocument(id: number): void {
+/** Its diagram stays as deleted, so the next scan of the agent's log does not make the document again. */
+export function deleteDocument(id: number, now = new Date()): boolean {
   const d = open();
   d.exec("BEGIN IMMEDIATE");
   try {
+    const row = d.prepare("SELECT diagram_id AS diagramId FROM documents WHERE id = ?").get(id) as { diagramId: number | null } | undefined;
+    if (row?.diagramId != null) d.prepare("UPDATE diagrams SET deleted_at = ? WHERE id = ?").run(now.toISOString(), row.diagramId);
     d.prepare("DELETE FROM document_images WHERE document_id = ?").run(id);
     d.prepare("DELETE FROM documents WHERE id = ?").run(id);
     d.exec("COMMIT");
+    return !!row;
   } catch (err) {
     d.exec("ROLLBACK");
     throw err;

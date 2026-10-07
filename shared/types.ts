@@ -356,15 +356,6 @@ export interface Diagram {
   editedAt: string | null;
 }
 
-/** A diagram with its text. Null for a raster image, which `/api/diagram/raw` serves. */
-export interface DiagramWithSource extends Diagram {
-  source: string | null;
-  /** Set when you deleted it: it is off the board and the list, and its page can restore it. */
-  deletedAt: string | null;
-  /** The conversation, from the log. Null when its log is gone. */
-  conversation: { title: string; cwd: string; startedAt: string; lastActivityAt: string } | null;
-}
-
 /** `ticket-summary`: the start, middle and end states of a ticket. A ticket has at most one. */
 export type DocumentType = "document" | "ticket-summary";
 
@@ -510,7 +501,7 @@ export interface Dashboard {
   snoozedUntil: Record<string, string>;
   /** Starred ticket keys, first starred first. They go to the top of the board and the PRs view. */
   starred: string[];
-  /** Every diagram an agent made, newest first, without its source. */
+  /** Every picture an agent showed in a message, newest first, without its source: a message finds its document from here. */
   diagrams: Diagram[];
   /** Every document, without its body. A ticket's ticket summary first, then the newest change first. */
   documents: TicketDocument[];

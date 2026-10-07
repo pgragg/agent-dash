@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import type { Dashboard, DiagramWithSource, HistoryRun, TicketDocumentWithBody, PrDetail, ThreadStatus, Transcript } from "../../shared/types.ts";
+import type { Dashboard, HistoryRun, TicketDocumentWithBody, PrDetail, ThreadStatus, Transcript } from "../../shared/types.ts";
 import { setTeam } from "../../shared/team.ts";
 import { internalHref, JIRA_BROWSE, splitTrailing } from "./links.ts";
 import { EmbeddedImage, MermaidFence, setKnownDiagrams } from "./mermaid.tsx";
@@ -123,7 +123,7 @@ export function useDashboard() {
       // Before setData: shared code reads the team settings while the page renders.
       if (body.team) setTeam(body.team);
       knownTickets = new Set([...body.myTickets, ...body.otherTickets].map((g) => g.ticket.key));
-      setKnownDiagrams(body.diagrams);
+      setKnownDiagrams(body.diagrams, body.documents);
       setData(body);
       setError(null);
     } catch (err) {
@@ -381,19 +381,6 @@ export const api = {
     if (!res.ok) throw new Error(json.error ?? `could not save (${res.status})`);
     return json.addressed;
   },
-  diagram: async (id: number): Promise<DiagramWithSource> => {
-    const res = await fetch(`/api/diagram?id=${id}`);
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(json.error ?? `could not load the diagram (${res.status})`);
-    return json;
-  },
-  /** Fixes an agent's mistake: a new title or source, or `deleted` to take it off the board (false restores it). */
-  editDiagram: async (id: number, change: { title?: string; source?: string; deleted?: boolean }): Promise<DiagramWithSource> => {
-    const res = await fetch(`/api/diagram?id=${id}`, { method: "POST", headers: { "X-Agent-Dash": "1", "Content-Type": "application/json" }, body: JSON.stringify(change) });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(json.error ?? `could not save the diagram (${res.status})`);
-    return json;
-  },
   document: async (id: number): Promise<TicketDocumentWithBody> => {
     const res = await fetch(`/api/document?id=${id}`);
     const json = await res.json().catch(() => ({}));
@@ -402,6 +389,8 @@ export const api = {
   },
   /** An agent changes the document in place, as the prompt asks. */
   editDocument: (id: number, prompt: string, cwd: string) => post(`/api/document/edit?id=${id}`, { prompt, cwd }),
+  /** Its diagram stays deleted, so the agent's log does not bring it back. */
+  deleteDocument: (id: number) => post(`/api/document?id=${id}`, undefined, "DELETE"),
   /** Ends an edit that will not save. A ticket summary with no first version goes. */
   cancelDocumentEdit: (id: number) => post(`/api/document/edit?id=${id}`, undefined, "DELETE"),
   writeTicketSummary: (ticket: string, cwd: string) => post(`/api/document/ticket-summary?ticket=${encodeURIComponent(ticket)}`, { cwd }),

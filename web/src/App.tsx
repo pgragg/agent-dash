@@ -31,8 +31,7 @@ import { Chat, useLoad } from "./chat.tsx";
 import { ConversationGist } from "./gist.tsx";
 import { SlackQuotes } from "./slackQuotes.tsx";
 import { DueDateVerb, MoveButton, TicketPanel, useTicketDetail } from "./ticketPanel.tsx";
-import { DiagramCards, DiagramsView, DiagramView } from "./diagrams.tsx";
-import { Documentation, TicketSummaryDoc, WriteTicketSummary } from "./documents.tsx";
+import { Documentation, DocumentsView, DocumentView, TicketSummaryDoc, WriteTicketSummary } from "./documents.tsx";
 import { SessionScope } from "./mermaid.tsx";
 import { type BoardMode, kanbanColumns, type Searchable, searchCards, stageOf, useBoardMode } from "./kanban.ts";
 import { starredFirst } from "./star.ts";
@@ -1173,10 +1172,8 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
   const featured = live.length ? live : primary && !isResolved(s, primary) ? [primary] : relevant.length ? [relevant.at(-1)!] : [];
   const prs = s.ticket?.prs ?? [];
   const runs = s.ticket?.runs ?? (s.run ? [s.run] : []);
-  const documents = s.ticket ? data.documents.filter((d) => d.ticket === s.ticket!.ticket.key) : [];
-  // A ticket's diagrams, or a run's when the entry is a run with no ticket. A diagram that became a document shows there.
-  const documented = new Set(documents.map((d) => d.diagramId));
-  const diagrams = data.diagrams.filter((d) => (s.ticket ? d.ticket === s.ticket.ticket.key : d.sessionId === s.run?.sessionId) && !documented.has(d.id));
+  // A ticket's documents, or a run's when the entry is a run with no ticket.
+  const documents = data.documents.filter((d) => (s.ticket ? d.ticket === s.ticket.ticket.key : d.sessionId === s.run?.sessionId));
   const top = lead(s);
 
   return (
@@ -1243,7 +1240,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
 
       {t && <TicketPanel key={t.key} ticket={t} onError={setError} />}
 
-      {s.ticket && <TicketSummaryDoc key={`summary-${s.id}`} documents={documents} runs={runs} cwd={cwd} now={now} anchor={anchor} onError={setError} />}
+      {s.ticket && <TicketSummaryDoc key={`summary-${s.id}`} documents={documents} runs={runs} cwd={cwd} now={now} onError={setError} />}
 
       {error && (
         <div className="toast" role="alert">
@@ -1264,7 +1261,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
 
       {s.ticket && <Notes ticket={s.ticket.ticket.key} notes={data.notes[s.ticket.ticket.key] ?? []} now={now} onError={setError} focusSignal={noteSignal} />}
 
-      {s.ticket && <Documentation key={`docs-${s.id}`} documents={documents} runs={runs} cwd={cwd} now={now} anchor={anchor} onError={setError} />}
+      {(s.ticket || documents.length > 0) && <Documentation key={`docs-${s.id}`} documents={documents} runs={runs} cwd={cwd} now={now} onError={setError} />}
 
       {featured.length > 0 && (
         <div className="stack">
@@ -1288,12 +1285,6 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
         </div>
       )}
 
-      {diagrams.length > 0 && (
-        <div className="stack">
-          <h2 className="section-title">Diagrams · {diagrams.length}</h2>
-          <DiagramCards diagrams={diagrams} now={now} showConversation />
-        </div>
-      )}
 
       {runs.length > 0 && (
         <div className="stack">
@@ -1653,9 +1644,9 @@ function NewConversationForm() {
 function ConversationView({ sessionId, data, now }: { sessionId: string; data: Dashboard; now: number }) {
   const run = useMemo(() => [...data.myTickets, ...data.otherTickets].flatMap((g) => g.runs).concat(data.unlinkedRuns).find((r) => r.sessionId === sessionId), [data, sessionId]);
   const [error, setError] = useState<string | null>(null);
-  // A diagram can link to a conversation older than the board's window.
+  // A document can link to a conversation older than the board's window.
   const old = useLoad(() => (run ? Promise.resolve(null) : api.transcript(sessionId)), run ? "live" : `${sessionId} ${data.generatedAt}`);
-  const diagrams = data.diagrams.filter((d) => d.sessionId === sessionId);
+  const documents = data.documents.filter((d) => d.sessionId === sessionId);
   const end = useRef<HTMLDivElement>(null);
   // New turns land at the bottom, next to the reply box.
   // A block body: Chrome's scrollIntoView returns a Promise, which React would call as a cleanup.
@@ -1690,12 +1681,7 @@ function ConversationView({ sessionId, data, now }: { sessionId: string; data: D
       </header>
       {error && <div className="toast">{error}</div>}
       {/* The run shows once pi saved the first message; until then there is no chat to load. */}
-      {diagrams.length > 0 && (
-        <div className="stack">
-          <h2 className="section-title">Diagrams · {diagrams.length}</h2>
-          <DiagramCards diagrams={diagrams} now={now} showTicket />
-        </div>
-      )}
+      {documents.length > 0 && <Documentation documents={documents} runs={run ? [run] : []} cwd={run?.cwd ?? "~"} now={now} onError={setError} />}
       {run && <ConversationGist run={run} summary={data.conversationSummaries[sessionId]} now={now} />}
       {run && <Chat sessionId={sessionId} refreshKey={run.lastActivityAt + run.status} />}
       {!run && old.value && <Chat sessionId={sessionId} refreshKey="old" />}
@@ -1964,8 +1950,8 @@ export function App() {
             <a href="#/history" className={view === "history" ? "active" : ""} aria-current={view === "history" ? "page" : undefined}>
               History
             </a>
-            <a href="#/diagrams" className={view === "diagrams" || view === "diagram" ? "active" : ""} aria-current={view === "diagrams" ? "page" : undefined}>
-              Diagrams {data.diagrams.length > 0 && <span className="count">{data.diagrams.length}</span>}
+            <a href="#/documents" className={view === "documents" || view === "document" || view === "diagram" ? "active" : ""} aria-current={view === "documents" ? "page" : undefined}>
+              Documents {data.documents.length > 0 && <span className="count">{data.documents.length}</span>}
             </a>
             <a href="#/worktrees" className={view === "worktrees" ? "active" : ""} aria-current={view === "worktrees" ? "page" : undefined}>
               Worktrees
@@ -2025,9 +2011,9 @@ export function App() {
         <main className="main">
           <HistoryView data={data} now={now} />
         </main>
-      ) : route.view === "diagrams" ? (
+      ) : route.view === "documents" ? (
         <main className="main">
-          <DiagramsView data={data} now={now} />
+          <DocumentsView data={data} now={now} />
         </main>
       ) : route.view === "worktrees" ? (
         <main className="main">
@@ -2037,9 +2023,13 @@ export function App() {
         <main className="main">
           <SettingsView />
         </main>
+      ) : route.view === "document" ? (
+        <main className="main">
+          <DocumentView key={route.id} id={route.id} data={data} now={now} />
+        </main>
       ) : route.view === "diagram" ? (
         <main className="main">
-          <DiagramView key={route.id} id={route.id} data={data} now={now} />
+          <DocumentView key={`d${route.id}`} diagramId={route.id} data={data} now={now} />
         </main>
       ) : route.view === "conversation" ? (
         <main className="main">

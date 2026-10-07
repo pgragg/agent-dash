@@ -19,7 +19,7 @@ export interface DocumentDeps {
 }
 
 /**
- * `GET /api/document?id=N`: one document with its body. `GET /api/document/image?id=N`: an image in one.
+ * `GET /api/document?id=N`: one document with its body. `DELETE /api/document?id=N` deletes it. `GET /api/document/image?id=N`: an image in one.
  * `POST /api/document/edit?id=N` with `{ prompt, cwd }`: an agent changes the document in place.
  * `DELETE /api/document/edit?id=N`: ends an edit that will not save.
  * `POST /api/document/ticket-summary?ticket=KEY` with `{ cwd }`: an agent writes the ticket's ticket summary.
@@ -35,6 +35,12 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   if (url.pathname === "/api/document" && req.method === "GET") {
     const doc = db.getDocument(id);
     return doc ? json(200, doc) : json(404, { error: "no such document" });
+  }
+  if (url.pathname === "/api/document" && req.method === "DELETE") {
+    if (req.headers["x-agent-dash"] !== "1") return json(403, { error: "missing the X-Agent-Dash header" });
+    const ok = db.deleteDocument(id);
+    if (ok) deps.onChange();
+    return ok ? json(200, { ok }) : json(404, { error: "no such document" });
   }
   if (url.pathname === "/api/document/image" && req.method === "GET") {
     const img = db.getDocumentImage(id);

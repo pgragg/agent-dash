@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from "react";
-import type { Run, TicketDocument } from "../../shared/types.ts";
-import { age, api, elapsed, Markdown, stamp } from "./lib.tsx";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { Dashboard, Run, TicketDocument } from "../../shared/types.ts";
+import { age, api, elapsed, Markdown, plural, stamp } from "./lib.tsx";
 import { href } from "./routes.ts";
 
-/** A ticket's markdown documents, and the agents that write them: the ticket summary, and the Documentation section. */
+/** Documents: a ticket's summary and Documentation section, a document's page, and the list of every document. */
 
 /** A body changes only with a save, so each version loads once. */
 const bodies = new Map<string, Promise<string>>();
@@ -104,6 +104,9 @@ function PendingEdit({ d, run, now, onError }: { d: TicketDocument; run: Run | u
   );
 }
 
+/** Every run on the board, to find the agent of an edit or the folder of a document's conversation. */
+const allRuns = (data: Dashboard): Run[] => [...data.myTickets, ...data.otherTickets].flatMap((g) => g.runs).concat(data.unlinkedRuns);
+
 function DocumentCard({ d, run, open, onToggle, cwd, now, onError }: { d: TicketDocument; run: Run | undefined; open: boolean; onToggle: () => void; cwd: string; now: number; onError: (m: string | null) => void }) {
   const [prompting, setPrompting] = useState(false);
   return (
@@ -114,11 +117,6 @@ function DocumentCard({ d, run, open, onToggle, cwd, now, onError }: { d: Ticket
           <h3>{d.title}</h3>
         </button>
         {d.type === "ticket-summary" && <span className="tag tone-good">ticket summary</span>}
-        {d.diagramId !== null && (
-          <a className="meta" href={href(`d:${d.diagramId}`)} title="The diagram that this document was made from">
-            diagram {d.diagramId}
-          </a>
-        )}
         {d.sessionId && d.sessionId !== d.edit?.sessionId && (
           <a className="meta" href={href(`c:${d.sessionId}`)} title="The conversation that made it">
             conversation
@@ -133,6 +131,9 @@ function DocumentCard({ d, run, open, onToggle, cwd, now, onError }: { d: Ticket
             Edit
           </button>
         )}
+        <a className="btn ghost small" href={href(`doc:${d.id}`)} title="Open the document's page">
+          ↗
+        </a>
       </header>
       {prompting && !d.edit && <EditPrompt d={d} cwd={cwd} onDone={() => setPrompting(false)} onError={onError} />}
       {d.edit && <PendingEdit d={d} run={run} now={now} onError={onError} />}
@@ -141,33 +142,16 @@ function DocumentCard({ d, run, open, onToggle, cwd, now, onError }: { d: Ticket
   );
 }
 
-/** Opens a linked document (`#/doc:<id>`) once per link, and keeps the open state of the rest. */
-function useOpened(anchor: string | null) {
-  const [opened, setOpened] = useState<Record<number, boolean>>({});
-  const linked = anchor?.startsWith("doc:") ? Number(anchor.slice(4)) : null;
-  const seen = useRef<number | null>(null);
-  useEffect(() => {
-    if (linked !== null && seen.current !== linked) {
-      seen.current = linked;
-      setOpened((o) => ({ ...o, [linked]: true }));
-    }
-  }, [linked]);
-  return [opened, setOpened] as const;
-}
-
 type DocsProps = {
   documents: TicketDocument[];
-  /** The ticket's runs, to tell when an editing agent stopped. */
+  /** The runs that can edit these documents, to tell when an editing agent stopped. */
   runs: Run[];
   cwd: string;
   now: number;
-  anchor: string | null;
   onError: (m: string | null) => void;
 };
 
-function runOf(d: TicketDocument, runs: Run[]): Run | undefined {
-  return d.edit ? runs.find((r) => r.sessionId === d.edit!.sessionId) : undefined;
-}
+const runOf = (d: TicketDocument, runs: Run[]): Run | undefined => (d.edit ? runs.find((r) => r.sessionId === d.edit!.sessionId) : undefined);
 
 /** The button at the top of a ticket's workspace. It shows only while the ticket has no ticket summary. */
 export function WriteTicketSummary({ ticket, cwd, onError }: { ticket: string; cwd: string; onError: (m: string | null) => void }) {
@@ -185,17 +169,16 @@ export function WriteTicketSummary({ ticket, cwd, onError }: { ticket: string; c
 }
 
 /** The ticket summary, under the Ticket section. It opens by itself. */
-export function TicketSummaryDoc({ documents, runs, cwd, now, anchor, onError }: DocsProps) {
-  const [opened, setOpened] = useOpened(anchor);
+export function TicketSummaryDoc({ documents, runs, cwd, now, onError }: DocsProps) {
+  const [open, setOpen] = useState(true);
   const d = documents.find((x) => x.type === "ticket-summary");
   if (!d) return null;
-  const open = opened[d.id] ?? true;
-  return <DocumentCard d={d} run={runOf(d, runs)} open={open} onToggle={() => setOpened((o) => ({ ...o, [d.id]: !open }))} cwd={cwd} now={now} onError={onError} />;
+  return <DocumentCard d={d} run={runOf(d, runs)} open={open} onToggle={() => setOpen(!open)} cwd={cwd} now={now} onError={onError} />;
 }
 
-/** The ticket's other documents. They stay short until you open one. */
-export function Documentation({ documents, runs, cwd, now, anchor, onError }: DocsProps) {
-  const [opened, setOpened] = useOpened(anchor);
+/** A ticket's other documents, or a conversation's. They stay short until you open one. */
+export function Documentation({ documents, runs, cwd, now, onError }: DocsProps) {
+  const [opened, setOpened] = useState<Record<number, boolean>>({});
   const docs = documents.filter((d) => d.type !== "ticket-summary");
   return (
     <div className="stack documentation">
@@ -203,11 +186,147 @@ export function Documentation({ documents, runs, cwd, now, anchor, onError }: Do
       {docs.length === 0 ? (
         <p className="meta empty-note">No documents yet.</p>
       ) : (
-        docs.map((d) => {
-          const open = opened[d.id] ?? false;
-          return <DocumentCard key={d.id} d={d} run={runOf(d, runs)} open={open} onToggle={() => setOpened((o) => ({ ...o, [d.id]: !open }))} cwd={cwd} now={now} onError={onError} />;
-        })
+        docs.map((d) => <DocumentCard key={d.id} d={d} run={runOf(d, runs)} open={!!opened[d.id]} onToggle={() => setOpened((o) => ({ ...o, [d.id]: !o[d.id] }))} cwd={cwd} now={now} onError={onError} />)
       )}
     </div>
+  );
+}
+
+/** `#/doc:ID`: one document, also one with no ticket. `diagramId` opens the document of an older diagram link. */
+export function DocumentView({ id, diagramId, data, now }: { id?: number; diagramId?: number; data: Dashboard; now: number }) {
+  const d = data.documents.find((x) => (diagramId === undefined ? x.id === id : x.diagramId === diagramId));
+  const [prompting, setPrompting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const runs = useMemo(() => allRuns(data), [data]);
+  if (!d) return <article className="workspace"><div className="zero big">{diagramId === undefined ? `Document ${id} is gone.` : `Diagram ${diagramId} has no document: it was deleted.`}</div></article>;
+  const ticket = [...data.myTickets, ...data.otherTickets].find((g) => g.ticket.key === d.ticket)?.ticket;
+  const made = d.sessionId ? runs.find((r) => r.sessionId === d.sessionId) : undefined;
+  const remove = async () => {
+    if (!confirm(`Delete document ${d.id}, "${d.title}"? You cannot undo this.`)) return;
+    const err = await api.deleteDocument(d.id);
+    if (err) setError(err);
+    else location.hash = d.ticket ? href(`t:${d.ticket}`) : "#/documents";
+  };
+  return (
+    <article className="workspace">
+      <header className="ws-head">
+        <div className="eyebrow">
+          <span>Document {d.id}</span>
+          {d.type === "ticket-summary" && <span className="tag tone-good">ticket summary</span>}
+        </div>
+        <h1>{d.title}</h1>
+        <div className="ws-meta doc-links">
+          {d.ticket ? (
+            <a className="key-link" href={href(`t:${d.ticket}`)} title="Open the ticket on the board">
+              {d.ticket}
+            </a>
+          ) : (
+            <span className="meta">no ticket</span>
+          )}
+          {ticket && <span className="meta">{ticket.summary}</span>}
+          {d.sessionId && (
+            <>
+              <span className="sep">·</span>
+              <a href={href(`c:${d.sessionId}`)} title="Open the conversation that made it">
+                {made ? (made.name ?? made.firstPrompt).slice(0, 80) : `conversation ${d.sessionId.slice(-6)}`}
+              </a>
+            </>
+          )}
+          <span className="sep">·</span>
+          <span className="meta" title={stamp(d.createdAt)}>
+            made {age(d.createdAt, now)} ago
+          </span>
+          {d.updatedAt !== d.createdAt && (
+            <span className="meta" title={stamp(d.updatedAt)}>
+              saved {age(d.updatedAt, now)} ago
+            </span>
+          )}
+          <span className="grow" />
+          {d.hasBody && !d.edit && (
+            <button className="btn ghost small" onClick={() => setPrompting(!prompting)} aria-expanded={prompting} title="Ask an agent to change this document">
+              Edit
+            </button>
+          )}
+          <button className="btn ghost small" onClick={remove} title="Delete this document">
+            Delete
+          </button>
+        </div>
+      </header>
+      {error && <div className="toast" role="alert">{error}</div>}
+      {prompting && !d.edit && <EditPrompt d={d} cwd={made?.cwd ?? "~"} onDone={() => setPrompting(false)} onError={setError} />}
+      {d.edit && <PendingEdit d={d} run={runs.find((r) => r.sessionId === d.edit!.sessionId)} now={now} onError={setError} />}
+      {d.hasBody && (
+        <section className="card doc-page-body">
+          <DocumentBody d={d} />
+        </section>
+      )}
+    </article>
+  );
+}
+
+/** Turns true near the screen, so a long list renders only what you scroll to. */
+function useVisible<T extends Element>(): [React.RefObject<T | null>, boolean] {
+  const ref = useRef<T>(null);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    if (visible || !ref.current) return;
+    const io = new IntersectionObserver(([e]) => e.isIntersecting && setVisible(true), { rootMargin: "300px" });
+    io.observe(ref.current);
+    return () => io.disconnect();
+  }, [visible]);
+  return [ref, visible];
+}
+
+function DocumentPreview({ d }: { d: TicketDocument }) {
+  const [ref, visible] = useVisible<HTMLDivElement>();
+  return <div ref={ref} className="doc-preview">{visible && d.hasBody ? <DocumentBody d={d} /> : null}</div>;
+}
+
+/** `#/documents`: every document, newest change first. */
+export function DocumentsView({ data, now }: { data: Dashboard; now: number }) {
+  const [query, setQuery] = useState("");
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const found = data.documents.filter((d) => words.every((w) => `${d.title} ${d.ticket ?? ""} ${d.type}`.toLowerCase().includes(w)));
+  return (
+    <article className="workspace">
+      <header className="ws-head">
+        <h1>Documents</h1>
+        <div className="ws-meta">
+          <span className="meta">{plural(data.documents.length, "document")} · ticket summaries first, then the newest change</span>
+        </div>
+        <input className="search" type="search" placeholder="Search titles, tickets, types" value={query} onChange={(e) => setQuery(e.target.value)} />
+      </header>
+      {found.length === 0 ? (
+        <div className="zero big">{query ? "No document matches." : "No documents yet. Write a ticket summary from a ticket, or let an agent draw a diagram: each diagram becomes a document."}</div>
+      ) : (
+        <div className="doc-grid">
+          {found.map((d) => (
+            <article key={d.id} className="doc-card">
+              <a className="doc-card-preview" href={href(`doc:${d.id}`)} aria-label={`Open document ${d.id}: ${d.title}`}>
+                <DocumentPreview d={d} />
+              </a>
+              <div className="doc-card-meta">
+                <a className="doc-card-title" href={href(`doc:${d.id}`)} title={d.title}>
+                  {d.title}
+                </a>
+                <div className="doc-card-tags">
+                  {d.type === "ticket-summary" && <span className="tag tone-good">ticket summary</span>}
+                  {d.ticket && (
+                    <a className="key-link" href={href(`t:${d.ticket}`)} title="Open the ticket on the board">
+                      {d.ticket}
+                    </a>
+                  )}
+                  {d.edit && <span className="tag tone-working">agent at work</span>}
+                  <span className="grow" />
+                  <span className="meta" title={stamp(d.updatedAt)}>
+                    {age(d.updatedAt, now)}
+                  </span>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </article>
   );
 }

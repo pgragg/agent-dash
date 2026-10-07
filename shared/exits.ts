@@ -6,7 +6,7 @@
 export const EXIT_KINDS = ["github_pr", "jira", "slack", "iterm_focus", "copy_resume", "other_url"] as const;
 export type ExitKind = (typeof EXIT_KINDS)[number];
 
-export const EXIT_VIEWS = ["board", "needs", "prs", "history", "conversation", "diagrams", "diagram", "worktrees", "parked", "settings"] as const;
+export const EXIT_VIEWS = ["board", "needs", "prs", "history", "conversation", "documents", "document", "diagram", "worktrees", "parked", "settings"] as const;
 export type ExitView = (typeof EXIT_VIEWS)[number];
 
 export interface Exit {
