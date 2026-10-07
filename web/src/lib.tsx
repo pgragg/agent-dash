@@ -1,7 +1,7 @@
-import { Fragment, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, type MouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { Dashboard, HistoryRun, TicketDocumentWithBody, PrDetail, ThreadStatus, Transcript } from "../../shared/types.ts";
 import { setTeam } from "../../shared/team.ts";
-import { internalHref, JIRA_BROWSE, splitTrailing } from "./links.ts";
+import { dashClick, internalHref, JIRA_BROWSE, splitTrailing } from "./links.ts";
 import { EmbeddedImage, MermaidFence, setKnownDiagrams } from "./mermaid.tsx";
 import { addUpdate, entryOf, entryOfSignal, type Group, groupNotification, needSignals, newlyWaiting, newSignals, type Pending, pruneSeen, releasePending, runsOf, runUpdate, type Seen, type SeenAt, signalUpdate, snapshot, type Update } from "./notify.ts";
 
@@ -415,7 +415,7 @@ function linkLabel(url: string): string {
   return jira ? jira[1] : url.replace(/^https?:\/\//, "");
 }
 
-/** A PR or a known ticket opens in agent-dash; the small ↗ still opens GitHub or Jira. */
+/** A PR or a known ticket opens in agent-dash on a click, but its href and a copy carry the GitHub or Jira URL. */
 function Link({ url, label }: { url: string; label: ReactNode }) {
   const internal = internalHref(url, knownTickets);
   if (!internal) {
@@ -425,9 +425,16 @@ function Link({ url, label }: { url: string; label: ReactNode }) {
       </a>
     );
   }
+  const open = (e: MouseEvent) => {
+    const where = dashClick(e);
+    if (!where) return;
+    e.preventDefault();
+    if (where === "here") location.hash = internal;
+    else window.open(internal, "_blank", "noopener");
+  };
   return (
     <>
-      <a href={internal} title={`Open in agent-dash · ${url}`}>
+      <a href={url} onClick={open} onAuxClick={open} title={`Open in agent-dash · ${url}`}>
         {label}
       </a>
       <a className="ext-link" href={url} target="_blank" rel="noreferrer" title={`Open ${url}`} aria-label={`Open ${url}`}>
