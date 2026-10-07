@@ -1,7 +1,16 @@
 # agent-dash
 
 A local dashboard for one person who oversees many coding agents at the same time.
-It answers one question: **what do I look at next?**
+
+**It is the bridge of a ship, for software engineering.** A captain does not run to the engine room to change speed. The captain moves the engine telegraph on the bridge, and the crew does the work. agent-dash does this for a developer: you see your agents, tickets, PRs, reviews, smoketests and deploys on one page, and you give each order from there. Your coding agents are the crew.
+
+![The agent-dash board: a ranked queue of tickets on the left; on the right, the selected ticket with its SDLC progress bar, what needs you, and the drafted next steps](docs/images/board.png)
+
+- **See what needs you.** One queue, ranked by urgency, with a short summary of what each agent did and what it needs from you.
+- **Act from the page.** Start, reply to and stop agents. Move Jira tickets, request reviews in Slack, fix a red PR, and plan and run smoketests, without a terminal tab.
+- **Keep control.** It runs on your machine only, and each write starts with your click.
+
+For a tour with screenshots, see [docs/capabilities.md](docs/capabilities.md). The rest of this README is the reference.
 
 **The goal: one place for the whole developer workflow.** You find the next task, start agents, talk to them, and follow their PRs on this page, so you do not switch between iTerm and agent-dash. Each new feature moves one more step of the workflow from the terminal onto the page.
 
