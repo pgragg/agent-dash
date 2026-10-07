@@ -3,7 +3,7 @@ import type { Run, TicketDocument } from "../../shared/types.ts";
 import { age, api, elapsed, Markdown, stamp } from "./lib.tsx";
 import { href } from "./routes.ts";
 
-/** The Documentation section of a ticket: its markdown documents, and the agents that write them. */
+/** A ticket's markdown documents, and the agents that write them: the ticket summary, and the Documentation section. */
 
 /** A body changes only with a save, so each version loads once. */
 const bodies = new Map<string, Promise<string>>();
@@ -141,19 +141,9 @@ function DocumentCard({ d, run, open, onToggle, cwd, now, onError }: { d: Ticket
   );
 }
 
-export function Documentation({ ticket, documents, runs, cwd, now, anchor, onError }: {
-  ticket: string;
-  documents: TicketDocument[];
-  /** The ticket's runs, to tell when an editing agent stopped. */
-  runs: Run[];
-  cwd: string;
-  now: number;
-  anchor: string | null;
-  onError: (m: string | null) => void;
-}) {
-  // A ticket summary opens by itself; the rest stay short until you open one.
+/** Opens a linked document (`#/doc:<id>`) once per link, and keeps the open state of the rest. */
+function useOpened(anchor: string | null) {
   const [opened, setOpened] = useState<Record<number, boolean>>({});
-  const [busy, setBusy] = useState(false);
   const linked = anchor?.startsWith("doc:") ? Number(anchor.slice(4)) : null;
   const seen = useRef<number | null>(null);
   useEffect(() => {
@@ -162,29 +152,60 @@ export function Documentation({ ticket, documents, runs, cwd, now, anchor, onErr
       setOpened((o) => ({ ...o, [linked]: true }));
     }
   }, [linked]);
-  const hasSummary = documents.some((d) => d.type === "ticket-summary");
+  return [opened, setOpened] as const;
+}
+
+type DocsProps = {
+  documents: TicketDocument[];
+  /** The ticket's runs, to tell when an editing agent stopped. */
+  runs: Run[];
+  cwd: string;
+  now: number;
+  anchor: string | null;
+  onError: (m: string | null) => void;
+};
+
+function runOf(d: TicketDocument, runs: Run[]): Run | undefined {
+  return d.edit ? runs.find((r) => r.sessionId === d.edit!.sessionId) : undefined;
+}
+
+/** The button at the top of a ticket's workspace. It shows only while the ticket has no ticket summary. */
+export function WriteTicketSummary({ ticket, cwd, onError }: { ticket: string; cwd: string; onError: (m: string | null) => void }) {
+  const [busy, setBusy] = useState(false);
   const write = async () => {
     setBusy(true);
     onError(await api.writeTicketSummary(ticket, cwd));
     setBusy(false);
   };
   return (
+    <button className="btn ghost" onClick={write} disabled={busy} title={`An agent in ${cwd} writes the start, middle and end states of ${ticket}, with user stories and diagrams`}>
+      {busy ? "Starting…" : "Write a ticket summary"}
+    </button>
+  );
+}
+
+/** The ticket summary, under the Ticket section. It opens by itself. */
+export function TicketSummaryDoc({ documents, runs, cwd, now, anchor, onError }: DocsProps) {
+  const [opened, setOpened] = useOpened(anchor);
+  const d = documents.find((x) => x.type === "ticket-summary");
+  if (!d) return null;
+  const open = opened[d.id] ?? true;
+  return <DocumentCard d={d} run={runOf(d, runs)} open={open} onToggle={() => setOpened((o) => ({ ...o, [d.id]: !open }))} cwd={cwd} now={now} onError={onError} />;
+}
+
+/** The ticket's other documents. They stay short until you open one. */
+export function Documentation({ documents, runs, cwd, now, anchor, onError }: DocsProps) {
+  const [opened, setOpened] = useOpened(anchor);
+  const docs = documents.filter((d) => d.type !== "ticket-summary");
+  return (
     <div className="stack documentation">
-      <div className="section-head">
-        <h2 className="section-title">Documentation{documents.length ? ` · ${documents.length}` : ""}</h2>
-        <span className="grow" />
-        {!hasSummary && (
-          <button className="btn small" onClick={write} disabled={busy} title={`An agent in ${cwd} writes the start, middle and end states of ${ticket}, with user stories and diagrams`}>
-            {busy ? "Starting…" : "Write a ticket summary"}
-          </button>
-        )}
-      </div>
-      {documents.length === 0 ? (
-        <p className="meta empty-note">No documents yet. A ticket summary is a good first one.</p>
+      <h2 className="section-title">Documentation{docs.length ? ` · ${docs.length}` : ""}</h2>
+      {docs.length === 0 ? (
+        <p className="meta empty-note">No documents yet.</p>
       ) : (
-        documents.map((d) => {
-          const open = opened[d.id] ?? d.type === "ticket-summary";
-          return <DocumentCard key={d.id} d={d} run={d.edit ? runs.find((r) => r.sessionId === d.edit!.sessionId) : undefined} open={open} onToggle={() => setOpened((o) => ({ ...o, [d.id]: !open }))} cwd={cwd} now={now} onError={onError} />;
+        docs.map((d) => {
+          const open = opened[d.id] ?? false;
+          return <DocumentCard key={d.id} d={d} run={runOf(d, runs)} open={open} onToggle={() => setOpened((o) => ({ ...o, [d.id]: !open }))} cwd={cwd} now={now} onError={onError} />;
         })
       )}
     </div>
