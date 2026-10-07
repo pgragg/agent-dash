@@ -32,6 +32,7 @@ import { ConversationGist } from "./gist.tsx";
 import { SlackQuotes } from "./slackQuotes.tsx";
 import { DueDateVerb, MoveButton, TicketPanel, useTicketDetail } from "./ticketPanel.tsx";
 import { DiagramCards, DiagramsView, DiagramView } from "./diagrams.tsx";
+import { Documentation } from "./documents.tsx";
 import { SessionScope } from "./mermaid.tsx";
 import { type BoardMode, kanbanColumns, type Searchable, searchCards, stageOf, useBoardMode } from "./kanban.ts";
 import { starredFirst } from "./star.ts";
@@ -1172,8 +1173,10 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
   const featured = live.length ? live : primary && !isResolved(s, primary) ? [primary] : relevant.length ? [relevant.at(-1)!] : [];
   const prs = s.ticket?.prs ?? [];
   const runs = s.ticket?.runs ?? (s.run ? [s.run] : []);
-  // A ticket's diagrams, or a run's when the entry is a run with no ticket.
-  const diagrams = data.diagrams.filter((d) => (s.ticket ? d.ticket === s.ticket.ticket.key : d.sessionId === s.run?.sessionId));
+  const documents = s.ticket ? data.documents.filter((d) => d.ticket === s.ticket!.ticket.key) : [];
+  // A ticket's diagrams, or a run's when the entry is a run with no ticket. A diagram that became a document shows there.
+  const documented = new Set(documents.map((d) => d.diagramId));
+  const diagrams = data.diagrams.filter((d) => (s.ticket ? d.ticket === s.ticket.ticket.key : d.sessionId === s.run?.sessionId) && !documented.has(d.id));
   const top = lead(s);
 
   return (
@@ -1257,6 +1260,8 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
       {s.ticket && <StartAgent key={s.id} s={s} cwd={cwd} setCwd={setCwd} onError={setError} focusSignal={agentSignal} />}
 
       {s.ticket && <Notes ticket={s.ticket.ticket.key} notes={data.notes[s.ticket.ticket.key] ?? []} now={now} onError={setError} focusSignal={noteSignal} />}
+
+      {s.ticket && <Documentation key={`docs-${s.id}`} ticket={s.ticket.ticket.key} documents={documents} runs={runs} cwd={cwd} now={now} anchor={anchor} onError={setError} />}
 
       {featured.length > 0 && (
         <div className="stack">

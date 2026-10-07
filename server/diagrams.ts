@@ -36,7 +36,9 @@ const MAX_IMAGE = 5_000_000;
 export const sha1 = (data: string | Buffer) => createHash("sha1").update(data).digest("hex");
 
 const FENCE = /^[ \t]*```[ \t]*mermaid[ \t]*\n([\s\S]*?)^[ \t]*```/gim;
-const IMAGE = /!\[([^\]\n]*)\]\(<?([^)\s>]+)>?\)/g;
+/** The file that an agent writes a document in before it saves it to agent-dash. */
+const DOCUMENT_DRAFT = /(^|\/)agent-dash-document-\d+\.md$/;
+export const IMAGE = /!\[([^\]\n]*)\]\(<?([^)\s>]+)>?\)/g;
 const IMAGE_EXT = /\.(png|svg|jpe?g|gif|webp)$/i;
 
 /** "Flowchart" from "flowchart LR", "Sequence diagram" from "sequenceDiagram". */
@@ -96,6 +98,8 @@ export function findInWrite(args: unknown, at: string | null): Found[] {
     return [{ kind: "mermaid", title: own === typeName(content) ? name : own, source: content, hash: sha1(content), origin: path, at }];
   }
   if (/\.svg$/i.test(path) && /<svg[\s>]/i.test(content)) return [{ kind: "svg", title: name, source: content, hash: sha1(content), origin: path, at }];
+  // A document's draft: its diagrams show in the document.
+  if (DOCUMENT_DRAFT.test(path)) return [];
   if (/\.(md|markdown|mdx)$/i.test(path)) return findInReply(content, "", at).flatMap((f) => (f.kind === "mermaid" ? [{ ...f, origin: path }] : []));
   return [];
 }

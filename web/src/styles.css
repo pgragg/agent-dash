@@ -751,3 +751,23 @@ a.btn.verb { text-decoration: none; }
 .setup-agent .setting-error { color: var(--bad); margin: 0; }
 .settings .setting-guide { color: var(--muted); }
 .settings .setting-guide code { font-size: 12px; overflow-wrap: anywhere; }
+
+/* Documentation: a ticket's markdown documents. A document's headings get their size from their level. */
+.section-head { display: flex; align-items: center; gap: 10px; }
+.doc { padding: 12px 18px; }
+.doc .doc-head { margin-bottom: 0; white-space: nowrap; }
+.doc .doc-head > * { flex: none; }
+.doc .doc-head > .doc-toggle { flex: 0 1 auto; }
+.doc .doc-head > .grow { flex: 1; }
+.doc-toggle h3 { overflow: hidden; text-overflow: ellipsis; }
+.doc.open .doc-head, .doc .doc-pending, .doc .doc-prompt { margin-bottom: 12px; }
+.doc-toggle { display: inline-flex; align-items: center; gap: 8px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; text-align: left; }
+.doc-toggle .caret { color: var(--muted); width: 12px; flex: none; }
+.doc-toggle:hover h3 { text-decoration: underline; }
+.doc-pending { display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: var(--ink-2); padding: 8px 12px; border-radius: 10px; background: var(--hover); }
+.doc .doc-prompt { margin-top: 10px; }
+.doc-body .md h4[data-level="1"] { font: 600 20px var(--display); margin: 22px 0 10px; }
+.doc-body .md h4[data-level="2"] { font: 600 16px var(--display); margin: 20px 0 8px; }
+.doc-body .md h4[data-level="3"] { font-size: 14px; margin: 16px 0 6px; }
+.md blockquote { margin: 0 0 10px; padding: 2px 0 2px 12px; border-left: 3px solid var(--line-2); color: var(--ink-2); }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }

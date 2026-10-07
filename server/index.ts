@@ -21,6 +21,7 @@ import * as loginRoute from "./routes/login.ts";
 import * as slackRoute from "./routes/slack.ts";
 import * as ticketRoute from "./routes/ticket.ts";
 import * as diagramRoute from "./routes/diagrams.ts";
+import * as documentRoute from "./routes/documents.ts";
 import * as sdlcRoute from "./routes/sdlc.ts";
 import * as smoketestPlanRoute from "./routes/smoketestPlan.ts";
 import * as reviewRoute from "./routes/reviewRequests.ts";
@@ -226,6 +227,7 @@ async function dashboard(force: boolean) {
   for (const g of [...d.myTickets, ...d.otherTickets]) for (const r of g.runs) if (r.tickets[0]) runTicket.set(r.sessionId, r.tickets[0]);
   await syncDiagrams(parsed, (s) => runTicket.get(s.sessionId) ?? s.tickets[0] ?? null, new Date(now));
   d.diagrams = summaryDb.listDiagrams();
+  d.documents = summaryDb.listDocuments();
   d.sdlcEvents = summaryDb.sdlcEventsByTicket();
   d.reviewDrafts = summaryDb.reviewDrafts();
   d.reviewRequests = summaryDb.reviewRequestsByPr();
@@ -340,6 +342,7 @@ const server = createServer(async (req, res) => {
     if (await prRoute.handle(req, res, url, broadcast)) return;
     if (await ticketRoute.handle(req, res, url, onTicketChange)) return;
     if (await diagramRoute.handle(req, res, url, sessions, broadcast)) return;
+    if (await documentRoute.handle(req, res, url, { context: ticketContext, onChange: broadcast })) return;
     if (await smoketestPlanRoute.handle(req, res, url, { sessions, context: ticketContext, script: SDLC_SCRIPT, login: ghLogin, onChange: broadcast })) return;
     if (await sdlcRoute.handle(req, res, url, broadcast)) return;
     // The dashboard's PRs carry the tickets that cross-linking gave them.

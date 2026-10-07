@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import type { Dashboard, DiagramWithSource, HistoryRun, PrDetail, ThreadStatus, Transcript } from "../../shared/types.ts";
+import type { Dashboard, DiagramWithSource, HistoryRun, TicketDocumentWithBody, PrDetail, ThreadStatus, Transcript } from "../../shared/types.ts";
 import { setTeam } from "../../shared/team.ts";
 import { internalHref, JIRA_BROWSE, splitTrailing } from "./links.ts";
 import { EmbeddedImage, MermaidFence, setKnownDiagrams } from "./mermaid.tsx";
@@ -394,6 +394,17 @@ export const api = {
     if (!res.ok) throw new Error(json.error ?? `could not save the diagram (${res.status})`);
     return json;
   },
+  document: async (id: number): Promise<TicketDocumentWithBody> => {
+    const res = await fetch(`/api/document?id=${id}`);
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error ?? `could not load the document (${res.status})`);
+    return json;
+  },
+  /** An agent changes the document in place, as the prompt asks. */
+  editDocument: (id: number, prompt: string, cwd: string) => post(`/api/document/edit?id=${id}`, { prompt, cwd }),
+  /** Ends an edit that will not save. A ticket summary with no first version goes. */
+  cancelDocumentEdit: (id: number) => post(`/api/document/edit?id=${id}`, undefined, "DELETE"),
+  writeTicketSummary: (ticket: string, cwd: string) => post(`/api/document/ticket-summary?ticket=${encodeURIComponent(ticket)}`, { cwd }),
   transcript: async (sessionId: string): Promise<Transcript> => {
     const res = await fetch(`/api/transcript?session=${encodeURIComponent(sessionId)}`);
     if (!res.ok) throw new Error(`could not load the chat (${res.status})`);
@@ -405,8 +416,9 @@ export const api = {
 
 // ---- markdown -----------------------------------------------------------------------
 
-// The last group is a local image, `![alt](path)`; a web image stays a link.
-const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\(https?:\/\/[^)\s]+\))|(https?:\/\/[^\s)<>\]]+)|(!\[[^\]\n]*\]\((?![a-z]+:)<?[^)\s>]+\.(?:png|svg|jpe?g|gif|webp)>?\))/gi;
+// Group 5 is a local image, `![alt](path)`, and group 6 a document's stored image; a web image stays a link.
+// Group 7 is *italic* or _italic_; a snake_case name is not.
+const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\(https?:\/\/[^)\s]+\))|(https?:\/\/[^\s)<>\]]+)|(!\[[^\]\n]*\]\((?![a-z]+:)<?[^)\s>]+\.(?:png|svg|jpe?g|gif|webp)>?\))|(!\[[^\]\n]*\]\(image:\d+\))|(\*(?![\s*])[^*\n]+?(?<!\s)\*|(?<!\w)_(?![\s_])[^_\n]+?(?<!\s)_(?!\w))/gi;
 
 function linkLabel(url: string): string {
   if (/github\.com\/.+\/pull\/\d+/.test(url)) return prName(url);
@@ -444,9 +456,18 @@ export function inline(text: string): ReactNode[] {
     const [tok] = m;
     if (m[1]) out.push(<code key={m.index}>{tok.slice(1, -1)}</code>);
     else if (m[2]) out.push(<strong key={m.index}>{inline(tok.slice(2, -2))}</strong>);
+    else if (m[7]) out.push(<em key={m.index}>{inline(tok.slice(1, -1))}</em>);
     else if (m[5]) {
       const [, alt, path] = tok.match(/^!\[([^\]]*)\]\(<?([^)\s>]+)>?\)$/)!;
       out.push(<EmbeddedImage key={m.index} alt={alt} path={path} />);
+    }
+    else if (m[6]) {
+      const [, alt, id] = tok.match(/^!\[([^\]]*)\]\(image:(\d+)\)$/)!;
+      out.push(
+        <a key={m.index} className="md-image" href={`/api/document/image?id=${id}`} target="_blank" rel="noreferrer" title={alt || "Open the image"}>
+          <img src={`/api/document/image?id=${id}`} alt={alt} loading="lazy" />
+        </a>,
+      );
     }
     else if (m[3]) {
       const [, label, url] = tok.match(/^\[([^\]]+)\]\((.+)\)$/)!;
@@ -464,9 +485,11 @@ export function inline(text: string): ReactNode[] {
 }
 
 /**
- * Enough markdown for agent replies: paragraphs, lists, headings, fences, tables, and
- * inline code, bold and links. React escapes all text, so a reply cannot inject HTML.
+ * Enough markdown for agent replies and documents: paragraphs, lists, headings, quotes, rules,
+ * fences, tables, images, and inline code, bold, italic and links. React escapes all text, so a reply cannot inject HTML.
  */
+const HR = /^\s*([-*_])(\s*\1){2,}\s*$/;
+
 export function Markdown({ text }: { text: string }) {
   const lines = text.replace(/\r/g, "").split("\n");
   const blocks: ReactNode[] = [];
@@ -499,8 +522,16 @@ export function Markdown({ text }: { text: string }) {
         </div>,
       );
     } else if (/^#{1,6}\s/.test(line)) {
-      blocks.push(<h4 key={i}>{inline(line.replace(/^#+\s*/, ""))}</h4>);
+      // One element for every level, so a reply's heading stays small; a document's CSS sizes it by level.
+      blocks.push(<h4 key={i} data-level={line.match(/^#+/)![0].length}>{inline(line.replace(/^#+\s*/, ""))}</h4>);
       i++;
+    } else if (HR.test(line)) {
+      blocks.push(<hr key={i} />);
+      i++;
+    } else if (/^\s*>/.test(line)) {
+      const quote: string[] = [];
+      for (; i < lines.length && /^\s*>/.test(lines[i]); i++) quote.push(lines[i].replace(/^\s*>\s?/, ""));
+      blocks.push(<blockquote key={i}><Markdown text={quote.join("\n")} /></blockquote>);
     } else if (/^\s*([-*•]|\d+[.)])\s+/.test(line)) {
       const ordered = /^\s*\d+[.)]/.test(line);
       const items: string[] = [];
@@ -509,7 +540,7 @@ export function Markdown({ text }: { text: string }) {
       blocks.push(<List key={i}>{items.map((it, k) => <li key={k}>{inline(it)}</li>)}</List>);
     } else {
       const para: string[] = [];
-      for (; i < lines.length && lines[i].trim() && !/^(```|#{1,6}\s|\s*\||\s*([-*•]|\d+[.)])\s+)/.test(lines[i]); i++) para.push(lines[i]);
+      for (; i < lines.length && lines[i].trim() && !/^(```|#{1,6}\s|\s*\||\s*>|\s*([-*•]|\d+[.)])\s+)/.test(lines[i]) && !HR.test(lines[i]); i++) para.push(lines[i]);
       blocks.push(
         <p key={i}>
           {para.map((p, k) => (
