@@ -580,6 +580,9 @@ a.btn.verb { text-decoration: none; }
 .sdlc-stage.st-done > :is(button, a) { border-top-color: var(--good); }
 :is(.sdlc-stage, .lane-lamp).st-done .sdlc-dot { background: var(--good); border-color: var(--good); color: #fff; }
 .sdlc-stage.st-done .sdlc-label { color: var(--ink-2); }
+.sdlc-stage.st-unhealthy > :is(button, a) { border-top-color: var(--warn); }
+:is(.sdlc-stage, .lane-lamp).st-unhealthy .sdlc-dot { background: var(--warn); border-color: var(--warn); color: #fff; }
+.sdlc-stage.st-unhealthy .sdlc-label { color: var(--ink-2); }
 .sdlc-stage.st-failed > :is(button, a) { border-top-color: var(--bad); }
 :is(.sdlc-stage, .lane-lamp).st-failed .sdlc-dot { background: var(--bad); border-color: var(--bad); color: #fff; }
 .sdlc-stage.st-blocked > :is(button, a) { border-top-color: var(--muted); }
@@ -594,7 +597,7 @@ a.btn.verb { text-decoration: none; }
 .sdlc-detail { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--ink-2); }
 .st-tag-done { background: var(--good-bg); color: var(--good); }
 .st-tag-failed { background: var(--bad-bg); color: var(--bad); }
-.st-tag-waiting { background: var(--warn-bg); color: var(--warn); }
+.st-tag-waiting, .st-tag-unhealthy { background: var(--warn-bg); color: var(--warn); }
 .st-tag-running, .tag.tone-running { background: var(--running-bg); color: var(--running-ink); }
 .st-tag-blocked, .st-tag-skipped, .st-tag-todo { background: var(--hover); color: var(--muted); }
 
@@ -642,6 +645,7 @@ a.btn.verb { text-decoration: none; }
 .run-passed { background: var(--good); }
 .run-failed { background: var(--bad); }
 .run-blocked { background: var(--muted); }
+.run-unhealthy { background: var(--warn); }
 .run-running { background: var(--running); }
 .run-skipped { background: none; border: 1.5px dashed var(--muted); box-sizing: border-box; }
 .lane-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; line-height: 1.4; }

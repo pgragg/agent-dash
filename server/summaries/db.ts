@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS SDLC_Event (
   event_type   TEXT NOT NULL CHECK (event_type IN ('smoketest_plan', 'smoketest_execution', 'deploy', 'review_request')),
   started_at   TEXT NOT NULL,
   finished_at  TEXT,
-  outcome      TEXT CHECK (outcome IN ('passed', 'failed', 'blocked')),
+  outcome      TEXT CHECK (outcome IN ('passed', 'failed', 'blocked', 'unhealthy')),
   test_details TEXT,
   test_results TEXT,
   -- The pi session that runs the smoketest, when agent-dash started it, so the page can link to it.
@@ -256,7 +256,7 @@ const SDLC_EVENT_COLUMNS = ["session_id", "skipped_at", "pr_url", "channel", "me
  */
 function upgradeSdlcEventChecks(d: DatabaseSync): void {
   const row = d.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'SDLC_Event'").get() as { sql: string } | undefined;
-  if (!row || (row.sql.includes("'blocked'") && row.sql.includes("'smoketest_plan'") && row.sql.includes("confirmed_by <> ''"))) return;
+  if (!row || (row.sql.includes("'unhealthy'") && row.sql.includes("'smoketest_plan'") && row.sql.includes("confirmed_by <> ''"))) return;
   const create = SCHEMA.slice(SCHEMA.indexOf("CREATE TABLE IF NOT EXISTS SDLC_Event ("), SCHEMA.indexOf("-- The environments under test"));
   const cols = ["id, event_type, started_at, finished_at, outcome, test_details, test_results, created_at", ...SDLC_EVENT_COLUMNS].join(", ");
   const select = cols.replace("event_type", "CASE event_type WHEN 'smoketest' THEN 'smoketest_execution' ELSE event_type END");

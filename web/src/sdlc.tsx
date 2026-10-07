@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { prRef } from "../../shared/refs.ts";
 import { ENV_LABEL, enabledEnvironments, isPlanRunning, isPlanStage, isPlanWaiting, isSmoketestRunning, mergePrs, newestPlan, sharedEnvs, SMOKETEST_ENV, type SmoketestLane, sdlcProgress, smoketestLanes, type Stage, type StageState } from "../../shared/sdlc.ts";
-import type { PullRequest, Run, SdlcEnvironment, SdlcEvent, SmoketestOutcome, TicketGroup } from "../../shared/types.ts";
+import type { PullRequest, Run, SdlcEnvironment, SdlcEvent, SdlcOutcome, SmoketestOutcome, TicketGroup } from "../../shared/types.ts";
 import { conversationHash, launchAgent, type LaunchBody, ResumeHere } from "./agents.tsx";
 import { Chat } from "./chat.tsx";
 import { age, Markdown, post, stamp } from "./lib.tsx";
@@ -147,9 +147,9 @@ function SkipSmoketest({ ticket, env, onError }: { ticket: string; env: SdlcEnvi
   );
 }
 
-const OUTCOME_TONE: Record<SmoketestOutcome, string> = { passed: "tone-good", failed: "tone-bad", blocked: "tone-muted" };
+const OUTCOME_TONE: Record<SdlcOutcome, string> = { passed: "tone-good", failed: "tone-bad", blocked: "tone-muted", unhealthy: "tone-warn" };
 
-const STATE_TEXT: Record<StageState, string> = { done: "done", failed: "failed", blocked: "blocked", running: "running", waiting: "waiting", skipped: "skipped", todo: "to do" };
+const STATE_TEXT: Record<StageState, string> = { done: "done", unhealthy: "unhealthy", failed: "failed", blocked: "blocked", running: "running", waiting: "waiting", skipped: "skipped", todo: "to do" };
 
 /** A smoketest row's name in the why list: a link to its event on the Smoketests card. */
 export function SmoketestName({ row }: { row: SmoketestRow }) {
@@ -297,7 +297,7 @@ function StageActions({ stage, group, events, cwd, onError }: { stage: Stage; gr
 
 /** The bar's lamp text, also on the Smoketests card, so a state looks the same in both places. */
 function stageGlyph(s: Stage, n: number | string): string | number {
-  return s.state === "done" ? "✓" : s.state === "failed" ? "!" : s.state === "blocked" ? "?" : s.state === "running" ? "…" : s.state === "waiting" && isPlanStage(s.id) ? "↵" : n;
+  return s.state === "done" ? "✓" : s.state === "unhealthy" ? "~" : s.state === "failed" ? "!" : s.state === "blocked" ? "?" : s.state === "running" ? "…" : s.state === "waiting" && isPlanStage(s.id) ? "↵" : n;
 }
 
 export function SdlcBar({ group, events, cwd, onError }: { group: TicketGroup; events: SdlcEvent[]; cwd: string; onError: (m: string | null) => void }) {
@@ -636,7 +636,7 @@ function PlanRow({ e, now, runs, cwd, onError }: { e: SdlcEvent; now: number; ru
 }
 
 /** One execution's history dot: its outcome, or what it is instead of one. */
-function runTone(e: SdlcEvent): SmoketestOutcome | "running" | "skipped" {
+function runTone(e: SdlcEvent): SdlcOutcome | "running" | "skipped" {
   return e.skippedAt ? "skipped" : isSmoketestRunning(e) ? "running" : (e.outcome ?? "passed");
 }
 

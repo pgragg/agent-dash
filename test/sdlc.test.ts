@@ -9,7 +9,7 @@ import { buildHandoff } from "../server/handoff.ts";
 import { validateSdlcEvent, validateSdlcPlan } from "../server/sdlc.ts";
 import * as db from "../server/summaries/db.ts";
 import { buildContext, buildPrompt, redraftAfterNewEvents } from "../server/summaries/runner.ts";
-import { confirmDeployMessage, executeMessage, parseEnvironment, planMessage, sdlcProgress, smoketestLanes } from "../shared/sdlc.ts";
+import { confirmDeployMessage, executeMessage, parseEnvironment, planMessage, progressLines, sdlcProgress, smoketestLanes } from "../shared/sdlc.ts";
 import type { SdlcEvent } from "../shared/types.ts";
 import { NOW, PATTERN, pr, ticket } from "./helpers.ts";
 
@@ -105,6 +105,20 @@ test("a later stage that is done marks the open stages before it as skipped, and
   assert.equal(p.stages[p.current].detail, "Checked off by hand in agent-dash");
   assert.equal(p.next?.id, "beta_smoketest_plan");
   assert.match(p.hint!, /Plan a smoketest on Postman Beta before you open the prod chart version update PR/);
+});
+
+test("an unhealthy deploy shows yellow, counts as reached, and a later healthy deploy makes it done", () => {
+  const sick = ev({ id: 50, eventType: "deploy", environments: ["postman_prod"], outcome: "unhealthy", testDetails: "IAM fix live; KEDA metrics cert expired", startedAt: "2026-10-07T10:00:00.000Z" });
+  const p = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [sick] });
+  assert.equal(states(p).in_prod, "unhealthy");
+  assert.equal(p.stages[p.current].id, "in_prod");
+  assert.equal(p.stages[p.current].detail, "IAM fix live; KEDA metrics cert expired");
+  assert.match(progressLines(p).join("\n"), /\[~\] unhealthy In Prod/);
+  const healed = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [sick, ev({ id: 51, eventType: "deploy", environments: ["postman_prod"], startedAt: "2026-10-08T10:00:00.000Z" })] });
+  assert.equal(states(healed).in_prod, "done");
+  assert.equal(validateSdlcEvent({ eventType: "deploy", tickets: ["FSDK-1"], environments: ["postman_prod"], outcome: "unhealthy" }, PATTERN, new Date(NOW)).outcome, "unhealthy");
+  assert.throws(() => validateSdlcEvent({ eventType: "deploy", tickets: ["FSDK-1"], environments: ["postman_prod"], outcome: "failed" }, PATTERN), /unhealthy, or none/);
+  assert.throws(() => validateSdlcEvent({ eventType: "smoketest_execution", tickets: ["FSDK-1"], environments: ["localhost"], outcome: "unhealthy" }, PATTERN), /passed, failed or blocked/);
 });
 
 test("the newest smoketest decides: a failure shows red, a later pass makes it done again", () => {
@@ -337,6 +351,7 @@ test("verb messages name the environment and the record command; the summary pro
   const c = confirmDeployMessage("FSDK-1", "beta", ["https://github.com/postman-eng/cloud9-parcels-deployments/pull/7"], "/s");
   assert.match(c, /Do not sync, roll back, or change anything/);
   assert.match(c, /deploy --ticket FSDK-1 --env postman_beta/);
+  assert.match(c, /--outcome unhealthy/);
 
   assert.match(buildPrompt("FSDK-1", 1, "/w"), /local smoketest comes before a PR review request/);
   assert.match(buildPrompt("FSDK-1", 1, "/w"), /Each smoketest starts with a plan/);
