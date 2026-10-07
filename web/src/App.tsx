@@ -31,7 +31,7 @@ import { Chat, useLoad } from "./chat.tsx";
 import { ConversationGist } from "./gist.tsx";
 import { SlackQuotes } from "./slackQuotes.tsx";
 import { DueDateVerb, MoveButton, TicketPanel, useTicketDetail } from "./ticketPanel.tsx";
-import { Documentation, DocumentsView, DocumentView } from "./documents.tsx";
+import { Documentation, DocumentsView, DocumentView, TicketSummaryDoc, WriteTicketSummary } from "./documents.tsx";
 import { SessionScope } from "./mermaid.tsx";
 import { type BoardMode, kanbanColumns, type Searchable, searchCards, stageOf, useBoardMode } from "./kanban.ts";
 import { starredFirst } from "./star.ts";
@@ -1220,6 +1220,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
             </>
           )}
           <span className="grow" />
+          {t && !documents.some((d) => d.type === "ticket-summary") && <WriteTicketSummary key={`summary-${t.key}`} ticket={t.key} cwd={cwd} onError={setError} />}
           {t && <StarButton key={`star-${t.key}`} ticket={t.key} starred={data.starred.includes(t.key)} onError={setError} />}
           {t && <SnoozeControl key={t.key} ticket={t.key} until={data.snoozedUntil[t.key]} now={now} signal={snoozeSignal} onSnoozed={onSnoozed} onError={setError} />}
           {actionable(s) &&
@@ -1238,6 +1239,8 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
       </header>
 
       {t && <TicketPanel key={t.key} ticket={t} onError={setError} />}
+
+      {s.ticket && <TicketSummaryDoc key={`summary-${s.id}`} documents={documents} runs={runs} cwd={cwd} now={now} onError={setError} />}
 
       {error && (
         <div className="toast" role="alert">
@@ -1258,7 +1261,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
 
       {s.ticket && <Notes ticket={s.ticket.ticket.key} notes={data.notes[s.ticket.ticket.key] ?? []} now={now} onError={setError} focusSignal={noteSignal} />}
 
-      {(s.ticket || documents.length > 0) && <Documentation key={`docs-${s.id}`} ticket={s.ticket?.ticket.key ?? null} documents={documents} runs={runs} cwd={cwd} now={now} onError={setError} />}
+      {(s.ticket || documents.length > 0) && <Documentation key={`docs-${s.id}`} documents={documents} runs={runs} cwd={cwd} now={now} onError={setError} />}
 
       {featured.length > 0 && (
         <div className="stack">
@@ -1678,7 +1681,7 @@ function ConversationView({ sessionId, data, now }: { sessionId: string; data: D
       </header>
       {error && <div className="toast">{error}</div>}
       {/* The run shows once pi saved the first message; until then there is no chat to load. */}
-      <Documentation ticket={null} documents={documents} runs={run ? [run] : []} cwd={run?.cwd ?? "~"} now={now} onError={setError} />
+      {documents.length > 0 && <Documentation documents={documents} runs={run ? [run] : []} cwd={run?.cwd ?? "~"} now={now} onError={setError} />}
       {run && <ConversationGist run={run} summary={data.conversationSummaries[sessionId]} now={now} />}
       {run && <Chat sessionId={sessionId} refreshKey={run.lastActivityAt + run.status} />}
       {!run && old.value && <Chat sessionId={sessionId} refreshKey="old" />}
