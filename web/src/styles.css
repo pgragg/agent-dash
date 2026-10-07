@@ -663,8 +663,26 @@ a.btn.verb { text-decoration: none; }
 .q-item.k-card.selected { border-color: var(--muted); }
 .q-item.dim { opacity: .6; }
 .q-item.dim:hover, .q-item.dim.selected { opacity: 1; }
-.kanban-drawer { position: absolute; top: 0; right: 0; bottom: 0; width: min(900px, 64vw); overflow-y: auto; background: var(--bg); border-left: 1px solid var(--line); box-shadow: -12px 0 32px #0000001f; z-index: 5; animation: rise .18s ease-out; }
-.drawer-close { position: sticky; top: 10px; float: right; margin: 10px 14px 0 0; z-index: 1; background: var(--bg); }
+.kanban-drawer { position: absolute; top: 0; right: 0; bottom: 0; display: flex; background: var(--bg); border-left: 1px solid var(--line); box-shadow: -12px 0 32px #0000001f; z-index: 5; animation: rise .18s ease-out; }
+.kanban-drawer.full { width: 100%; border-left: 0; box-shadow: none; }
+.drawer-scroll { flex: 1; min-width: 0; overflow-y: auto; }
+.drawer-scroll > .workspace { max-width: none; }
+.drawer-tools { position: sticky; top: 10px; float: right; display: flex; gap: 6px; margin: 10px 14px 0 0; z-index: 1; }
+.drawer-tools .btn { background: var(--bg); }
+
+/* The ticket view on the queue: a centered column. You drag either edge to change its width, or show it full screen. */
+.columns.full { grid-template-columns: 1fr; }
+.columns.full .rail { display: none; }
+.ws-frame { position: relative; margin: 0 auto; min-height: 100%; }
+.ws-frame > .workspace { max-width: none; }
+.ws-tools { position: sticky; top: 10px; height: 0; display: flex; justify-content: flex-end; padding-right: 14px; z-index: 2; }
+.ws-tools .btn { background: var(--bg); }
+.resize-grip { position: absolute; top: 0; bottom: 0; width: 7px; cursor: col-resize; z-index: 3; touch-action: none; }
+.resize-grip.left { left: 0; }
+.resize-grip.right { right: 0; }
+.resize-grip::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: transparent; transition: background .1s; }
+.resize-grip:hover::after, .resize-grip:active::after { background: var(--line-2); }
+body.resizing { cursor: col-resize; user-select: none; }
 
 /* The merge sits under the feedback, so it is read first. */
 .pr-merge { display: flex; justify-content: flex-end; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
