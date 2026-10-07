@@ -9,13 +9,13 @@ import type { Dashboard } from "../../shared/types.ts";
  * | `#/r:SESSION`     | A run on the board, under its ticket if it has one |
  * | `#/step:ID`       | A drafted next step, on its ticket                |
  * | `#/note:ID`       | A note, on its ticket                             |
- * | `#/doc:ID`        | A document, open, on its ticket                   |
  * | `#/pr:OWNER/REPO/N` | The PR panel (a view under PRs)                 |
  * | `#/needs`         | The list behind "N notifications"                 |
  * | `#/parked`        | The waiting agents that agent-dash parked          |
  * | `#/c:SESSION`     | A conversation's page                             |
- * | `#/d:ID`          | A diagram's page                                  |
- * | `#/diagrams`      | Every diagram                                     |
+ * | `#/doc:ID`        | A document's page                                 |
+ * | `#/documents`     | Every document                                    |
+ * | `#/d:ID`          | The document of a diagram, from an older link     |
  * | `#/worktrees`     | Every git worktree, with Clean up                 |
  * | `#/settings`      | The config file: your own paths and accounts      |
  *
@@ -29,7 +29,8 @@ export type Route =
   | { view: "prs"; pr: string | null }
   | { view: "history" }
   | { view: "conversation"; id: string | null }
-  | { view: "diagrams" }
+  | { view: "documents" }
+  | { view: "document"; id: number }
   | { view: "diagram"; id: number }
   | { view: "worktrees" }
   | { view: "settings" };
@@ -41,9 +42,11 @@ export function parseHash(hash: string): Route {
   if (path === "prs") return { view: "prs", pr: null };
   if (path.startsWith("pr:")) return { view: "prs", pr: path };
   if (path === "history") return { view: "history" };
-  if (path === "diagrams") return { view: "diagrams" };
+  // A diagram is a document now, so an older link to the list opens the documents.
+  if (path === "documents" || path === "diagrams") return { view: "documents" };
   if (path === "worktrees") return { view: "worktrees" };
   if (path === "settings") return { view: "settings" };
+  if (/^doc:\d+$/.test(path)) return { view: "document", id: Number(path.slice(4)) };
   if (/^d:\d+$/.test(path)) return { view: "diagram", id: Number(path.slice(2)) };
   if (path === "c" || path.startsWith("c:")) return { view: "conversation", id: path.slice(2) || null };
   return { view: "board", ref: path || null };
@@ -54,11 +57,11 @@ export function href(ref: string): string {
   return `#/${encodeURIComponent(ref).replace(/%3A/gi, ":").replace(/%2F/gi, "/")}`;
 }
 
-type BoardData = Pick<Dashboard, "myTickets" | "otherTickets" | "summaries" | "notes"> & { documents?: Pick<Dashboard["documents"][number], "id" | "ticket">[] };
+type BoardData = Pick<Dashboard, "myTickets" | "otherTickets" | "summaries" | "notes">;
 
 /**
  * Which board entry a ref selects, and which element in it to show. A ref for a run on a
- * ticket, a step, a note, or a document opens the ticket. Null when the object is not on the board.
+ * ticket, a step, or a note opens the ticket. Null when the object is not on the board.
  */
 export function resolveBoardRef(ref: string, d: BoardData, subjects: Set<string>): { subjectId: string; anchor: string | null } | null {
   if (subjects.has(ref)) return { subjectId: ref, anchor: null };
@@ -76,10 +79,6 @@ export function resolveBoardRef(ref: string, d: BoardData, subjects: Set<string>
       if ([s.latest, s.lastDone].some((x) => x?.steps.some((st) => st.id === id))) return subjects.has(`t:${key}`) ? { subjectId: `t:${key}`, anchor: ref } : null;
     }
     return null;
-  }
-  if (kind === "doc") {
-    const ticket = d.documents?.find((x) => x.id === Number(rest))?.ticket;
-    return ticket && subjects.has(`t:${ticket}`) ? { subjectId: `t:${ticket}`, anchor: ref } : null;
   }
   if (kind === "note") {
     const id = Number(rest);

@@ -41,4 +41,6 @@ export async function syncDiagrams(sessions: ParsedSession[], ticketOf: (s: Pars
     if (ticket && [...(storedTickets.get(s.sessionId) ?? [])].some((t) => t !== ticket)) db.setDiagramTicket(s.sessionId, ticket);
   }
   db.addDiagrams(rows);
+  // A diagram is a document on the page, so each new one gets its own.
+  db.documentsFromDiagrams();
 }

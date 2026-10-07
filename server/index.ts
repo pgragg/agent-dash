@@ -341,7 +341,7 @@ const server = createServer(async (req, res) => {
     if (await liveControl.handle(req, res, url)) return;
     if (await prRoute.handle(req, res, url, broadcast)) return;
     if (await ticketRoute.handle(req, res, url, onTicketChange)) return;
-    if (await diagramRoute.handle(req, res, url, sessions, broadcast)) return;
+    if (await diagramRoute.handle(req, res, url)) return;
     if (await documentRoute.handle(req, res, url, { context: ticketContext, onChange: broadcast })) return;
     if (await smoketestPlanRoute.handle(req, res, url, { sessions, context: ticketContext, script: SDLC_SCRIPT, login: ghLogin, onChange: broadcast })) return;
     if (await sdlcRoute.handle(req, res, url, broadcast)) return;

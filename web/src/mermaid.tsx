@@ -1,5 +1,5 @@
 import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
-import type { Diagram } from "../../shared/types.ts";
+import type { Diagram, TicketDocument } from "../../shared/types.ts";
 import { href } from "./routes.ts";
 
 /** Mermaid is big, so it loads the first time a diagram shows. */
@@ -51,15 +51,17 @@ export function Mermaid({ code }: { code: string }) {
   return <div className="mermaid" dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
-// ---- which diagram a fence or an image on the page is ---------------------------------
+// ---- which document a fence or an image in a message is -------------------------------
 
 /** An edit changes the URL, so the browser never shows an old copy from its cache. */
 export const rawUrl = (d: Diagram) => `/api/diagram/raw?id=${d.id}${d.editedAt ? `&v=${encodeURIComponent(d.editedAt)}` : ""}`;
 
-/** Every diagram, set by each dashboard load, as the ticket keys are for links. */
+/** Every diagram and the document that each one became, set by each dashboard load, as the ticket keys are for links. */
 let known: Diagram[] = [];
-export function setKnownDiagrams(diagrams: Diagram[]): void {
+let documentOf = new Map<number, number>();
+export function setKnownDiagrams(diagrams: Diagram[], documents: TicketDocument[]): void {
   known = diagrams;
+  documentOf = new Map(documents.flatMap((d) => (d.diagramId === null ? [] : [[d.diagramId, d.id]])));
 }
 
 /** The conversation whose messages are inside, so their diagrams link to that conversation's rows. */
@@ -79,7 +81,7 @@ function pick(sessionId: string | null, match: (d: Diagram) => boolean, anySessi
   return known.find((d) => match(d) && d.sessionId === sessionId) ?? (anySession ? known.find(match) : undefined);
 }
 
-/** A ```mermaid fence in a message: the chart, and a link to its diagram page. */
+/** A ```mermaid fence in a message: the chart, and a link to its document. */
 export function MermaidFence({ code }: { code: string }) {
   const sessionId = useContext(SessionContext);
   const [hash, setHash] = useState<string | null>(null);
@@ -88,14 +90,14 @@ export function MermaidFence({ code }: { code: string }) {
     sha1(code.trimEnd()).then(setHash, () => setHash(null));
   }, [code]);
   const d = hash ? pick(sessionId, (x) => x.hash === hash, true) : undefined;
+  const doc = d && documentOf.get(d.id);
   return (
     <figure className="md-diagram">
       <Mermaid code={code} />
-      {d && (
+      {doc && (
         <figcaption>
-          <a href={href(`d:${d.id}`)} title={d.editedAt ? "You edited this diagram: its page shows your version" : undefined}>
-            Diagram {d.id}
-            {d.editedAt ? " · edited" : ""} ↗
+          <a href={href(`doc:${doc}`)} title="Its document can have a newer version">
+            Document {doc} ↗
           </a>
         </figcaption>
       )}
@@ -106,9 +108,10 @@ export function MermaidFence({ code }: { code: string }) {
 /** A local image shows from its stored copy, so it outlives the file. */
 export function EmbeddedImage({ alt, path }: { alt: string; path: string }) {
   const d = pick(useContext(SessionContext), (x) => x.origin === path && x.kind !== "mermaid");
-  if (!d) return <code title="This image is not stored as a diagram">{alt || path}</code>;
+  if (!d) return <code title="agent-dash has no copy of this image">{alt || path}</code>;
+  const doc = documentOf.get(d.id);
   return (
-    <a className="md-image" href={href(`d:${d.id}`)} title={`${d.title} · open the diagram`}>
+    <a className="md-image" href={doc ? href(`doc:${doc}`) : rawUrl(d)} title={doc ? `${d.title} · open its document` : d.title}>
       <img src={rawUrl(d)} alt={alt || d.title} loading="lazy" />
     </a>
   );
