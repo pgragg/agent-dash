@@ -448,7 +448,7 @@ function KanbanBoard({ order, dim, ranks, selected, onSelect, data, now, until, 
           </h2>
           <div className="k-col-list">
             {c.items.map((s) => {
-              // The ticket's top next step, as a button, so you start it without opening the ticket.
+              // The ticket's top next step, as a button, so you start it without opening the ticket. It shows once the server has decided what a click does.
               const step = s.ticket && !isDone(s) ? firstStep(data, s) : null;
               return (
                 <QueueItem
@@ -464,7 +464,7 @@ function KanbanBoard({ order, dim, ranks, selected, onSelect, data, now, until, 
                   notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0}
                   snoozedUntil={isSnoozed(until(s), now) ? until(s) : undefined}
                   starred={isStarred(s)}
-                  footer={step && <CardStep key={step.id} ticket={s.ticket!.ticket.key} step={step} cwd={workFolders(s)[0]} canMove={s.ticket!.ticket.source.move} />}
+                  footer={step?.action && <CardStep key={step.id} ticket={s.ticket!.ticket.key} status={s.ticket!.ticket.status} step={step} action={step.action} cwd={workFolders(s)[0]} />}
                 />
               );
             })}

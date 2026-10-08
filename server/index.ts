@@ -454,8 +454,11 @@ const server = createServer(async (req, res) => {
       const sessionId = randomUUID();
       // Saved before pi starts, so the stage is yellow from the click.
       const running = env && !step ? summaryDb.addSdlcEvent({ eventType: "smoketest_plan", startedAt: new Date().toISOString(), environments: [env], tickets: [key], sessionId }) : null;
+      // The kanban button's label was written from its stored message, so the agent gets that one.
       const message = step
-        ? stepMessage(key, step.body)
+        ? step.action?.kind === "agent"
+          ? step.action.message
+          : stepMessage(key, step.body)
         : env && running
           ? planMessage(key, env, SDLC_SCRIPT, running.id, config.smoketestGuide)
           : stage
