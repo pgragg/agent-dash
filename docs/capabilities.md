@@ -54,7 +54,7 @@ Read the Jira description, move the status, and set a due date. → [The ticket 
 
 ![Ticket section with Move to and Set due date](images/ticket.png)
 
-Keep the ticket's documentation on its page: markdown with mermaid diagrams and images. Each diagram that an agent draws becomes a document. One click has an agent write a ticket summary, with the start, middle and end states and user stories. **Edit** with a prompt has an agent rewrite a document in place. → [Documentation](../README.md#documents)
+Keep the ticket's documentation on its page: markdown with mermaid diagrams and images. Each diagram that an agent draws becomes a document. One click has an agent research the ticket and write a five-minute ticket brief: today and done on one map, where the ticket and reality differ, how to prove it is done, and the open decisions with a recommendation each. **Edit** with a prompt has an agent rewrite a document in place. → [Documentation](../README.md#documents)
 
 ### PRs and reviews
 

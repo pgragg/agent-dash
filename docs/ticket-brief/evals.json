@@ -1,0 +1,50 @@
+{
+  "skill_name": "ticket-brief",
+  "note": "Prompts only. Run each through agent-dash (Write a ticket brief, or Edit on an existing brief) and also with no guide, in an environment with Jira, GitHub and Slack access. Compare with GUIDE.md steps 6 and 7: lint, visual check, cold-reader test. The suggested assertions can become graders: most read the saved spec (node scripts/brief.ts show --id N) or the lint output.",
+  "evals": [
+    {
+      "id": 1,
+      "name": "large-migration-ticket",
+      "prompt": "A new engineer picks up PLAT-4821 on Monday and has never touched the billing service. Can you put together something that gets them up to speed? It's a migration, so I'd like them to see what changes.",
+      "expected_output": "A size-L brief with a multi-view system map (Today / Done, plus a During view if a bridge exists), 1-4 heads-ups where the ticket disagrees with reality, done items each with a verify, at most 3 major decisions each with one recommendation and a named decider, a work section that marks what only a human can do, and an evidence ledger. Lint clean. node scripts/brief.ts export writes the HTML, TL;DR, text, JSON and SVGs.",
+      "suggested_assertions": [
+        "node scripts/brief.ts lint reports 0 errors",
+        "system.views has 2-4 views, and the views share one nodes list",
+        "At least one heads-up has ticket_says and cites a fact with how=verified or read",
+        "Every done item has a verify",
+        "decisions.major has at most 3 entries, each with exactly one recommended option",
+        "No write was made to Jira or Slack",
+        "The lint's visible word count is under 1600, or the reply says why"
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "small-bug-ticket",
+      "prompt": "WEB-1177 'Checkout occasionally double-charges' is going to whoever is on call tomorrow. Give them a quick brief so they don't have to spend the morning figuring out how checkout works.",
+      "expected_output": "A size-S brief: a flow (or a 2-view map) of the checkout and charge path with the failing step marked, 3-5 done items with verify steps, the code locations to start from. No path, people or decision matrices unless the ticket truly needs them. Short.",
+      "suggested_assertions": [
+        "size is S, and the spec has no path and no people",
+        "A flow with a step of tone=bad or a note, or a map whose first view has a pin",
+        "work.repos lists concrete paths",
+        "The lint's visible word count is under 900",
+        "The reply says what could not be verified"
+      ],
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "update-existing-brief",
+      "prompt": "We have a brief for FSDK-2073 from last week. The skip-cache PR has merged and the cutover moved to 10-20. Can you update it?",
+      "expected_output": "The agent starts from the saved spec (show --id N), re-checks the facts, sets the PR state to merged, changes the cutover date everywhere it appears (path, numbers, facts, risks, headings), sets verified_on to today, and saves with the same id. The reply opens with the What changed lines that the save printed. No full rewrite.",
+      "suggested_assertions": [
+        "The document id is the same, and fields the request did not touch are unchanged",
+        "The reply starts with the save's What changed lines",
+        "verified_on is today",
+        "No field still says 10-17 for the cutover",
+        "The PR #185 repo card has pr.state merged"
+      ],
+      "files": ["examples/FSDK-2073.brief.json"]
+    }
+  ]
+}

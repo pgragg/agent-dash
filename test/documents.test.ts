@@ -89,9 +89,17 @@ test("the agent's draft file adds no diagrams; its messages name the script, the
   assert.match(edit, /node \/s\.ts show --id 4 > .*agent-dash-document-4\.md/);
   assert.match(edit, /node \/s\.ts save --id 4 --file .*agent-dash-document-4\.md/);
   assert.match(edit, /<request>\nadd a diagram\n<\/request>/);
-  const summary = ticketSummaryMessage("FSDK-1", 5, "/s.ts");
+  const summary = ticketSummaryMessage("FSDK-1", 5, "/b.ts", "http://127.0.0.1:7777/#/doc:5");
   assert.ok(summary.startsWith(TICKET_SUMMARY_PROMPT));
-  assert.match(summary, /save --id 5 --file .*agent-dash-document-5\.md/);
+  assert.match(summary, /docs\/ticket-brief\/GUIDE\.md/);
+  assert.match(summary, /node \/b\.ts skeleton > .*agent-dash-brief-5\.json/);
+  assert.match(summary, /node \/b\.ts save --id 5 --file .*agent-dash-brief-5\.json/);
+  assert.match(summary, /open http:\/\/127\.0\.0\.1:7777\/#\/doc:5/);
+  // A brief's edit uses the brief tools and its update mode; a markdown edit does not.
+  const briefEdit = editMessage({ id: 6, title: "B", ticket: "FSDK-1", brief: true }, "the PR merged", "/s.ts", "/b.ts");
+  assert.match(briefEdit, /node \/b\.ts show --id 6 > .*agent-dash-brief-6\.json/);
+  assert.match(briefEdit, /verified_on to today/);
+  assert.doesNotMatch(edit, /brief/);
 });
 
 test("the script lists, shows, saves and creates documents", () => {
@@ -121,7 +129,7 @@ test("the routes start an editing agent, write a ticket summary once, and serve 
   const started: { message?: string; name?: string; sessionId?: string; onSpawnError?: () => void }[] = [];
   let changes = 0;
   const server = createServer(async (req, res) => {
-    const deps = { context: async (k: string) => (k === "FSDK-20" ? "[context]" : null), onChange: () => changes++, script: "/s.ts", start: (o: (typeof started)[number]) => (started.push(o), o.sessionId ?? "") };
+    const deps = { context: async (k: string) => (k === "FSDK-20" ? "[context]" : null), onChange: () => changes++, script: "/s.ts", briefScript: "/b.ts", start: (o: (typeof started)[number]) => (started.push(o), o.sessionId ?? "") };
     if (!(await handle(req, res, new URL(req.url ?? "/", "http://localhost"), deps as never))) res.writeHead(404).end();
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -151,7 +159,8 @@ test("the routes start an editing agent, write a ticket summary once, and serve 
   const { documentId } = await made.json();
   const summary = db.getDocument(documentId)!;
   assert.deepEqual([summary.type, summary.hasBody, summary.edit?.prompt], ["ticket-summary", false, TICKET_SUMMARY_PROMPT]);
-  assert.match(started[1].message!, new RegExp(`save --id ${documentId} `));
+  assert.match(started[1].message!, new RegExp(`/b\\.ts save --id ${documentId} `));
+  assert.equal(summary.title, "Ticket brief");
   assert.equal((await send("/api/document/ticket-summary?ticket=FSDK-20", { cwd: tmp })).status, 409);
   // An agent that cannot start leaves no empty ticket summary, so the button comes back.
   started[1].onSpawnError!();
