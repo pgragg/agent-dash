@@ -116,4 +116,6 @@ test("a label from an older version is drafted again; the old pair shows meanwhi
   await wait(10);
   assert.equal(top("FSDK-40").label, "Move ticket to In Review");
   assert.deepEqual(top("FSDK-40").action, { kind: "move", to: "In Review" });
+  // A server on older code, with the same database, does not take a label from a newer version.
+  assert.deepEqual(db.claimStepLabels([id], 1, now.toISOString(), now), []);
 });

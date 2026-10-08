@@ -74,7 +74,7 @@ export function requestStepLabels(tops: TopStep[], onChange: () => void, deps: L
   const queue = db.claimStepLabels([...byId.keys()], LABEL_VERSION, new Date(now.getTime() - RETRY_MS).toISOString(), now).map((id) => byId.get(id)!);
   const started = queue.map((t) => t.step.id);
   const fail = (t: TopStep) => (err: Error) => {
-    console.warn(`step button for ${t.ticket.key}: ${err.message.split("\n").at(-1)}`);
+    console.warn(`step button for ${t.ticket.key}: ${err.message.trim().split("\n").at(-1)}`);
     return null;
   };
   const worker = async () => {

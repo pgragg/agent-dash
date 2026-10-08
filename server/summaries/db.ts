@@ -381,15 +381,16 @@ export function getStep(id: number): NextStep | null {
 }
 
 /**
- * Takes each step whose label is not drafted, is from an older prompt `version`, or whose draft
- * failed or stuck before `retryBefore`. Writes only for a real claim. The old label shows meanwhile.
+ * Takes each step whose label is not drafted, is from an older prompt `version` (never a newer one:
+ * a test server on older code shares the database), or whose draft failed or stuck before
+ * `retryBefore`. Writes only for a real claim. The old label shows meanwhile.
  */
 export function claimStepLabels(ids: number[], version: number, retryBefore: string, now = new Date()): number[] {
   const claim = open().prepare(
     `UPDATE next_steps SET label_status = 'in_progress', label_requested_at = ?, label_version = ?
-     WHERE id = ? AND (label_status IS NULL OR (label_status != 'in_progress' AND label_version IS NOT ?) OR (label_status != 'done' AND label_requested_at < ?)) RETURNING id`,
+     WHERE id = ? AND (label_status IS NULL OR (label_status != 'in_progress' AND (label_version IS NULL OR label_version < ?)) OR (label_status != 'done' AND label_requested_at < ? AND (label_version IS NULL OR label_version <= ?))) RETURNING id`,
   );
-  return ids.filter((id) => claim.get(now.toISOString(), version, id, version, retryBefore));
+  return ids.filter((id) => claim.get(now.toISOString(), version, id, version, retryBefore, version));
 }
 
 /** Only an in-progress draft changes, so a late answer cannot overwrite a newer one. */
