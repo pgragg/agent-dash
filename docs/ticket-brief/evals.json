@@ -14,7 +14,8 @@
         "Every done item has a verify",
         "decisions.major has at most 3 entries, each with exactly one recommended option",
         "No write was made to Jira or Slack",
-        "The lint's visible word count is under 1600, or the reply says why"
+        "The lint's visible word count is under 1600, or the reply says why",
+        "Visible text is ASD-STE100: no sentence over 25 words (20 for an instruction in done.verify, path or work.first_move), active voice, one term for one thing"
       ],
       "files": []
     },
@@ -28,7 +29,8 @@
         "A flow with a step of tone=bad or a note, or a map whose first view has a pin",
         "work.repos lists concrete paths",
         "The lint's visible word count is under 900",
-        "The reply says what could not be verified"
+        "The reply says what could not be verified",
+        "Visible text is ASD-STE100: no sentence over 25 words (20 for an instruction in done.verify, path or work.first_move), active voice, one term for one thing"
       ],
       "files": []
     },
