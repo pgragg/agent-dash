@@ -305,6 +305,8 @@ export interface NextStep {
   /** 1-based order in the summary. */
   position: number;
   body: string;
+  /** A short button label for the kanban card, from the cheap model. Null until it is drafted. */
+  label: string | null;
 }
 
 /** The newest request (any status), and the newest finished summary to show meanwhile. */

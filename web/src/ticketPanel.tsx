@@ -11,7 +11,7 @@ import { age, api, Markdown, plural, stamp } from "./lib.tsx";
 const TTL_MS = 2 * 60_000;
 const cache = new Map<string, { at: number; value: TicketDetail }>();
 
-async function loadDetail(key: string, refresh: boolean): Promise<TicketDetail> {
+export async function loadDetail(key: string, refresh: boolean): Promise<TicketDetail> {
   const hit = cache.get(key);
   if (hit && !refresh && Date.now() - hit.at < TTL_MS) return hit.value;
   const res = await fetch(`/api/ticket?key=${encodeURIComponent(key)}${refresh ? "&refresh" : ""}`, { headers: { "X-Agent-Dash": "1" } });

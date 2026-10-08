@@ -5,7 +5,7 @@ import { parseHash } from "../web/src/routes.ts";
 import { needStep } from "../web/src/needs.ts";
 
 const item = (o: Partial<AttentionItem>): AttentionItem => ({ kind: "awaiting_input", score: 1, reason: "", name: "", status: "", ticketKey: "FSDK-1", ticketUrl: null, since: "", updatedAt: "", ...o });
-const step = { id: 5, summaryId: 1, ticket: "FSDK-1", position: 1, body: "do" };
+const step = { id: 5, summaryId: 1, ticket: "FSDK-1", position: 1, body: "do", label: null };
 
 test("#/needs opens the needs-you view", () => {
   assert.deepEqual(parseHash("#/needs"), { view: "needs" });
