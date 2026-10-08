@@ -141,7 +141,7 @@ function group(ticket: Ticket, runs: Run[], prs: PullRequest[], threads: ThreadM
 /**
  * The same runs, minus the tickets that you marked them resolved for. Ranking uses these, so a
  * resolved thread no longer puts its ticket in the queue. A thread resolved for all of its
- * tickets still shows as a run of its own while it waits for you.
+ * tickets can still show as a run of its own while it waits for you: see `resolvedAway`.
  */
 export function withoutResolved(runs: Run[], threads: ThreadMap, done: Set<string> = new Set()): Run[] {
   return runs.map((r) => {
@@ -150,6 +150,19 @@ export function withoutResolved(runs: Run[], threads: ThreadMap, done: Set<strin
     tickets.sort((a, b) => Number(done.has(a)) - Number(done.has(b)));
     return tickets.join() === r.tickets.join() ? r : { ...r, tickets };
   });
+}
+
+/** Tickets that have an entry in the queue: a signal on them that needs you. */
+export function ticketsInQueue(attention: AttentionItem[]): Set<string> {
+  return new Set(attention.flatMap((a) => (a.ticketKey && !a.info ? [a.ticketKey] : [])));
+}
+
+/**
+ * A run that you resolved on all its tickets loses its own queue entry, unless it asked a question
+ * that no entry of those tickets shows. Else one ask takes two places in the queue.
+ */
+export function resolvedAway(r: Run, isResolved: (ticket: string) => boolean, shown: Set<string>): boolean {
+  return r.tickets.length > 0 && r.tickets.every(isResolved) && (!r.askedQuestion || r.tickets.some((k) => shown.has(k)));
 }
 
 const byRecent = (a: Run, b: Run) => b.lastActivityAt.localeCompare(a.lastActivityAt);
@@ -186,9 +199,12 @@ export function buildDashboard(input: ModelInput): Dashboard {
   const done = new Set([...input.myTickets, ...input.otherTickets].filter((t) => t.statusCategory === "done").map((t) => t.key));
   const parked = input.parked ?? new Set<string>();
   const signalRuns = recentRuns.filter((r) => !(r.status === "finished" && parked.has(r.sessionId)));
-  const attention = rankAttention(withoutResolved(signalRuns, threads, done), prs, input.myTickets, now, input.ticketUrl);
+  const ranked = rankAttention(withoutResolved(signalRuns, threads, done), prs, input.myTickets, now, input.ticketUrl);
   // The ticket is closed, so nothing on it is a task any more: an open tab there is only worth knowing about.
-  for (const a of attention) if (a.ticketKey && done.has(a.ticketKey)) a.info = true;
+  for (const a of ranked) if (a.ticketKey && done.has(a.ticketKey)) a.info = true;
+  const shown = ticketsInQueue(ranked);
+  const dropped = new Set(signalRuns.filter((r) => resolvedAway(r, (k) => threads.get(threadKey(k, r.sessionId))?.status === "resolved", shown)).map((r) => r.sessionId));
+  const attention = ranked.filter((a) => !(a.kind === "awaiting_input" && !a.ticketKey && dropped.has(a.sessionId ?? "")));
   attachRuns(attention, withoutResolved(runs, threads, done));
 
   // Tickets with the most urgent item come first, so the list reads in the same order as the queue.

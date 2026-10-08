@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AttentionItem, ConversationSummary } from "../shared/types.ts";
-import { addUpdate, agentFinished, agentWaitsOnReview, entryOf, entryOfSignal, type Group, groupNotification, isNewSince, needSignals, newSignals, type Pending, pruneSeen, releasePending, runUpdate, SEEN_KEEP_MS, SUMMARY_WAIT_MS, signalUpdate, summaryText } from "../web/src/notify.ts";
+import { addUpdate, agentFinished, agentWaitsOnReview, asksNothing, entryOf, entryOfSignal, type Group, groupNotification, isNewSince, needSignals, newSignals, type Pending, pruneSeen, releasePending, runUpdate, SEEN_KEEP_MS, SUMMARY_WAIT_MS, signalUpdate, summaryText } from "../web/src/notify.ts";
 import { run } from "./helpers.ts";
 
 const since = "2026-10-05T10:00:00.000Z";
@@ -19,6 +19,15 @@ test("an agent is finished only when its current summary says it needs nothing",
   assert.equal(agentFinished(run({ ...waiting, dialog: { method: "confirm", title: "Run it?", since } }), summary()), false);
   // A question in the last message needs an answer, also when the summary missed it.
   assert.equal(agentFinished(run({ ...waiting, askedQuestion: true }), summary()), false);
+});
+
+test("a summary asks nothing when it is current and needs nothing, or only a reviewer", () => {
+  // A stalled ticket whose newest agent asks nothing leaves Up next on this rule.
+  assert.equal(asksNothing(summary()), true);
+  assert.equal(asksNothing(summary({ needs: "Waiting on review: PR 12" })), true);
+  assert.equal(asksNothing(summary({ needs: "Restart the pod" })), false);
+  assert.equal(asksNothing(summary({ stale: true })), false);
+  assert.equal(asksNothing(undefined), false);
 });
 
 test("an agent waits on review only when its current summary says so", () => {

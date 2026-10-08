@@ -8,6 +8,7 @@ import { READ_FEEDBACK, REVIEW_AND_MERGE } from "../../shared/prVerbs.ts";
 import type { AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, LaneMode, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState } from "../../shared/types.ts";
 import { conversationHash, launchAgent, ResumeHere, resuming } from "./agents.tsx";
 import { ParkedView } from "./parked.tsx";
+import { splitParked } from "./parkedRows.ts";
 import { CADDY_HTTP, CADDY_HTTPS, caddyCommands, cleanHost, cleanPort, rootScript, undoCommands } from "./localUrl.ts";
 import { SettingsView, SetupBanner } from "./settings.tsx";
 import { FIRST_LANES, type LaneDraft, LanesCard, LanesEditor, type LaneRun, WorktreesView } from "./lanes.tsx";
@@ -18,7 +19,7 @@ import { countPrs, groupOpenPrs } from "./prs.ts";
 import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, lastSeen, resumeCommand, runTitle, shortDate, stamp, useDashboard, useFlash, useLook, useNow, usePageFocus, useWaitNotifications } from "./lib.tsx";
 import { Composer, LivePanel } from "./liveControl.tsx";
 import { needStep } from "./needs.ts";
-import { agentFinished, agentWaitsOnReview, isNewSince, readySummary, runsOf, summaryText } from "./notify.ts";
+import { agentFinished, agentWaitsOnReview, asksNothing, isNewSince, readySummary, runsOf, summaryText } from "./notify.ts";
 import { needsNothing } from "../../shared/conversationSummary.ts";
 import { href, humanAge, parseHash, resolveBoardRef, type Route } from "./routes.ts";
 import { FixLogin } from "./fixLogin.tsx";
@@ -139,7 +140,9 @@ function buildSubjects(d: Dashboard): Map<string, Subject> {
     const status = review ? "waits on review" : finished ? "finished" : a.status;
     // A finished agent needs nothing, so it is not on your queue, unless its smoketest still needs you (a plan to Confirm, a failed run).
     const idle = finished && !smoketestRow(a.sessionId, a.ticketKey ? (d.sdlcEvents[a.ticketKey] ?? []) : [], { asked: false, finished: true })?.needsYou;
-    s.items.push({ ...a, info: a.info || review || idle, reason, status, gist: summaryText(summary), finished, waitsOnReview: review });
+    // A stalled ticket whose newest agent asks nothing of you is quiet, not a task.
+    const settled = a.kind === "stalled" && asksNothing(d.conversationSummaries[a.sessionId ?? ""]);
+    s.items.push({ ...a, info: a.info || review || idle || settled, reason, status, gist: summaryText(summary), finished, waitsOnReview: review });
   }
   for (const s of out.values()) s.fingerprint = s.items.map((a) => `${a.kind}${a.finished ? ":finished" : ""}${a.waitsOnReview ? ":review" : ""}@${a.updatedAt}`).join("|");
   return out;
@@ -2117,8 +2120,8 @@ export function App() {
             <Dot tone="working" pulse={workingRuns > 0} /> {workingRuns} working
           </span>
           {data.parked.length > 0 && (
-            <a href="#/parked" className={view === "parked" ? "active" : ""} title="Waiting agents that agent-dash stopped, with what each one needed">
-              <Dot tone="muted" /> {data.parked.length} parked
+            <a href="#/parked" className={view === "parked" ? "active" : ""} title={`Parked agents that could need you: an open ticket, and an ask of their own. ${data.parked.length} parked in all.`}>
+              <Dot tone="muted" /> {splitParked(data).needsYou.length} parked
             </a>
           )}
         </div>
