@@ -69,6 +69,12 @@ export function agentWaitsOnReview(run: Run | undefined, s: ConversationSummary 
   return !!run && !!ready && run.status === "awaiting_input" && !run.dialog && waitsOnReview(ready.needs);
 }
 
+/** The run's current summary asks nothing of you: it needs nothing, or only a reviewer. */
+export function asksNothing(s: ConversationSummary | undefined): boolean {
+  const ready = readySummary(s);
+  return !!ready && (needsNothing(ready.needs) || waitsOnReview(ready.needs));
+}
+
 /** The need goes on its own line, so a notification shows it apart. */
 export function summaryText(s: ConversationSummary | undefined): string | null {
   const ready = readySummary(s);

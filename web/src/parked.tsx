@@ -2,12 +2,14 @@ import { useState } from "react";
 import type { Dashboard, ParkedRun, ParkReason, Ticket } from "../../shared/types.ts";
 import { conversationHash } from "./agents.tsx";
 import { age, inline, plural, post, stamp } from "./lib.tsx";
+import { splitParked } from "./parkedRows.ts";
 import { href } from "./routes.ts";
 
 /** The waiting agents that agent-dash stopped, grouped by ticket, with what each one needed. */
 
 const REASON: Record<ParkReason, string> = {
-  ticket_done: "ticket Done or thread resolved",
+  ticket_done: "ticket Done",
+  resolved: "thread resolved",
   needs_nothing: "needs nothing",
   superseded: "a newer agent took over",
   stale: "waited over 24 h",
@@ -87,7 +89,7 @@ function ParkedRow({ p, now, onError }: { p: ParkedRun; now: number; onError: (m
 
 export function ParkedView({ data, now }: { data: Dashboard; now: number }) {
   const [error, setError] = useState<string | null>(null);
-  const groups = parkedGroups(data);
+  const { needsYou, rest } = splitParked(data);
   const dismissAll = async (rows: ParkedRun[]) => {
     for (const p of rows) {
       const err = await post(`/api/parked/dismiss?session=${encodeURIComponent(p.sessionId)}`);
@@ -100,10 +102,26 @@ export function ParkedView({ data, now }: { data: Dashboard; now: number }) {
       <header className="ws-head">
         <h1>{data.parked.length ? `${plural(data.parked.length, "parked agent")}` : "No parked agents"}</h1>
         <div className="ws-meta">
-          <span className="meta">At most 15 agents wait for you. agent-dash stops the others and keeps what each one needed. Reply or Resume continues the same session.</span>
+          <span className="meta">
+            {needsYou.length} could need you. At most 15 agents wait for you. agent-dash stops the others and keeps what each one needed. Reply or Resume continues the same session.
+          </span>
         </div>
       </header>
       {error && <pre className="error">{error}</pre>}
+      <ParkedGroups groups={parkedGroups({ ...data, parked: needsYou })} now={now} onError={setError} dismissAll={dismissAll} />
+      {rest.length > 0 && (
+        <details className="parked-rest">
+          <summary>{plural(rest.length, "parked agent")} that need nothing from you: ticket Done, thread resolved, a newer agent took over, or nothing to ask</summary>
+          <ParkedGroups groups={parkedGroups({ ...data, parked: rest })} now={now} onError={setError} dismissAll={dismissAll} />
+        </details>
+      )}
+    </article>
+  );
+}
+
+function ParkedGroups({ groups, now, onError, dismissAll }: { groups: Group[]; now: number; onError: (m: string | null) => void; dismissAll: (rows: ParkedRun[]) => Promise<void> }) {
+  return (
+    <>
       {groups.map((g) => (
         <section key={g.key ?? "none"} className="card flush parked-group">
           <header className="card-head parked-head">
@@ -124,11 +142,11 @@ export function ParkedView({ data, now }: { data: Dashboard; now: number }) {
           </header>
           <ol className="actions">
             {g.rows.map((p) => (
-              <ParkedRow key={p.sessionId} p={p} now={now} onError={setError} />
+              <ParkedRow key={p.sessionId} p={p} now={now} onError={onError} />
             ))}
           </ol>
         </section>
       ))}
-    </article>
+    </>
   );
 }

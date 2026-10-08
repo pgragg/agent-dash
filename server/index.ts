@@ -11,7 +11,7 @@ import { startConversation } from "./conversations.ts";
 import { recordExit, wroteRecently } from "./exits.ts";
 import { focusItermSession, runInNewItermTab } from "./iterm.ts";
 import { claudeHooksInstalled, piExtensionFile, terminalCommand } from "./agent.ts";
-import { buildDashboard, buildHistory, otherTicketKeys } from "./model.ts";
+import { buildDashboard, buildHistory, otherTicketKeys, ticketsInQueue } from "./model.ts";
 import * as exitRoutes from "./routes/exits.ts";
 import { agentMessage, agentName, buildHandoff, stepMessage } from "./handoff.ts";
 import * as resumeRoute from "./routes/resume.ts";
@@ -244,7 +244,7 @@ async function dashboard(force: boolean) {
   const done = new Set([...d.myTickets, ...d.otherTickets].filter((g) => g.ticket.statusCategory === "done").map((g) => g.ticket.key));
   const laneSessions = new Set(Object.values(d.lanes).flatMap((ls) => ls.flatMap((l) => (l.sessionId && l.state !== "landed" ? [l.sessionId] : []))));
   const runs = [...new Map(boardRuns.map((r) => [r.sessionId, r])).values()];
-  if (sweepParks({ runs, summaries: d.conversationSummaries, done, threads: summaryDb.currentThreadStatuses(), laneSessions, now }, reported)) broadcast();
+  if (sweepParks({ runs, summaries: d.conversationSummaries, done, threads: summaryDb.currentThreadStatuses(), shown: ticketsInQueue(d.attention), laneSessions, now }, reported)) broadcast();
   const keepFrom = new Date(now - config.recentDays * 86_400_000).toISOString();
   d.parked = summaryDb.activeParked().filter((p) => p.parkedAt >= keepFrom);
   d.setup = setupNeeded();

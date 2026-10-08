@@ -748,6 +748,8 @@ body.resizing { cursor: col-resize; user-select: none; }
 
 /* Parked agents */
 .parked-group { margin-top: 14px; }
+.parked-rest { margin-top: 18px; }
+.parked-rest > summary { cursor: pointer; color: var(--muted); }
 .parked-head { padding: 10px 18px 0; flex-wrap: wrap; }
 .parked-head h3 { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .action.parked { align-items: flex-start; }

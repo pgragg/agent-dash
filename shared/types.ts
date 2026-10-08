@@ -76,7 +76,7 @@ export interface RunDialog {
 }
 
 /** Why agent-dash parked a waiting agent. */
-export type ParkReason = "ticket_done" | "needs_nothing" | "superseded" | "stale" | "over_cap";
+export type ParkReason = "ticket_done" | "resolved" | "needs_nothing" | "superseded" | "stale" | "over_cap";
 
 /**
  * A waiting headless agent that agent-dash stopped. Its session log stays, so Resume continues it;

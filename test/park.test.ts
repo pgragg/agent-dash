@@ -16,7 +16,16 @@ const reasons = (i: ParkInput) => Object.fromEntries(choosePark(i).map((c) => [c
 test("an agent whose tickets are all Done or resolved parks", () => {
   const runs = [waiting("a", { tickets: ["FSDK-1"] }), waiting("b", { tickets: ["FSDK-1", "FSDK-2"] }), waiting("c", { tickets: ["FSDK-3"] })];
   const threads = [{ id: 1, ticket: "FSDK-3", sessionId: "c", status: "resolved" as const, reason: null, createdAt: minutesAgo(1) }];
-  assert.deepEqual(reasons(input(runs, { done: new Set(["FSDK-1"]), threads })), { a: "ticket_done", c: "ticket_done" });
+  assert.deepEqual(reasons(input(runs, { done: new Set(["FSDK-1"]), threads })), { a: "ticket_done", c: "resolved" });
+});
+
+test("a resolved agent that asked a question parks only when a ticket entry shows the ask, or it needs nothing", () => {
+  const threads = ["q", "n"].map((id, i) => ({ id: i, ticket: "FSDK-3", sessionId: id, status: "resolved" as const, reason: null, createdAt: minutesAgo(1) }));
+  const runs = [waiting("q", { tickets: ["FSDK-3"], askedQuestion: true }), waiting("n", { tickets: ["FSDK-3"], askedQuestion: true })];
+  const i = input(runs, { threads });
+  i.summaries.n = gist("n", "Nothing");
+  assert.deepEqual(reasons(i), { n: "resolved" }, "q keeps its own queue entry");
+  assert.deepEqual(reasons({ ...i, shown: new Set(["FSDK-3"]) }), { q: "resolved", n: "resolved" });
 });
 
 test("an agent that needs nothing, or only a reviewer, parks", () => {

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { needsNothing, waitsOnReview } from "../shared/conversationSummary.ts";
 import type { ConversationSummary, ParkReason, ParkedRun, Run, ThreadStatusChange } from "../shared/types.ts";
 import { config } from "./config.ts";
+import { resolvedAway } from "./model.ts";
 import { isAlive, type ReportedStatus } from "./sources/status.ts";
 import * as db from "./summaries/db.ts";
 
@@ -29,6 +30,8 @@ export interface ParkInput {
   threads: ThreadStatusChange[];
   /** Runs the sweep must not park, such as one that Piper resumed after a park. */
   exempt: Set<string>;
+  /** Tickets with an entry in the queue: there, a resolved agent's ask is already shown. */
+  shown?: Set<string>;
   /** Agents of parallel lanes: they work side by side, so a newer lane does not replace an older one. */
   laneSessions?: Set<string>;
   now: number;
@@ -63,10 +66,12 @@ export function choosePark(input: ParkInput): ParkChoice[] {
   const candidates = waiting.filter(parkable);
 
   for (const r of candidates) {
-    const open = r.tickets.filter((k) => !done.has(k) && !resolved.has(`${k} ${r.sessionId}`));
+    const isResolved = (k: string) => resolved.has(`${k} ${r.sessionId}`);
     const s = summaries[r.sessionId];
-    if (r.tickets.length && !open.length) park(r, "ticket_done");
-    else if (s?.status === "done" && (needsNothing(s.needs) || waitsOnReview(s.needs))) park(r, "needs_nothing");
+    const nothing = s?.status === "done" && (needsNothing(s.needs) || waitsOnReview(s.needs));
+    if (r.tickets.length && r.tickets.every((k) => done.has(k))) park(r, "ticket_done");
+    else if (r.tickets.length && r.tickets.every((k) => done.has(k) || isResolved(k)) && (nothing || resolvedAway(r, (k) => done.has(k) || isResolved(k), input.shown ?? new Set()))) park(r, "resolved");
+    else if (nothing) park(r, "needs_nothing");
   }
   // A newer live agent on the same ticket carries the work on; the older one's ask goes to the Parked list.
   const live = runs.filter((r) => r.status !== "finished" && !chosen.has(r.sessionId));

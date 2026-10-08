@@ -157,13 +157,24 @@ test("a thread resolved for a ticket stays under it, but no longer puts the tick
 
   const resolved: ThreadStatusChange = { id: 1, ticket: "FSDK-1", sessionId: "w", status: "resolved", reason: "answered in Slack", createdAt: minutesAgo(1) };
   const after = build([waiting], [], [ticket()], [resolved]);
-  const item = after.attention.find((a) => a.kind === "awaiting_input");
-  assert.equal(item?.ticketKey, null, "the waiting run shows on its own, not on FSDK-1");
+  assert.equal(after.attention.find((a) => a.kind === "awaiting_input"), undefined, "it asked no question, so it takes no queue entry of its own");
   assert.deepEqual(after.myTickets[0].runs.map((r) => r.sessionId), ["w"]);
   assert.equal(after.myTickets[0].threads.w.reason, "answered in Slack");
 
   const relevantAgain = build([waiting], [], [ticket()], [{ ...resolved, id: 2, status: "relevant", reason: null }]);
   assert.ok(relevantAgain.attention.some((a) => a.kind === "awaiting_input" && a.ticketKey === "FSDK-1"));
+});
+
+test("a resolved thread that asked a question keeps its own entry only when no ticket entry shows the ask", () => {
+  const asking = session({ sessionId: "w", tickets: ["FSDK-1"], askedQuestion: true, lastActivityAt: minutesAgo(5), lastStopReason: "stop", midRun: false });
+  const resolved: ThreadStatusChange = { id: 1, ticket: "FSDK-1", sessionId: "w", status: "resolved", reason: null, createdAt: minutesAgo(1) };
+  // FSDK-1 is stalled, so it has its own entry, and the ask shows there: one entry, not two.
+  const shown = build([asking], [], [ticket()], [resolved]);
+  assert.ok(shown.attention.some((a) => a.kind === "stalled" && a.ticketKey === "FSDK-1"));
+  assert.equal(shown.attention.find((a) => a.kind === "awaiting_input"), undefined);
+  // FSDK-1 has no entry, so the question shows on its own.
+  const alone = build([asking], [], [], [resolved]);
+  assert.equal(alone.attention.find((a) => a.kind === "awaiting_input")?.ticketKey, null);
 });
 
 test("a thread resolved for one of its tickets still counts for the others", () => {
