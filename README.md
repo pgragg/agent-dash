@@ -70,7 +70,7 @@ What Claude Code cannot do here:
 
 ## The page
 
-The navbar at the top switches between the views: **Board** (`#/`, the queue and workspace below), **PRs** (`#/prs`), **History** (`#/history`) and **Documents** (`#/documents`). A conversation has its own page (`#/c:<sessionId>`), and so does each document (`#/doc:<id>`). Each object has its own [address](#addresses).
+The navbar at the top switches between the views: **Board** (`#/`, the queue and workspace below), **PRs** (`#/prs`), **History** (`#/history`), **Documents** (`#/documents`) and **Wiki** (`#/wiki`). A conversation has its own page (`#/c:<sessionId>`), and so does each document (`#/doc:<id>`). Each object has its own [address](#addresses).
 
 **The browser tab title** tells your agent-dash tabs apart, also when Chrome shows only its first characters. It starts with the view, then that view's counts, then the object that is open, and ends with `agent-dash`: `Board (3) · Fix the login redirect`, `PRs 5 · 2✓ 1💬 1✗` (5 open PRs: 2 approved, 1 with feedback to address, 1 with red CI), `PR ✓ 💬2 · Fix the login redirect`, `✋ Deploy FDR` (a chat that waits on you; ⚙️ when it works), `History 2 live`, `Doc · How login works`. The rules are in `web/src/tabTitle.ts`.
 
@@ -243,6 +243,8 @@ Every object in agent-dash has an address in the URL hash. A link opens the obje
 | `#/c:<sessionId>` | The conversation's page. A conversation that is older than the board's window shows its chat from the log. |
 | `#/doc:<id>` | The [document's](#documents) page |
 | `#/documents` | Every document. `#/diagrams` opens it too. |
+| `#/wiki` | The notes of your local Obsidian wiki, with a search box |
+| `#/wiki:<ref>` | One wiki note. The ref is its path in the wiki (`services/FDR.md`), or, as an Obsidian link, its file name, title or alias; the page then shows the note's path |
 | `#/d:<id>` | The document that diagram `<id>` became, from an older link |
 | `#/settings` | The [settings](#configuration) |
 
@@ -328,6 +330,18 @@ This section and the next two describe pi. For what is different with Claude Cod
   - On a conflict it aborts the rebase, marks the lane `conflict` with the files, and sends the lane's agent a message: rebase onto `<key>`, keep both changes, commit, and stop. On red checks it marks the lane `checks_failed` and sends the end of the output. Then **Land** again.
 - **Clean up** on a lane row removes its worktree through the same check as the Worktrees view, and marks the lane `removed`. Its branch goes too when its commits landed into `<key>`, are on `origin/<base>`, or its PR merged; otherwise the branch stays.
 - **Open PR** (`POST /api/lanes/pr?ticket=<KEY>&title=<title>`) starts an agent in the integration worktree that pushes `<key>` and opens the PR into the base, after at least one lane landed. Once GitHub has that PR, the button becomes its link.
+
+## Wiki
+
+**Wiki** (`#/wiki`) shows a local Obsidian vault, read-only. Set the folder in **Settings** → **Wiki folder** (`wikiDir`, for example `~/pi/wiki`). With no folder, the view says how to set it.
+
+- **The list** groups the notes by folder. The chips filter by the front matter `type` (`gotcha`, `runbook`, …). A note whose `status` is `stale` or `superseded` is dimmed and tagged.
+- **Search** (`/`): a note must hold every word of the query, in its title, tags, aliases, type, path or text. A word in the title counts most, and the whole query in the title counts more again. Each hit shows up to three matching lines with their line numbers. `↵` opens the first hit, and `J`/`K` and `↵` move through the rows.
+- **A note** (`#/wiki:<ref>`) shows its front matter as chips (`source` on its own line), the markdown with tables and mermaid charts, and **Linked from**: every note with a `[[link]]` to it. **Open in Obsidian** opens the same note in the app.
+- **Links**: `[[Note]]`, `[[Note|label]]` and `[[Note#heading]]` open the note in the Wiki view. As in Obsidian, the name can be a path, a file name, a title or an alias, case-insensitive. A link to no note is red and dashed. `![[image.png]]` shows the image from the wiki, and `![[Note]]` links to the note. A `[[...]]` in fenced code (a mermaid chart, for example) is not a link. These links also work in documents and agent replies.
+- **What it reads**: every `.md` file under the folder. Dot folders (`.obsidian`, `.git`, `.trash`), Obsidian's template folder (from `.obsidian/templates.json`) and symlinks are skipped. A file is read again only when it changes.
+- **Safety**: the server writes nothing to the folder, and answers only `GET`. A ref with `..`, an absolute path or a NUL gets no file, and an image must have an image extension and sit inside the folder after symlinks. An image comes with the same sandbox header as a document image, so an SVG runs no script.
+- **API**: `GET /api/wiki` (every note: path, title, type, tags, aliases, folder, updated, status), `GET /api/wiki?q=<words>` (the hits, best first), `GET /api/wiki/note?ref=<ref>` (one note with its front matter, body and backlinks), `GET /api/wiki/file?ref=<image>`. The rules are in `shared/wiki.ts` and `server/wiki.ts`.
 
 ## Worktrees
 
@@ -555,6 +569,7 @@ Company-wide values (the Jira server, the Slack org, the deploy repos, the Postm
 | Slack sign-in command, shown when posting needs a new sign-in | `slackReloginCommand` | | none |
 | Environments that a smoketest can run on | `environments` | | `localhost`, `postman_beta`, `postman_prod` (add `fern_dev`, `fern_prod` for Fern's stack) |
 | Local smoketest guide, read first by a local plan | `smoketestGuide` | | none |
+| Wiki folder: a local Obsidian vault for the Wiki view | `wikiDir` | `AGENT_DASH_WIKI_DIR` | none (the view is off) |
 
 ### Ticket providers
 

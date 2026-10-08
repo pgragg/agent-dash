@@ -33,6 +33,7 @@ import { ConversationGist } from "./gist.tsx";
 import { SlackQuotes } from "./slackQuotes.tsx";
 import { DueDateVerb, MoveButton, TicketPanel, useTicketDetail } from "./ticketPanel.tsx";
 import { Documentation, DocumentsView, DocumentView, TicketSummaryDoc, WriteTicketSummary } from "./documents.tsx";
+import { WikiListView, WikiNoteView } from "./wiki.tsx";
 import { SessionScope } from "./mermaid.tsx";
 import { CardStep } from "./cardStep.tsx";
 import { type BoardMode, kanbanColumns, type Searchable, searchCards, stageOf, useBoardMode } from "./kanban.ts";
@@ -1980,7 +1981,7 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
       if (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || el.tagName === "SELECT" || e.metaKey || e.ctrlKey || e.altKey) return;
-      if ((view === "prs" || view === "history") && rowKey(e.key)) return void e.preventDefault();
+      if ((view === "prs" || view === "history" || view === "wiki") && rowKey(e.key)) return void e.preventDefault();
       if (view !== "board" && e.key !== "?" && e.key !== "Escape") return;
       if (e.key === "j" || e.key === "ArrowDown") move(1);
       else if (e.key === "k" || e.key === "ArrowUp") move(-1);
@@ -2093,6 +2094,9 @@ export function App() {
             <a href="#/documents" className={view === "documents" || view === "document" || view === "diagram" ? "active" : ""} aria-current={view === "documents" ? "page" : undefined}>
               Documents {data.documents.length > 0 && <span className="count">{data.documents.length}</span>}
             </a>
+            <a href="#/wiki" className={view === "wiki" ? "active" : ""} aria-current={view === "wiki" ? "page" : undefined}>
+              Wiki
+            </a>
             <a href="#/worktrees" className={view === "worktrees" ? "active" : ""} aria-current={view === "worktrees" ? "page" : undefined}>
               Worktrees
             </a>
@@ -2154,6 +2158,10 @@ export function App() {
       ) : route.view === "documents" ? (
         <main className="main">
           <DocumentsView data={data} now={now} />
+        </main>
+      ) : route.view === "wiki" ? (
+        <main className="main">
+          {route.ref ? <WikiNoteView key={route.ref} refId={route.ref} /> : <WikiListView />}
         </main>
       ) : route.view === "worktrees" ? (
         <main className="main">

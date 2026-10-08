@@ -48,6 +48,8 @@ export interface Settings extends Team {
   slackWorkspaceUrl: string;
   slackReloginCommand: string;
   smoketestGuide: string;
+  /** The local Obsidian vault that the Wiki view reads. Empty turns the view off. */
+  wikiDir: string;
   /**
    * The ticket trackers, in order. Empty: the flat Jira fields and the local tickets folder make
    * them. The Settings page does not edit this list yet; the file does.
@@ -59,7 +61,7 @@ export type SettingKey = keyof Settings;
 
 export interface SettingField {
   key: SettingKey;
-  group: "Agent" | "You" | "Server" | "Jira" | "Tickets" | "Reviews" | "Deploys" | "Logins" | "Slack" | "Smoketests";
+  group: "Agent" | "You" | "Server" | "Jira" | "Tickets" | "Reviews" | "Deploys" | "Logins" | "Slack" | "Smoketests" | "Wiki";
   label: string;
   kind: "number" | "text" | "path" | "url" | "list" | "choice";
   /** The values of a choice, with their labels. */
@@ -99,6 +101,7 @@ export const DEFAULT_SETTINGS: Settings = {
   slackWorkspaceUrl: "https://postman.enterprise.slack.com",
   slackReloginCommand: "",
   smoketestGuide: "",
+  wikiDir: "",
   ticketProviders: [],
 };
 
@@ -255,6 +258,12 @@ export const SETTING_FIELDS: SettingField[] = [
     help: "A file that a local smoketest plan reads first.",
     example: "~/notes/local-smoketesting.md",
     find: "Usually empty. A markdown file that tells how to run your services locally, if the user keeps one.",
+  },
+  {
+    key: "wikiDir", group: "Wiki", label: "Wiki folder", kind: "path", env: "AGENT_DASH_WIKI_DIR",
+    help: "A local Obsidian vault (a folder of markdown notes). The Wiki view lists, searches and shows its notes, read-only. Empty hides the view.",
+    example: "~/pi/wiki",
+    find: "Ask the user if they keep an Obsidian vault. The vault is the folder that holds a `.obsidian` folder: `mdfind -onlyin ~ 'kMDItemFSName == \".obsidian\"' | head -5`, then take the parent folder.",
   },
 ];
 

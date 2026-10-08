@@ -113,5 +113,8 @@ export function tabTitle({ route, data, queue, open }: TitleInput): string {
       return join("Settings", null);
     case "localUrl":
       return join("Help", null, "Local URL");
+    case "wiki":
+      // A note's address is its path; the file name reads well enough as the object.
+      return join("Wiki", null, route.ref ? route.ref.replace(/^.*\//, "").replace(/\.md$/i, "") : null);
   }
 }

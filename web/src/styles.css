@@ -805,3 +805,39 @@ body.resizing { cursor: col-resize; user-select: none; }
 .doc-preview .tb { --tb-gap: 12px; font-size: 12px; }
 .doc-preview .tb-title { font-size: 15px; margin: 6px 0; }
 .doc-preview .tb-ask { font-size: 12.5px; }
+
+/* ---- wiki ---------------------------------------------------------------------------- */
+/* Notes hold wide tables and charts, so a note page is wider than a board workspace. */
+.workspace.wiki-note { max-width: 1180px; }
+.wiki-types { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.chip { height: 26px; padding: 0 10px; border-radius: 13px; border: 1px solid var(--line-2); background: var(--surface); font: 12px var(--sans); color: var(--ink-2); cursor: pointer; }
+.chip:hover { background: var(--hover); }
+.chip.active { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.chip .count { margin-left: 4px; opacity: .7; }
+.wiki-folder, .wiki section { margin-top: 18px; }
+.wiki-list { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); margin-top: 8px; overflow: hidden; }
+.wiki-row { padding: 9px 18px !important; }
+.wiki-row-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.wiki-row-head > * { flex: none; }
+.wiki-row .wiki-title { flex: 0 1 auto; min-width: 0; max-width: none; color: var(--ink); text-decoration: none; }
+.wiki-row-head > .grow { flex: 1 1 0; }
+.wiki-row .wiki-tags { flex: 0 100 auto; min-width: 0; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wiki-row .wiki-date { font-variant-numeric: tabular-nums; }
+.wiki-row.wiki-stale .wiki-title { color: var(--muted); }
+.wiki-lines { list-style: none; margin: 4px 0 0; padding: 0; font-size: 12.5px; color: var(--ink-2); }
+.wiki-lines li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wiki mark, .wiki-lines mark { background: var(--running-bg); color: inherit; border-radius: 3px; padding: 0 1px; }
+.wiki-type { text-transform: lowercase; }
+.wiki-type-gotcha { color: var(--waiting); background: var(--waiting-bg); }
+.wiki-type-runbook, .wiki-type-how-to { color: var(--working); background: var(--working-bg); }
+.wiki-type-decision { color: var(--good); background: var(--good-bg); }
+.wiki-type-architecture { color: var(--running-ink); background: var(--running-bg); }
+.wiki-crumbs { margin-bottom: 4px; }
+.wiki-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.wiki-field b, .wiki-source b { font-weight: 600; color: var(--ink-2); margin-right: 4px; }
+.wiki-source { margin: 6px 0 0; }
+.wiki-body { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 28px 20px; margin-top: 14px; }
+.wiki-backlinks { margin-top: 22px; }
+a.wikilink { color: var(--working); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--working) 35%, transparent); }
+a.wikilink:hover { border-bottom-color: var(--working); }
+a.wikilink.missing { color: var(--bad); border-bottom-style: dashed; }
