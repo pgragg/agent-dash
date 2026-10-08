@@ -321,6 +321,12 @@ function readBody(req: IncomingMessage, max: number): Promise<string> {
 
 const TYPES: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json" };
 
+/** The entry script of the built page, for example `/assets/index-cclrfrkh.js`. A rebuild changes its hash. */
+async function currentBuild(): Promise<string> {
+  const index = await readFile(join(WEB_DIST, "index.html"), "utf8").catch(() => "");
+  return /\/assets\/index-[\w-]+\.js/.exec(index)?.[0] ?? "";
+}
+
 async function serveStatic(path: string, res: ServerResponse): Promise<void> {
   const rel = normalize(path === "/" ? "/index.html" : path).replace(/^(\.\.[/\\])+/, "");
   try {
@@ -355,7 +361,8 @@ const server = createServer(async (req, res) => {
     if (await slackRoute.handle(req, res, url)) return;
     if (url.pathname === "/api/dashboard") {
       const body = JSON.stringify(await dashboard(url.searchParams.has("refresh")));
-      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(body);
+      // A tab from before a rebuild runs old code; the header tells it to reload.
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Agent-Dash-Build": await currentBuild() }).end(body);
     } else if (url.pathname === "/api/conversation-summaries" && req.method === "POST") {
       // A finished run's summary, drafted when its page opens. It starts a paid model run, so the guard.
       if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();

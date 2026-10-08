@@ -32,6 +32,8 @@ function DocumentBody({ d, compact = false }: { d: TicketDocument; compact?: boo
   if (body === null) return <span className="shimmer wide" />;
   const brief = parseBrief(body);
   if (brief) return <BriefView brief={brief} compact={compact} />;
+  // A spec that does not parse is not for a reader; markdown would show it as a wall of JSON.
+  if (d.type === "ticket-summary" && body.trimStart().startsWith("{")) return <p className="meta">This ticket brief is not a valid spec, so it cannot show yet. Ask the agent to save it again with <code>scripts/brief.ts save</code>.</p>;
   return (
     <div className="doc-body">
       <Markdown text={body} />
