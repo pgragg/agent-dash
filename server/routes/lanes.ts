@@ -1,11 +1,10 @@
-import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { laneAgentName, laneBrief, lanesProblem, type LaneRequest } from "../../shared/lanes.ts";
 import type { LaneMode, WorkLane } from "../../shared/types.ts";
 import { config } from "../config.ts";
-import { startConversation } from "../conversations.ts";
+import { newSessionId, startConversation } from "../conversations.ts";
 import { agentMessage } from "../handoff.ts";
 import { landFailureMessage, landLane, type LandOutcome } from "../land.ts";
 import { createLanes, git, LaneError, laneGit, planLanes } from "../lanes.ts";
@@ -58,7 +57,7 @@ export async function startLanes(input: StartLanesInput, start = startConversati
       worktree: p.worktree,
       integrationBranch: plan.integration?.branch ?? null,
       integrationWorktree: plan.integration?.worktree ?? null,
-      sessionId: randomUUID(),
+      sessionId: newSessionId(),
       goal: lanes[i].message.trim(),
     }),
   );
@@ -130,7 +129,7 @@ export async function land(id: number, deps: LaneRouteDeps): Promise<{ status: n
     else if (out.kind === "refused") db.setLaneState(id, before.state === "landing" ? "working" : before.state, out.message);
     else {
       db.setLaneState(id, out.kind === "conflict" ? "conflict" : "checks_failed", out.message);
-      if (before.sessionId) (deps.inbox ?? deliver)(before.sessionId, "txt", landFailureMessage(before, out));
+      if (before.sessionId) await (deps.inbox ?? deliver)(before.sessionId, "txt", landFailureMessage(before, out));
     }
     deps.onChange();
     return out.ok ? { status: 200, body: out } : { status: out.kind === "refused" ? 409 : 200, body: out };

@@ -13,8 +13,8 @@ export interface ReportedStatus {
   inbox?: boolean;
   /** "rpc" is a headless conversation that the dash started. */
   mode?: string;
-  /** Set by the Claude Code hook. A file without it comes from the pi extension. */
-  agent?: "claude";
+  /** Set by the Claude Code hook and the OpenCode poller. A file without it comes from the pi extension. */
+  agent?: "claude" | "opencode";
   state: "working" | "awaiting_input" | "closed";
   since: string;
   /** 2 and later: the extension reads *.steer and *.abort files, and reports activity and dialogs. */
@@ -28,7 +28,7 @@ export function takesControls(s: ReportedStatus | undefined): boolean {
   return Boolean(s?.inbox) && (s?.version ?? 1) >= 2;
 }
 
-/** Claude Code has no steer: a message waits until the current turn ends. */
+/** Claude Code has no steer: a message waits until the current turn ends. pi and OpenCode take one. */
 export function takesSteer(s: ReportedStatus | undefined): boolean {
   return takesControls(s) && s?.agent !== "claude";
 }

@@ -1,13 +1,13 @@
 import { existsSync, mkdirSync, statSync, watch, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, normalize } from "node:path";
 import type { Dashboard, PullRequest, SourceHealth, Ticket } from "../shared/types.ts";
-import { config, setupNeeded } from "./config.ts";
+import { config, opencodeLogDir, setupNeeded } from "./config.ts";
 import { team } from "../shared/team.ts";
-import { startConversation } from "./conversations.ts";
+import { endHeadless, newSessionId, startConversation } from "./conversations.ts";
+import { startOpencodeStatus, syncOpencodeLogs } from "./opencode.ts";
 import { recordExit, wroteRecently } from "./exits.ts";
 import { focusItermSession, runInNewItermTab } from "./iterm.ts";
 import { claudeHooksInstalled, piExtensionFile, terminalCommand } from "./agent.ts";
@@ -88,7 +88,10 @@ class Cached<T> {
   }
 }
 
-const sessions = new SessionIndex(config.sessionsDir, config.ticketPattern);
+// OpenCode's sessions are in its database; the index reads the dash's pi-log copies of them.
+const sessions = new SessionIndex(config.sessionsDir, config.ticketPattern, (dir) => {
+  if (dir === opencodeLogDir()) syncOpencodeLogs(config.opencodeDb, dir);
+});
 /**
  * Each ticket provider's tickets. A remote one keeps its open list in a cache and the tickets that
  * runs name in `others`; an exhaustive one (local files) is read again on every build.
@@ -212,7 +215,8 @@ async function dashboard(force: boolean) {
     now,
     recentDays: config.recentDays,
     sources: { ...Object.fromEntries(providerStates.map((s) => [s.provider.source.id, providerHealth(s)])), github: { ...prs.health, label: "GitHub" }, sessions: sessionsHealth },
-    extensionInstalled: config.agent === "claude" ? claudeHooksInstalled() : existsSync(piExtensionFile()),
+    // OpenCode needs no install: its service reports every session.
+    extensionInstalled: config.agent === "opencode" || (config.agent === "claude" ? claudeHooksInstalled() : existsSync(piExtensionFile())),
     summaries,
     notes: summaryDb.notesByTicket(),
     snoozedUntil: summaryDb.snoozedUntilByTicket(),
@@ -280,6 +284,7 @@ function broadcast(): void {
 }
 
 mkdirSync(config.statusDir, { recursive: true });
+mkdirSync(config.sessionsDir, { recursive: true });
 watch(config.sessionsDir, { recursive: true }, broadcast);
 watch(config.statusDir, broadcast);
 const watchedDirs = new Set([config.sessionsDir]);
@@ -303,6 +308,15 @@ watch(dirname(summaryDb.DB_PATH), (_e, file) => {
   // An agent records an SDLC event from its own process; draft its next steps without waiting for the page.
   if (!redraftLoad && summaryDb.hasNewEventTickets()) redraftLoad = dashboard(false).catch(() => {}).finally(() => (redraftLoad = null));
 });
+if (config.agent === "opencode") {
+  startOpencodeStatus(config.statusDir, config.opencodeDb);
+  // Each OpenCode message is a write to its database: refresh the page, whose scan copies the session.
+  if (existsSync(dirname(config.opencodeDb))) {
+    watch(dirname(config.opencodeDb), (_e, file) => {
+      if (file?.startsWith(basename(config.opencodeDb))) broadcast();
+    });
+  }
+}
 // Time alone changes a status: a pid dies, or a wait crosses a threshold.
 setInterval(broadcast, 30_000).unref();
 
@@ -453,7 +467,7 @@ const server = createServer(async (req, res) => {
       }
       if (!step && !body.sdlc && !body.message?.trim()) return json(400, { error: "write the first message" });
       // Picked here, so a smoketest plan's event can link to its agent before pi starts.
-      const sessionId = randomUUID();
+      const sessionId = newSessionId();
       // Saved before pi starts, so the stage is yellow from the click.
       const running = env && !step ? summaryDb.addSdlcEvent({ eventType: "smoketest_plan", startedAt: new Date().toISOString(), environments: [env], tickets: [key], sessionId }) : null;
       // The kanban button's label was written from its stored message, so the agent gets that one.
@@ -510,7 +524,7 @@ const server = createServer(async (req, res) => {
       const status = (await readReportedStatuses(config.statusDir)).get(url.searchParams.get("session") ?? "");
       // Only a headless run: a terminal pi is closed from its own tab.
       if (status?.mode !== "rpc" || !isAlive(status.pid)) return void res.writeHead(404, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "no live conversation to end" }));
-      process.kill(status.pid, "SIGTERM");
+      await endHeadless(status);
       res.writeHead(202, { "Content-Type": "application/json" }).end(JSON.stringify({ ok: true }));
     } else if (url.pathname === "/api/parked/dismiss" && req.method === "POST") {
       if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
