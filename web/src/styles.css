@@ -559,6 +559,7 @@ a.btn.verb { text-decoration: none; }
 .doc-links { flex-wrap: wrap; }
 .doc-links .sep { color: var(--line-2); }
 .doc-page-body { padding: 24px; overflow: auto; }
+.doc-page-body:has(.tb) { padding: 20px 18px; }
 
 /* Five views: the top bar keeps one line, and drops the least useful text first. */
 .headline, .headline span, .sources { white-space: nowrap; }
@@ -790,3 +791,13 @@ body.resizing { cursor: col-resize; user-select: none; }
 .md hr { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
 .doc-preview .doc-body .md h4[data-level] { font-size: 13px; margin: 0 0 6px; }
 .doc-body .md-diagram figcaption { display: none; }
+
+/* A ticket brief: its own layout is in shared/briefRender.ts, so the exported file looks the same. */
+.brief-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+.brief-bar .grow { flex: 1; }
+.brief-notes { font-size: 12.5px; max-width: 100%; }
+.brief-notes summary { cursor: pointer; text-align: right; }
+.brief-notes ul { margin: 6px 0 0; padding-left: 18px; color: var(--ink-2); }
+.doc-preview .tb { --tb-gap: 12px; font-size: 12px; }
+.doc-preview .tb-title { font-size: 15px; margin: 6px 0; }
+.doc-preview .tb-ask { font-size: 12.5px; }

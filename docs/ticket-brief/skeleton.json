@@ -1,0 +1,87 @@
+{
+  "schema": "ticket-brief/1",
+  "key": "ABC-123",
+  "title": "Short title: what the ticket does",
+  "size": "M",
+  "ask": "<Verb> <thing> so that <why>.",
+  "verified_on": "YYYY-MM-DD",
+  "links": [{ "label": "ABC-123", "url": "https://example.atlassian.net/browse/ABC-123" }],
+  "glance": {
+    "shifts": [
+      { "what": "Where it runs", "before": "today", "after": "when done" },
+      { "what": "Who calls it", "before": "today", "after": "when done" },
+      { "what": "What users get", "before": "today", "after": "when done" }
+    ],
+    "numbers": [{ "value": "231k", "label": "of 390k calls a day return nothing", "fact": "f1" }],
+    "headsups": [{ "title": "A claim: what the ticket gets wrong", "ticket_says": "What the AC says.", "body": "What is true, and what to do instead.", "facts": ["f1"] }]
+  },
+  "system": {
+    "heading": "A claim about the system, not a topic",
+    "nodes": [
+      { "id": "user", "label": "Caller", "sub": "who starts it", "col": 0, "row": 0, "kind": "actor" },
+      { "id": "old", "label": "Old service", "sub": "where it runs today", "col": 1, "row": 0 },
+      { "id": "new", "label": "New service", "sub": "where it runs when done", "col": 1, "row": 1 },
+      { "id": "db", "label": "Store", "sub": "what it keeps", "col": 2, "row": 0, "kind": "store" }
+    ],
+    "views": [
+      {
+        "id": "today",
+        "label": "Today",
+        "caption": "One sentence: what to look at.",
+        "hide": ["new"],
+        "edges": [{ "from": "user", "to": "old", "label": "what it sends" }, { "from": "old", "to": "db", "tone": "bad", "label": "what goes wrong" }],
+        "pins": [{ "node": "old", "text": "One thing wrong today, with a number.", "fact": "f1" }]
+      },
+      {
+        "id": "done",
+        "label": "Done",
+        "caption": "One sentence: what is different.",
+        "hide": ["old"],
+        "edges": [{ "from": "user", "to": "new", "tone": "new" }, { "from": "new", "to": "db" }]
+      }
+    ]
+  },
+  "done": {
+    "items": [{ "text": "An observable end state.", "verify": "The command, test or dashboard that proves it: `pnpm test path/to.test.ts`." }],
+    "ac_review": [{ "ac": "AC 1: what the ticket says", "verdict": "change", "note": "What it must say instead." }]
+  },
+  "path": {
+    "steps": [{ "title": "Step 1", "who": "agent opens the PR, a human merges", "state": "now", "detail": "What happens.", "gate": "How to know it worked.", "undo": "How to reverse it." }]
+  },
+  "decisions": {
+    "major": [
+      {
+        "question": "The question, as one sentence?",
+        "decider": "A person's name",
+        "criteria": ["What separates the options", "Another thing that differs"],
+        "options": [
+          { "name": "Option A", "cells": ["+ good, in a few words", "~ mixed"], "recommended": true },
+          { "name": "Option B", "cells": ["- bad, in a few words", "+ good"] }
+        ],
+        "why": "Why the recommendation wins.",
+        "facts": ["f1"]
+      }
+    ],
+    "minor": [{ "question": "A small call?", "call": "What was decided.", "decider": "Name" }]
+  },
+  "work": {
+    "first_move": "Read <path> first, then <next thing>.",
+    "repos": [
+      {
+        "repo": "org/repo",
+        "url": "https://github.com/org/repo",
+        "why": "What changes here.",
+        "paths": ["src/the/file.ts"],
+        "pr": { "label": "#12 what it does", "url": "https://github.com/org/repo/pull/12", "state": "open" },
+        "who": "agent",
+        "human_only": "Merge; any prod write."
+      }
+    ]
+  },
+  "risks": {
+    "items": [{ "text": "What could go wrong, and its effect.", "mitigation": "What prevents it.", "fact": "f1" }],
+    "questions": [{ "q": "An open question?", "owner": "Name" }]
+  },
+  "facts": [{ "id": "f1", "text": "One checkable statement.", "source": "repo path, command, PR, ticket comment or #channel on date", "how": "read", "as_of": "YYYY-MM-DD" }],
+  "glossary": [{ "term": "Jargon", "means": "What it means, in one line." }]
+}

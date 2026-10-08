@@ -5,7 +5,8 @@ import { homedir } from "node:os";
 import { config } from "../config.ts";
 import { startConversation } from "../conversations.ts";
 import { MIME } from "../diagrams.ts";
-import { DOCUMENT_SCRIPT, editMessage, TICKET_SUMMARY_PROMPT, ticketSummaryMessage } from "../documents.ts";
+import { parseBrief } from "../../shared/brief.ts";
+import { BRIEF_SCRIPT, DOCUMENT_SCRIPT, editMessage, TICKET_SUMMARY_PROMPT, ticketSummaryMessage } from "../documents.ts";
 import { agentMessage, agentName } from "../handoff.ts";
 import * as db from "../summaries/db.ts";
 
@@ -16,6 +17,7 @@ export interface DocumentDeps {
   /** Tests start no agent. */
   start?: typeof startConversation;
   script?: string;
+  briefScript?: string;
 }
 
 /**
@@ -79,6 +81,9 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   if (!dir.startsWith("/") || !existsSync(dir) || !statSync(dir).isDirectory()) return json(400, { error: `not a folder: ${String(body.cwd)}` });
   const start = deps.start ?? startConversation;
   const script = deps.script ?? DOCUMENT_SCRIPT;
+  const briefScript = deps.briefScript ?? BRIEF_SCRIPT;
+  // The agent opens the brief on this dashboard to look at it.
+  const pageUrl = (docId: number) => `http://127.0.0.1:${config.port}/#/doc:${docId}`;
   const sessionId = randomUUID();
 
   if (editing) {
@@ -91,7 +96,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
     const undo = () => {
       if (db.clearDocumentEdit(id)) deps.onChange();
     };
-    const message = editMessage(doc, prompt, script);
+    const message = editMessage({ ...doc, brief: !!parseBrief(doc.body) }, prompt, script, briefScript, pageUrl(id));
     const label = `Edit document ${id}: ${prompt}`;
     return launch(() => start({ cwd: dir, message: context ? agentMessage(context, message) : message, name: doc.ticket ? agentName(doc.ticket, label) : label.slice(0, 70), sessionId, onSpawnError: undo }), undo);
   }
@@ -100,12 +105,12 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   if (!new RegExp(`^${config.ticketPattern.source}$`).test(key)) return json(400, { error: `not a ticket key: ${key}` });
   const context = await deps.context(key);
   if (context === null) return json(404, { error: `the dash does not show ${key}, so it cannot start an agent for it` });
-  const doc = db.addDocument({ ticket: key, type: "ticket-summary", title: "Ticket summary", body: "", edit: { prompt: TICKET_SUMMARY_PROMPT, sessionId } });
+  const doc = db.addDocument({ ticket: key, type: "ticket-summary", title: "Ticket brief", body: "", edit: { prompt: TICKET_SUMMARY_PROMPT, sessionId } });
   if (!doc) return json(409, { error: `${key} already has a ticket summary` });
   const undo = () => {
     if (db.clearDocumentEdit(doc.id)) deps.onChange();
   };
-  return launch(() => start({ cwd: dir, message: agentMessage(context, ticketSummaryMessage(key, doc.id, script)), name: agentName(key, "Write the ticket summary"), sessionId, onSpawnError: undo }), undo, doc.id);
+  return launch(() => start({ cwd: dir, message: agentMessage(context, ticketSummaryMessage(key, doc.id, briefScript, pageUrl(doc.id))), name: agentName(key, "Write the ticket brief"), sessionId, onSpawnError: undo }), undo, doc.id);
 
   function launch(run: () => unknown, undo: () => void, documentId = id): boolean {
     try {

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dashboard, Run, TicketDocument } from "../../shared/types.ts";
+import { parseBrief } from "../../shared/brief.ts";
+import { BriefView } from "./brief.tsx";
 import { age, api, elapsed, Markdown, plural, stamp } from "./lib.tsx";
 import { href } from "./routes.ts";
 
@@ -18,7 +20,8 @@ function bodyOf(d: TicketDocument): Promise<string> {
   return p;
 }
 
-function DocumentBody({ d }: { d: TicketDocument }) {
+/** A ticket brief's body is its JSON spec; any other body is markdown. */
+function DocumentBody({ d, compact = false }: { d: TicketDocument; compact?: boolean }) {
   const [body, setBody] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -27,6 +30,8 @@ function DocumentBody({ d }: { d: TicketDocument }) {
   }, [d.id, d.updatedAt]);
   if (error) return <p className="error">{error}</p>;
   if (body === null) return <span className="shimmer wide" />;
+  const brief = parseBrief(body);
+  if (brief) return <BriefView brief={brief} compact={compact} />;
   return (
     <div className="doc-body">
       <Markdown text={body} />
@@ -82,7 +87,7 @@ function PendingEdit({ d, run, now, onError }: { d: TicketDocument; run: Run | u
   const edit = d.edit!;
   // A headless agent waits for a reply when its turn ends, so a run that is not working stopped. A new run gets time to start.
   const stopped = !!run && run.status !== "working" && now - Date.parse(edit.startedAt) > 30_000;
-  const what = d.hasBody ? <>An agent edits this document: “{edit.prompt.length > 160 ? `${edit.prompt.slice(0, 159)}…` : edit.prompt}”</> : <>An agent writes this {d.type === "ticket-summary" ? "ticket summary" : "document"}.</>;
+  const what = d.hasBody ? <>An agent edits this document: “{edit.prompt.length > 160 ? `${edit.prompt.slice(0, 159)}…` : edit.prompt}”</> : <>An agent writes this {d.type === "ticket-summary" ? "ticket brief" : "document"}.</>;
   return (
     <div className={`doc-pending ${stopped ? "tone-text-warn" : ""}`}>
       <span className={`dot ${stopped ? "tone-warn" : "tone-working pulse"}`} />
@@ -116,7 +121,7 @@ function DocumentCard({ d, run, open, onToggle, cwd, now, onError }: { d: Ticket
           <span className="caret">{open ? "▾" : "▸"}</span>
           <h3>{d.title}</h3>
         </button>
-        {d.type === "ticket-summary" && <span className="tag tone-good">ticket summary</span>}
+        {d.type === "ticket-summary" && <span className="tag tone-good">ticket brief</span>}
         {d.sessionId && d.sessionId !== d.edit?.sessionId && (
           <a className="meta" href={href(`c:${d.sessionId}`)} title="The conversation that made it">
             conversation
@@ -162,8 +167,8 @@ export function WriteTicketSummary({ ticket, cwd, onError }: { ticket: string; c
     setBusy(false);
   };
   return (
-    <button className="btn ghost" onClick={write} disabled={busy} title={`An agent in ${cwd} writes the start, middle and end states of ${ticket}, with user stories and diagrams`}>
-      {busy ? "Starting…" : "Write a ticket summary"}
+    <button className="btn ghost" onClick={write} disabled={busy} title={`An agent in ${cwd} researches ${ticket} and writes a five-minute brief: today and done on one map, where the ticket and reality differ, how to prove it is done, and the open decisions`}>
+      {busy ? "Starting…" : "Write a ticket brief"}
     </button>
   );
 }
@@ -212,7 +217,7 @@ export function DocumentView({ id, diagramId, data, now }: { id?: number; diagra
       <header className="ws-head">
         <div className="eyebrow">
           <span>Document {d.id}</span>
-          {d.type === "ticket-summary" && <span className="tag tone-good">ticket summary</span>}
+          {d.type === "ticket-summary" && <span className="tag tone-good">ticket brief</span>}
         </div>
         <h1>{d.title}</h1>
         <div className="ws-meta doc-links">
@@ -279,7 +284,7 @@ function useVisible<T extends Element>(): [React.RefObject<T | null>, boolean] {
 
 function DocumentPreview({ d }: { d: TicketDocument }) {
   const [ref, visible] = useVisible<HTMLDivElement>();
-  return <div ref={ref} className="doc-preview">{visible && d.hasBody ? <DocumentBody d={d} /> : null}</div>;
+  return <div ref={ref} className="doc-preview">{visible && d.hasBody ? <DocumentBody d={d} compact /> : null}</div>;
 }
 
 /** `#/documents`: every document, newest change first. */
@@ -292,12 +297,12 @@ export function DocumentsView({ data, now }: { data: Dashboard; now: number }) {
       <header className="ws-head">
         <h1>Documents</h1>
         <div className="ws-meta">
-          <span className="meta">{plural(data.documents.length, "document")} · ticket summaries first, then the newest change</span>
+          <span className="meta">{plural(data.documents.length, "document")} · ticket briefs first, then the newest change</span>
         </div>
         <input className="search" type="search" placeholder="Search titles, tickets, types" value={query} onChange={(e) => setQuery(e.target.value)} />
       </header>
       {found.length === 0 ? (
-        <div className="zero big">{query ? "No document matches." : "No documents yet. Write a ticket summary from a ticket, or let an agent draw a diagram: each diagram becomes a document."}</div>
+        <div className="zero big">{query ? "No document matches." : "No documents yet. Write a ticket brief from a ticket, or let an agent draw a diagram: each diagram becomes a document."}</div>
       ) : (
         <div className="doc-grid">
           {found.map((d) => (
@@ -310,7 +315,7 @@ export function DocumentsView({ data, now }: { data: Dashboard; now: number }) {
                   {d.title}
                 </a>
                 <div className="doc-card-tags">
-                  {d.type === "ticket-summary" && <span className="tag tone-good">ticket summary</span>}
+                  {d.type === "ticket-summary" && <span className="tag tone-good">ticket brief</span>}
                   {d.ticket && (
                     <a className="key-link" href={href(`t:${d.ticket}`)} title="Open the ticket on the board">
                       {d.ticket}
