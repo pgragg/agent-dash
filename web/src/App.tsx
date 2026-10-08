@@ -40,6 +40,7 @@ import { starredFirst } from "./star.ts";
 import { FullScreenButton, ResizeHandle, useViewWidth } from "./resizeView.tsx";
 import { rowName, rowType } from "./whyRow.ts";
 import { DEFAULT_SNOOZE, isSnoozed, SNOOZE_OPTIONS, type SnoozeOption, snoozeUntil, untilLabel } from "./snooze.ts";
+import { tabTitle } from "./tabTitle.ts";
 
 /**
  * agent-dash answers one question: "what do I work on next?".
@@ -2012,10 +2013,10 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [move, doneAndAdvance, selected, data, view, help, boardMode, setBoardMode, drawer, viewWidth]);
 
+  const openTitle = view === "board" && (boardMode === "queue" || drawer) && selected ? subjectTitle(selected) : null;
   useEffect(() => {
-    const waiting = data?.counts.awaiting_input ?? 0;
-    document.title = queue.length ? `(${queue.length}) agent-dash` : waiting ? `(${waiting}) agent-dash` : "agent-dash";
-  }, [data, queue.length]);
+    document.title = tabTitle({ route, data, queue: queue.length, open: openTitle });
+  }, [route, data, queue.length, openTitle]);
 
   if (!data) return <main className="loading">{error ? <pre className="error">{error}</pre> : <span className="shimmer wide" />}</main>;
 
