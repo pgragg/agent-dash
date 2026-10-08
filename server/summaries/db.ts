@@ -347,6 +347,10 @@ export function open(path = DB_PATH): DatabaseSync {
   db.exec(`CREATE TRIGGER IF NOT EXISTS sdlc_event_changed AFTER UPDATE ON SDLC_Event WHEN NEW.event_type != 'smoketest_plan' BEGIN
     UPDATE SDLC_Event_Ticket SET summary_requested_at = NULL, changed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE sdlc_event_id = NEW.id;
   END`);
+  // A step's kanban button label. A step row never changes, so its label is drafted once.
+  if (!(db.prepare("SELECT 1 FROM pragma_table_info('next_steps') WHERE name = 'label'").get())) {
+    db.exec("ALTER TABLE next_steps ADD COLUMN label TEXT; ALTER TABLE next_steps ADD COLUMN label_status TEXT; ALTER TABLE next_steps ADD COLUMN label_requested_at TEXT");
+  }
   documentsFromDiagrams(db);
   // Summaries saved before steps were stored get their rows once.
   for (const r of db.prepare("SELECT id, ticket, summary FROM summaries WHERE status = 'done' AND id NOT IN (SELECT summary_id FROM next_steps)").all() as unknown as Row[]) {
@@ -355,7 +359,7 @@ export function open(path = DB_PATH): DatabaseSync {
   return db;
 }
 
-const STEP_COLUMNS = "id, summary_id AS summaryId, ticket, position, body";
+const STEP_COLUMNS = "id, summary_id AS summaryId, ticket, position, body, label";
 
 function insertSteps(id: number, ticket: string, summary: string): void {
   const insert = open().prepare("INSERT INTO next_steps (summary_id, ticket, position, body) VALUES (?, ?, ?, ?)");
@@ -369,6 +373,20 @@ export function stepsFor(summaryId: number): NextStep[] {
 export function getStep(id: number): NextStep | null {
   const row = open().prepare(`SELECT ${STEP_COLUMNS} FROM next_steps WHERE id = ?`).get(id) as unknown as NextStep | undefined;
   return row ? { ...row } : null;
+}
+
+/** Takes each step whose label is not drafted, or whose draft failed or stuck before `retryBefore`. Writes only for a real claim. */
+export function claimStepLabels(ids: number[], retryBefore: string, now = new Date()): number[] {
+  const claim = open().prepare(
+    `UPDATE next_steps SET label_status = 'in_progress', label_requested_at = ?
+     WHERE id = ? AND (label_status IS NULL OR (label_status != 'done' AND label_requested_at < ?)) RETURNING id`,
+  );
+  return ids.filter((id) => claim.get(now.toISOString(), id, retryBefore));
+}
+
+/** Only an in-progress draft changes, so a late answer cannot overwrite a newer one. */
+export function finishStepLabel(id: number, label: string | null): boolean {
+  return open().prepare("UPDATE next_steps SET label_status = ?, label = ? WHERE id = ? AND label_status = 'in_progress'").run(label ? "done" : "failed", label, id).changes > 0;
 }
 
 export function createRequest(ticket: string, now = new Date()): SummaryRecord {

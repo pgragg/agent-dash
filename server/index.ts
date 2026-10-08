@@ -40,6 +40,7 @@ import type { TicketProvider } from "./tickets/provider.ts";
 import { ticketProviders } from "./tickets/registry.ts";
 import { SessionIndex, transcriptTurns } from "./sources/sessions.ts";
 import { isAlive, readReportedStatuses } from "./sources/status.ts";
+import { requestStepLabels, topSteps } from "./stepButtons.ts";
 import * as summaryDb from "./summaries/db.ts";
 import { reconcile, redraftAfterNewEvents, requestSummary } from "./summaries/runner.ts";
 
@@ -233,6 +234,8 @@ async function dashboard(force: boolean) {
   d.reviewRequests = summaryDb.reviewRequestsByPr();
   d.lanes = await lanesRoute.lanesByTicket();
   redraftAfterNewEvents([...d.myTickets, ...d.otherTickets], broadcast);
+  // Each kanban card shows its ticket's top next step as a button with a short label.
+  requestStepLabels(topSteps([...d.myTickets, ...d.otherTickets], summaries), broadcast);
   // Each live agent card opens on its summary, so draft it before Piper looks.
   const boardRuns = [...d.myTickets, ...d.otherTickets].flatMap((g) => g.runs).concat(d.unlinkedRuns);
   requestConversationSummaries(boardRuns.filter((r) => r.status !== "finished"), (id) => sessions.fileFor(id), broadcast);

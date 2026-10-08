@@ -34,6 +34,7 @@ import { SlackQuotes } from "./slackQuotes.tsx";
 import { DueDateVerb, MoveButton, TicketPanel, useTicketDetail } from "./ticketPanel.tsx";
 import { Documentation, DocumentsView, DocumentView, TicketSummaryDoc, WriteTicketSummary } from "./documents.tsx";
 import { SessionScope } from "./mermaid.tsx";
+import { CardStep } from "./cardStep.tsx";
 import { type BoardMode, kanbanColumns, type Searchable, searchCards, stageOf, useBoardMode } from "./kanban.ts";
 import { starredFirst } from "./star.ts";
 import { FullScreenButton, ResizeHandle, useViewWidth } from "./resizeView.tsx";
@@ -318,10 +319,10 @@ function laneRun(s: Subject, sessionId: string, now: number): LaneRun | null {
 
 // ---- queue (left rail) --------------------------------------------------------------
 
-function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snoozedUntil, card = false, dim = false, starred = false }: { s: Subject; selected: boolean; onSelect: () => void; now: number; summary?: TicketSummaryState; rank?: number; notes?: number; snoozedUntil?: string; card?: boolean; dim?: boolean; starred?: boolean }) {
+function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snoozedUntil, card = false, dim = false, starred = false, footer }: { s: Subject; selected: boolean; onSelect: () => void; now: number; summary?: TicketSummaryState; rank?: number; notes?: number; snoozedUntil?: string; card?: boolean; dim?: boolean; starred?: boolean; footer?: React.ReactNode }) {
   const top = lead(s);
   const run = primaryRun(s);
-  const ref = useRef<HTMLButtonElement>(null);
+  const ref = useRef<HTMLButtonElement & HTMLDivElement>(null);
   useEffect(() => {
     if (selected) ref.current?.scrollIntoView({ block: "nearest" });
   }, [selected]);
@@ -330,8 +331,9 @@ function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snooz
   // On a Done ticket nothing is urgent, so the headline goes quiet and the green tag says why.
   const tone = done ? "muted" : top ? look(top).tone : run ? runTone(run) : "muted";
   const when = top?.kind === "awaiting_input" && run ? age(run.statusSince, now) : age(top?.updatedAt ?? run?.lastActivityAt ?? s.ticket?.ticket.updatedAt, now);
-  return (
-    <button ref={ref} className={`q-item ${card ? "k-card" : ""} ${dim ? "dim" : ""} ${starred ? "starred" : ""} ${selected ? "selected" : ""}`} onClick={onSelect} aria-current={selected}>
+  const className = `q-item ${card ? "k-card" : ""} ${dim ? "dim" : ""} ${starred ? "starred" : ""} ${selected ? "selected" : ""}`;
+  const body = (
+    <>
       {starred && (
         <span className="q-star" title="Starred" aria-label="Starred">
           ★
@@ -353,8 +355,39 @@ function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snooz
           {notes > 0 && <span className="tag tone-muted" title={`${plural(notes, "note")}`}>✎ {notes}</span>}
           {snoozedUntil && <span className="tag tone-muted" title={new Date(snoozedUntil).toLocaleString()}>until {untilLabel(snoozedUntil, now)}</span>}
         </span>
+        {footer && (
+          // A click on the footer's own button does not also open the card.
+          <span className="q-foot" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+            {footer}
+          </span>
+        )}
       </span>
-    </button>
+    </>
+  );
+  if (!footer) {
+    return (
+      <button ref={ref} className={className} onClick={onSelect} aria-current={selected}>
+        {body}
+      </button>
+    );
+  }
+  // A button cannot hold a button, so a card with a footer button is a div that acts as one.
+  return (
+    <div
+      ref={ref}
+      role="button"
+      tabIndex={0}
+      className={className}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+        e.preventDefault();
+        onSelect();
+      }}
+      aria-current={selected}
+    >
+      {body}
+    </div>
   );
 }
 
@@ -414,22 +447,27 @@ function KanbanBoard({ order, dim, ranks, selected, onSelect, data, now, until, 
             <span className="count">{c.items.length}</span>
           </h2>
           <div className="k-col-list">
-            {c.items.map((s) => (
-              <QueueItem
-                key={s.id}
-                s={s}
-                card
-                dim={dim.has(s)}
-                rank={ranks.get(s)}
-                selected={s.id === selected?.id}
-                onSelect={() => onSelect(s)}
-                now={now}
-                summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined}
-                notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0}
-                snoozedUntil={isSnoozed(until(s), now) ? until(s) : undefined}
-                starred={isStarred(s)}
-              />
-            ))}
+            {c.items.map((s) => {
+              // The ticket's top next step, as a button, so you start it without opening the ticket.
+              const step = s.ticket && !isDone(s) ? firstStep(data, s) : null;
+              return (
+                <QueueItem
+                  key={s.id}
+                  s={s}
+                  card
+                  dim={dim.has(s)}
+                  rank={ranks.get(s)}
+                  selected={s.id === selected?.id}
+                  onSelect={() => onSelect(s)}
+                  now={now}
+                  summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined}
+                  notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0}
+                  snoozedUntil={isSnoozed(until(s), now) ? until(s) : undefined}
+                  starred={isStarred(s)}
+                  footer={step && <CardStep key={step.id} ticket={s.ticket!.ticket.key} step={step} cwd={workFolders(s)[0]} canMove={s.ticket!.ticket.source.move} />}
+                />
+              );
+            })}
           </div>
         </section>
       ))}
