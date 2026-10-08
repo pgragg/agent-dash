@@ -52,7 +52,10 @@ test("a conversation gives its status and name; the other views give their count
     counts: { working: 1, awaiting_input: 1, finished: 4 },
     documents: [{ id: 4, title: "How login works" } as TicketDocument],
   });
-  assert.equal(title("#/c:s1", d), "Chat waiting · Deploy FDR · agent-dash");
+  assert.equal(title("#/c:s1", d), "✋ Deploy FDR · agent-dash");
+  assert.equal(title("#/c:s2", data({ unlinkedRuns: [run({ sessionId: "s2", name: "Bump fai", status: "working" })] })), "⚙️ Bump fai · agent-dash");
+  assert.equal(title("#/c:s3", data({ unlinkedRuns: [run({ sessionId: "s3", name: "Old run" })] })), "Old run · agent-dash");
+  assert.equal(title("#/c:gone", d), "Chat · agent-dash");
   assert.equal(title("#/c", d), "New chat · agent-dash");
   assert.equal(title("#/history", d), "History 2 live · agent-dash");
   assert.equal(title("#/documents", d), "Documents 1 · agent-dash");

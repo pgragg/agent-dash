@@ -12,6 +12,7 @@ import type { Route } from "./routes.ts";
  *   Board (3) · Fix the login redirect · agent-dash
  *   PRs 5 · 2✓ 1💬 1✗ · agent-dash          5 open, 2 approved, 1 with feedback, 1 with red CI
  *   PR ✓ 💬2 · Fix the login redirect · agent-dash
+ *   ✋ Deploy FDR · agent-dash               a chat that waits on you (⚙️ when it works)
  */
 
 type TitleData = Pick<Dashboard, "prs" | "documents" | "parked" | "counts" | "myTickets" | "otherTickets" | "unlinkedRuns">;
@@ -92,8 +93,10 @@ export function tabTitle({ route, data, queue, open }: TitleInput): string {
     case "conversation": {
       if (!route.id) return join("New chat", null);
       const run = runs().find((r) => r.sessionId === route.id);
-      const state = run?.status === "awaiting_input" ? "waiting" : run?.status === "working" ? "working" : null;
-      return join("Chat", state, run ? (run.name ?? run.firstPrompt) : null);
+      if (!run) return join("Chat", null);
+      // No view word: the tab is narrow, and the run's name says enough. ✋ waits on you, ⚙️ works.
+      const state = run.status === "awaiting_input" ? "✋ " : run.status === "working" ? "⚙️ " : "";
+      return join(`${state}${short(run.name ?? run.firstPrompt)}`, null);
     }
     case "documents":
       return join("Documents", data.documents.length || null);

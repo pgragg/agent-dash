@@ -72,7 +72,7 @@ What Claude Code cannot do here:
 
 The navbar at the top switches between the views: **Board** (`#/`, the queue and workspace below), **PRs** (`#/prs`), **History** (`#/history`) and **Documents** (`#/documents`). A conversation has its own page (`#/c:<sessionId>`), and so does each document (`#/doc:<id>`). Each object has its own [address](#addresses).
 
-**The browser tab title** tells your agent-dash tabs apart, also when Chrome shows only its first characters. It starts with the view, then that view's counts, then the object that is open, and ends with `agent-dash`: `Board (3) · Fix the login redirect`, `PRs 5 · 2✓ 1💬 1✗` (5 open PRs: 2 approved, 1 with feedback to address, 1 with red CI), `PR ✓ 💬2 · Fix the login redirect`, `Chat waiting · Deploy FDR`, `History 2 live`, `Doc · How login works`. The rules are in `web/src/tabTitle.ts`.
+**The browser tab title** tells your agent-dash tabs apart, also when Chrome shows only its first characters. It starts with the view, then that view's counts, then the object that is open, and ends with `agent-dash`: `Board (3) · Fix the login redirect`, `PRs 5 · 2✓ 1💬 1✗` (5 open PRs: 2 approved, 1 with feedback to address, 1 with red CI), `PR ✓ 💬2 · Fix the login redirect`, `✋ Deploy FDR` (a chat that waits on you; ⚙️ when it works), `History 2 live`, `Doc · How login works`. The rules are in `web/src/tabTitle.ts`.
 
 ### Board
 
