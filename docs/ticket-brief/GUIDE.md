@@ -148,6 +148,14 @@ Start from `node scripts/brief.ts skeleton`. The fields are in [SPEC.md](SPEC.md
 - **Do not tell the story of the investigation.** State the result with its badge: "I tested X and Y happened" becomes "Y happens" with `how: verified`.
 - **Do not copy the ticket.** Link it. Include only what the ticket gets wrong or leaves out.
 - **A person is a person.** A `people` row is someone whose experience changes. "As a platform engineer I want to deploy" is a task: put it in `done`.
+- **Write every text field in ASD-STE100** (Simplified Technical English), so that a reader, also one whose first language is not English, reads each line once and gets it:
+  - One topic in a sentence. One instruction in a sentence. Put the verb first in an instruction: "Set `FDR_ORIGIN` on the prod Lambda."
+  - At most 20 words in an instruction and 25 words in a description. Split a longer sentence.
+  - Active voice: "FDR caches the answer", not "the answer is cached". Say who does it.
+  - Simple tenses only: present, past, future. No "-ing" word as a noun or an adjective ("the deploy", not "the deploying").
+  - Use simple, common words, and use each word with one meaning. Use one term for one thing on the whole page: if it is the "proxy", do not also call it the "forwarder".
+  - Keep "the", "a" and "is". Do not stack more than three nouns ("skip-cache row", not "Lambda docs skip cache row cleanup").
+  - Code names, hosts, paths and product names stay as they are, in `` `code` ``.
 - Text fields take `` `code` `` and `**bold**` only.
 
 ### 6. Lint and save
@@ -174,6 +182,8 @@ Then run the **cold-reader test** (skip it for size S). Give a fresh subagent on
 7. What is out of scope, and what can you skip?
 
 Also ask it: "Which line on the page makes you do work that the ask does not need?" Cut each line it names, or say on the page why the ask needs it.
+
+Also ask it to name each sentence that it had to read two times. Rewrite each one in ASD-STE100.
 
 Every wrong or missing answer is a defect in the page. Fix the page and test again. Then spot-check the truth: pick the three facts that the page leans on most, and confirm each against its source once more.
 

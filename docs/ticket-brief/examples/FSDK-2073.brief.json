@@ -3,7 +3,7 @@
   "key": "FSDK-2073",
   "title": "Move fdr-lambda-docs into FDR on Kubernetes",
   "size": "L",
-  "ask": "Serve AI example enhancement from FDR on Kubernetes, so that it survives the 10-17 registry cutover and the Lambda and its database can be deleted.",
+  "ask": "Move AI example enhancement to FDR on Kubernetes, so that it survives the 10-17 cutover and we can delete the Lambda and its database.",
   "verified_on": "2026-10-07",
   "links": [
     {
@@ -359,7 +359,7 @@
       },
       {
         "text": "The Lambda, its Function URL and `lambda-docs-db` are deleted, and the unused CDK code is removed.",
-        "verify": "After the exit gate, a human checks in the Fern account that the Function URL and the RDS instance are gone; `servers/fdr-lambda-docs-deploy/` is gone from `app`."
+        "verify": "After the exit gate, a human checks that the Function URL and the RDS instance are gone from the Fern account; `servers/fdr-lambda-docs-deploy/` is gone from `app`."
       }
     ],
     "ac_review": [
