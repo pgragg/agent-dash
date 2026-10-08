@@ -65,7 +65,7 @@ export function startConversation(opts: ConversationOptions): string {
   const log = openSync(join(config.conversationsDir, `${sessionId}.log`), "a");
   // A copied ITERM_SESSION_ID would make "Open in iTerm" focus the tab that started the dash.
   const { ITERM_SESSION_ID: _tab, ...env } = process.env;
-  const { cmd, args } = headlessCommand(agent, sessionId, opts);
+  const { cmd, args } = headlessCommand(agent, sessionId, { permissionMode: config.settings.claudePermissionMode, ...opts });
   const child = spawn(cmd, args, {
     cwd: opts.cwd,
     detached: true,

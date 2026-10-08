@@ -80,6 +80,8 @@ export interface HeadlessOptions {
   resume?: { sessionId: string; sessionFile: string };
   /** Claude Code tools that run without a permission dialog. pi asks before no tool call. */
   allowedTools?: string[];
+  /** Claude Code's `--permission-mode`. Omitted: Claude Code's own default. */
+  permissionMode?: string;
 }
 
 /**
@@ -96,6 +98,7 @@ export function headlessCommand(agent: AgentKind, sessionId: string, opts: Headl
   const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio", ...hookFlag()];
   args.push(...(opts.resume ? ["--resume", opts.resume.sessionId] : ["--session-id", sessionId]));
   if (opts.name && !opts.resume) args.push("--name", opts.name);
+  if (opts.permissionMode) args.push("--permission-mode", opts.permissionMode);
   if (opts.allowedTools?.length) args.push("--allowedTools", opts.allowedTools.join(","));
   return { cmd: "claude", args };
 }

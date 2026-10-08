@@ -81,6 +81,12 @@ test("a headless Claude Code can run some tools without a dialog", () => {
   assert.ok(!headlessCommand("claude", "s", {}).args.includes("--allowedTools"));
 });
 
+test("a headless Claude Code runs in the configured permission mode", () => {
+  const { args } = headlessCommand("claude", "s", { permissionMode: "auto" });
+  assert.equal(args[args.indexOf("--permission-mode") + 1], "auto");
+  assert.ok(!headlessCommand("claude", "s", {}).args.includes("--permission-mode"));
+});
+
 test("the pi extension links once, and does not replace a file that is not its link", () => {
   const target = join(dir, "ext", "agent-dash-status.ts");
   assert.match(installPiExtension(false, target), /^Installed/);
