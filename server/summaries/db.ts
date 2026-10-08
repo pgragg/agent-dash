@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { splitSummary } from "../../shared/nextSteps.ts";
-import type { ConversationSummary, Diagram, DocumentType, ParkedRun, DiagramKind, NextStep, Note, ReviewDraft, SdlcEnvironment, SdlcEvent, SdlcEventType, SmoketestOutcome, ThreadStatus, ThreadStatusChange, TicketDocument, TicketDocumentWithBody, TicketSummary, WorkLane } from "../../shared/types.ts";
+import type { ConversationSummary, Diagram, DocumentType, ParkedRun, DiagramKind, NextStep, Note, StepAction, ReviewDraft, SdlcEnvironment, SdlcEvent, SdlcEventType, SmoketestOutcome, ThreadStatus, ThreadStatusChange, TicketDocument, TicketDocumentWithBody, TicketSummary, WorkLane } from "../../shared/types.ts";
 
 export const DB_PATH = process.env.AGENT_DASH_DB ?? join(homedir(), ".agent-dash/agent-dash.db");
 
@@ -352,6 +352,7 @@ export function open(path = DB_PATH): DatabaseSync {
     db.exec("ALTER TABLE next_steps ADD COLUMN label TEXT; ALTER TABLE next_steps ADD COLUMN label_status TEXT; ALTER TABLE next_steps ADD COLUMN label_requested_at TEXT");
   }
   if (!(db.prepare("SELECT 1 FROM pragma_table_info('next_steps') WHERE name = 'label_version'").get())) db.exec("ALTER TABLE next_steps ADD COLUMN label_version INTEGER");
+  if (!(db.prepare("SELECT 1 FROM pragma_table_info('next_steps') WHERE name = 'label_action'").get())) db.exec("ALTER TABLE next_steps ADD COLUMN label_action TEXT");
   documentsFromDiagrams(db);
   // Summaries saved before steps were stored get their rows once.
   for (const r of db.prepare("SELECT id, ticket, summary FROM summaries WHERE status = 'done' AND id NOT IN (SELECT summary_id FROM next_steps)").all() as unknown as Row[]) {
@@ -360,20 +361,23 @@ export function open(path = DB_PATH): DatabaseSync {
   return db;
 }
 
-const STEP_COLUMNS = "id, summary_id AS summaryId, ticket, position, body, label";
+const STEP_COLUMNS = "id, summary_id AS summaryId, ticket, position, body, label, label_action AS action";
 
 function insertSteps(id: number, ticket: string, summary: string): void {
   const insert = open().prepare("INSERT INTO next_steps (summary_id, ticket, position, body) VALUES (?, ?, ?, ?)");
   splitSummary(summary).steps.forEach((body, i) => insert.run(id, ticket, i + 1, body));
 }
 
+type StepRow = Omit<NextStep, "action"> & { action: string | null };
+const toStep = (r: StepRow): NextStep => ({ ...r, action: r.action ? (JSON.parse(r.action) as StepAction) : null });
+
 export function stepsFor(summaryId: number): NextStep[] {
-  return (open().prepare(`SELECT ${STEP_COLUMNS} FROM next_steps WHERE summary_id = ? ORDER BY position`).all(summaryId) as unknown as NextStep[]).map((s) => ({ ...s }));
+  return (open().prepare(`SELECT ${STEP_COLUMNS} FROM next_steps WHERE summary_id = ? ORDER BY position`).all(summaryId) as unknown as StepRow[]).map(toStep);
 }
 
 export function getStep(id: number): NextStep | null {
-  const row = open().prepare(`SELECT ${STEP_COLUMNS} FROM next_steps WHERE id = ?`).get(id) as unknown as NextStep | undefined;
-  return row ? { ...row } : null;
+  const row = open().prepare(`SELECT ${STEP_COLUMNS} FROM next_steps WHERE id = ?`).get(id) as unknown as StepRow | undefined;
+  return row ? toStep(row) : null;
 }
 
 /**
@@ -389,9 +393,14 @@ export function claimStepLabels(ids: number[], version: number, retryBefore: str
 }
 
 /** Only an in-progress draft changes, so a late answer cannot overwrite a newer one. */
-export function finishStepLabel(id: number, label: string | null): boolean {
-  // A failed redraft keeps the old label, so the card still has one.
-  return open().prepare("UPDATE next_steps SET label_status = ?, label = COALESCE(?, label) WHERE id = ? AND label_status = 'in_progress'").run(label ? "done" : "failed", label, id).changes > 0;
+export function finishStepLabel(id: number, action: StepAction | null, label: string | null): boolean {
+  const db = open();
+  // With no action, the old pair stays. A new action replaces the label too: a label from an older
+  // action must not stay on a new one, so the page shows the fallback label until a retry.
+  const r = action
+    ? db.prepare("UPDATE next_steps SET label_status = ?, label = ?, label_action = ? WHERE id = ? AND label_status = 'in_progress'").run(label ? "done" : "failed", label, JSON.stringify(action), id)
+    : db.prepare("UPDATE next_steps SET label_status = 'failed' WHERE id = ? AND label_status = 'in_progress'").run(id);
+  return r.changes > 0;
 }
 
 export function createRequest(ticket: string, now = new Date()): SummaryRecord {

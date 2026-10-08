@@ -307,7 +307,12 @@ export interface NextStep {
   body: string;
   /** A short button label for the kanban card, from the cheap model. Null until it is drafted. */
   label: string | null;
+  /** What the kanban card's button does on a click. The label was written from it. Null until it is read. */
+  action: StepAction | null;
 }
+
+/** The kanban card button's click: a Jira move, else an agent that starts with this first message. */
+export type StepAction = { kind: "move"; to: string } | { kind: "agent"; message: string };
 
 /** The newest request (any status), and the newest finished summary to show meanwhile. */
 export interface TicketSummaryState {
