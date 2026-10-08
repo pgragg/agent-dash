@@ -44,7 +44,24 @@
         "No field still says 10-17 for the cutover",
         "The PR #185 repo card has pr.state merged"
       ],
-      "files": ["examples/FSDK-2073.brief.json"]
+      "files": [
+        "examples/FSDK-2073.brief.json"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "keep-the-lights-on-scope",
+      "prompt": "Write the brief for FSDK-2073. It has to land before the 10-17 cutover, so keep it tight.",
+      "expected_output": "The brief stays on what the ticket needs to survive the cutover. Settled choices (the model FDR already calls, the auth FDR already uses) are one-line minor calls or facts, not matrices. No tuning, optimization or 'consider X if Y' work appears in decisions, done, path or risk mitigations. Where an AC or step can be dropped or deferred, ac_review or the page says so.",
+      "suggested_assertions": [
+        "No decisions.major entry is about a model, a library, tuning or performance optimization",
+        "No risk mitigation, done item or path step asks for work that the ask does not need (for example 'measure p95, then consider Haiku')",
+        "decisions.major has at most 2 entries",
+        "The lint reports 0 errors"
+      ],
+      "files": [
+        "examples/FSDK-2073.brief.json"
+      ]
     }
   ]
 }
