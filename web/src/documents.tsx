@@ -28,9 +28,10 @@ function DocumentBody({ d, compact = false }: { d: TicketDocument; compact?: boo
     setError(null);
     bodyOf(d).then(setBody, (err: Error) => setError(err.message));
   }, [d.id, d.updatedAt]);
+  // One parse per version: each new Brief object renders new element ids, which resets open sections and the map view.
+  const brief = useMemo(() => (body === null ? null : parseBrief(body)), [body]);
   if (error) return <p className="error">{error}</p>;
   if (body === null) return <span className="shimmer wide" />;
-  const brief = parseBrief(body);
   if (brief) return <BriefView brief={brief} compact={compact} />;
   // A spec that does not parse is not for a reader; markdown would show it as a wall of JSON.
   if (d.type === "ticket-summary" && body.trimStart().startsWith("{")) return <p className="meta">This ticket brief is not a valid spec, so it cannot show yet. Ask the agent to save it again with <code>scripts/brief.ts save</code>.</p>;
