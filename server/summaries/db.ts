@@ -351,6 +351,7 @@ export function open(path = DB_PATH): DatabaseSync {
   if (!(db.prepare("SELECT 1 FROM pragma_table_info('next_steps') WHERE name = 'label'").get())) {
     db.exec("ALTER TABLE next_steps ADD COLUMN label TEXT; ALTER TABLE next_steps ADD COLUMN label_status TEXT; ALTER TABLE next_steps ADD COLUMN label_requested_at TEXT");
   }
+  if (!(db.prepare("SELECT 1 FROM pragma_table_info('next_steps') WHERE name = 'label_version'").get())) db.exec("ALTER TABLE next_steps ADD COLUMN label_version INTEGER");
   documentsFromDiagrams(db);
   // Summaries saved before steps were stored get their rows once.
   for (const r of db.prepare("SELECT id, ticket, summary FROM summaries WHERE status = 'done' AND id NOT IN (SELECT summary_id FROM next_steps)").all() as unknown as Row[]) {
@@ -375,18 +376,22 @@ export function getStep(id: number): NextStep | null {
   return row ? { ...row } : null;
 }
 
-/** Takes each step whose label is not drafted, or whose draft failed or stuck before `retryBefore`. Writes only for a real claim. */
-export function claimStepLabels(ids: number[], retryBefore: string, now = new Date()): number[] {
+/**
+ * Takes each step whose label is not drafted, is from an older prompt `version`, or whose draft
+ * failed or stuck before `retryBefore`. Writes only for a real claim. The old label shows meanwhile.
+ */
+export function claimStepLabels(ids: number[], version: number, retryBefore: string, now = new Date()): number[] {
   const claim = open().prepare(
-    `UPDATE next_steps SET label_status = 'in_progress', label_requested_at = ?
-     WHERE id = ? AND (label_status IS NULL OR (label_status != 'done' AND label_requested_at < ?)) RETURNING id`,
+    `UPDATE next_steps SET label_status = 'in_progress', label_requested_at = ?, label_version = ?
+     WHERE id = ? AND (label_status IS NULL OR (label_status != 'in_progress' AND label_version IS NOT ?) OR (label_status != 'done' AND label_requested_at < ?)) RETURNING id`,
   );
-  return ids.filter((id) => claim.get(now.toISOString(), id, retryBefore));
+  return ids.filter((id) => claim.get(now.toISOString(), version, id, version, retryBefore));
 }
 
 /** Only an in-progress draft changes, so a late answer cannot overwrite a newer one. */
 export function finishStepLabel(id: number, label: string | null): boolean {
-  return open().prepare("UPDATE next_steps SET label_status = ?, label = ? WHERE id = ? AND label_status = 'in_progress'").run(label ? "done" : "failed", label, id).changes > 0;
+  // A failed redraft keeps the old label, so the card still has one.
+  return open().prepare("UPDATE next_steps SET label_status = ?, label = COALESCE(?, label) WHERE id = ? AND label_status = 'in_progress'").run(label ? "done" : "failed", label, id).changes > 0;
 }
 
 export function createRequest(ticket: string, now = new Date()): SummaryRecord {

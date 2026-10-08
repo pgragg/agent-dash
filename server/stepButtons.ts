@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { cleanLabel, stepLabelPrompt } from "../shared/stepButton.ts";
+import { cleanLabel, LABEL_VERSION, stepLabelPrompt } from "../shared/stepButton.ts";
 import type { Dashboard, NextStep, TicketGroup } from "../shared/types.ts";
 import { draftCommand } from "./agent.ts";
 import { config } from "./config.ts";
@@ -13,14 +13,14 @@ const PARALLEL = 4;
 /** A failed or stuck draft is tried again on a page load after this. */
 const RETRY_MS = 5 * 60_000;
 
-/** The top step of each open ticket's newest finished draft: the step that its kanban card shows. */
+/** The top step of each open ticket's newest finished draft: the step that its kanban card shows. The claim skips the ones with a current label. */
 export function topSteps(groups: TicketGroup[], summaries: Dashboard["summaries"]): NextStep[] {
   return groups.flatMap((g) => {
     if (g.ticket.statusCategory === "done") return [];
     const state = summaries[g.ticket.key];
     const shown = state?.latest.status === "done" ? state.latest : state?.lastDone;
     const step = shown?.steps[0];
-    return step && !step.label ? [step] : [];
+    return step ? [step] : [];
   });
 }
 
@@ -35,12 +35,12 @@ export async function draftOne(step: NextStep): Promise<string | null> {
 }
 
 /**
- * Starts a label draft for each top step that has none, at most PARALLEL at a time, and returns at
+ * Starts a label draft for each top step with no current label, at most PARALLEL at a time, and returns at
  * once with the step ids it took. A new next-steps draft makes new step rows, so the card follows it.
  */
 export function requestStepLabels(steps: NextStep[], onChange: () => void, draft = draftOne, now = new Date()): number[] {
   const byId = new Map(steps.map((s) => [s.id, s]));
-  const queue = db.claimStepLabels([...byId.keys()], new Date(now.getTime() - RETRY_MS).toISOString(), now).map((id) => byId.get(id)!);
+  const queue = db.claimStepLabels([...byId.keys()], LABEL_VERSION, new Date(now.getTime() - RETRY_MS).toISOString(), now).map((id) => byId.get(id)!);
   const started = queue.map((s) => s.id);
   const worker = async () => {
     for (let step = queue.shift(); step; step = queue.shift()) {
