@@ -103,6 +103,23 @@ export function plural(n: number, word: string): string {
 /** Ticket keys on the board, so a Jira link in a message can open the ticket here. */
 let knownTickets: ReadonlySet<string> = new Set();
 
+/**
+ * Reloads the page to get the newest build, but not over typed text, and at most once a minute.
+ * A tab from before a rebuild runs old code: it cannot lazy-load the deleted chunks, and it shows
+ * new kinds of data (a ticket brief's JSON spec) the old way.
+ */
+export function reloadForNewBuild(): boolean {
+  const typed = [...document.querySelectorAll("textarea")].some((t) => t.value.trim());
+  const last = Number(sessionStorage.getItem("agent-dash:chunk-reload") ?? 0);
+  if (typed || Date.now() - last < 60_000) return false;
+  sessionStorage.setItem("agent-dash:chunk-reload", String(Date.now()));
+  location.reload();
+  return true;
+}
+
+/** The entry script of the build that this tab runs; empty under `pnpm dev`. */
+const ownBuild = document.querySelector<HTMLScriptElement>('script[type="module"][src*="/assets/index-"]')?.getAttribute("src") ?? "";
+
 export function useDashboard() {
   const [data, setData] = useState<Dashboard | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -117,6 +134,8 @@ export function useDashboard() {
     try {
       const res = await fetch(`/api/dashboard${refresh ? "?refresh" : ""}`);
       if (!res.ok) throw new Error(await res.text());
+      const build = res.headers.get("x-agent-dash-build");
+      if (ownBuild && build && build !== ownBuild && reloadForNewBuild()) return;
       const body: Dashboard = await res.json();
       if (seq < applied.current) return;
       applied.current = seq;
