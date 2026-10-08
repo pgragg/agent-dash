@@ -1,11 +1,10 @@
-import { randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { ENV_LABEL, isSmoketestRunning } from "../../shared/sdlc.ts";
 import type { AgentKind } from "../../shared/team.ts";
 import { config } from "../config.ts";
-import { isRunning, startConversation } from "../conversations.ts";
+import { isRunning, newSessionId, startConversation } from "../conversations.ts";
 import { agentMessage, agentName } from "../handoff.ts";
 import { startExecution } from "../sdlc.ts";
 import type { SessionIndex } from "../sources/sessions.ts";
@@ -50,7 +49,7 @@ async function pickTarget(sessionId: string | null, sessions: SessionIndex): Pro
     const parsed = (await sessions.scan()).find((p) => p.sessionId === sessionId);
     if (parsed && !resumeBlocker(parsed, status, { running: isRunning(sessionId) })) return { kind: "resume", sessionId, cwd: parsed.cwd, sessionFile: parsed.sessionFile, agent: parsed.agent };
   }
-  return { kind: "new", sessionId: randomUUID() };
+  return { kind: "new", sessionId: newSessionId() };
 }
 
 /**
@@ -103,7 +102,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
     const { execution, message } = startExecution(plan, target.sessionId, deps.script);
     executionId = execution.id;
     const key = plan.tickets[0];
-    if (target.kind === "inbox") deliver(target.sessionId, "txt", message);
+    if (target.kind === "inbox") await deliver(target.sessionId, "txt", message);
     else if (target.kind === "resume") startConversation({ cwd: target.cwd, message, resume: { sessionId: target.sessionId, sessionFile: target.sessionFile }, agent: target.agent });
     else startConversation({ cwd: dir, message: agentMessage(context!, message), name: agentName(key, `Run the smoketest plan on ${ENV_LABEL[plan.environments[0]]}`), sessionId: target.sessionId });
     deps.onChange();

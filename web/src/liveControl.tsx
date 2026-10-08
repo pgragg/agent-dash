@@ -120,6 +120,8 @@ export function Composer({ run, onError, focusSignal }: { run: HistoryRun; onErr
     }
   };
   if (!run.canReply) {
+    // OpenCode takes messages for every session while its service runs and the session is open.
+    if (run.agent === "opencode") return <div className="composer-off">The OpenCode service is not running, or this session ended. Resume it to continue on this page.</div>;
     // A Claude Code session in a terminal reads only what you type there.
     return run.agent === "claude" ? (
       <div className="composer-off">Reply in this session's tab. agent-dash can send messages only to a Claude Code that it started without a terminal.</div>

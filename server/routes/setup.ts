@@ -1,11 +1,10 @@
-import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { DEFAULT_SETTINGS, SETTING_FIELDS, type Settings } from "../../shared/settings.ts";
 import { AGENT_LABEL, type AgentKind } from "../../shared/team.ts";
 import { installPiExtension, piExtensionFile } from "../agent.ts";
 import { CONFIG_FILE, CONFIG_READ_ONLY, config, readSettingsFile, saveSettingsPatch, sessionsDirOf, setupNeeded } from "../config.ts";
-import { startConversation } from "../conversations.ts";
+import { newSessionId, startConversation } from "../conversations.ts";
 
 const ROOT = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
 export const SAVE_SCRIPT = `${ROOT}/scripts/save-settings.ts`;
@@ -79,17 +78,18 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   } catch {
     return json(400, { error: "the body is not JSON" });
   }
-  if (agent !== "pi" && agent !== "claude") return json(400, { error: "agent must be pi or claude" });
+  if (agent !== "pi" && agent !== "claude" && agent !== "opencode") return json(400, { error: "agent must be pi, claude or opencode" });
   try {
     // A headless pi gets its first message through the status extension. Any copy of it works.
     if (agent === "pi" && !existsSync(piExtensionFile())) installPiExtension();
     // Saved first, so the choice stays when the agent stops early. The board uses it after a restart.
     const { settings, errors } = saveSettingsPatch({ agent });
     if (Object.keys(errors).length) return json(500, { error: `could not save the agent: ${Object.values(errors).join("; ")}` });
-    const sessionId = randomUUID();
+    const sessionId = newSessionId(agent);
     deps.follow(sessionsDirOf(settings, agent), sessionId);
     const message = setupMessage({ agent, file: CONFIG_FILE, current: readSettingsFile().settings, missing: setupNeeded(), script: SAVE_SCRIPT, url: `http://127.0.0.1:${config.port}` });
-    startConversation({ cwd: ROOT, message, name: "agent-dash setup", sessionId, agent, allowedTools: agent === "claude" ? CLAUDE_READ_TOOLS : undefined });
+    // Claude Code and OpenCode read and search without a dialog; a command or a write asks on the page.
+    startConversation({ cwd: ROOT, message, name: "agent-dash setup", sessionId, agent, allowedTools: agent === "claude" ? CLAUDE_READ_TOOLS : undefined, askBeforeChanges: agent === "opencode" });
     return json(201, { sessionId });
   } catch (err) {
     return json(500, { error: (err as Error).message });

@@ -125,8 +125,8 @@ const INTERRUPTED = "[Request interrupted by user";
  * the same message id; they become one message. A pi log comes back as it is.
  */
 export function asPiLog(raw: string): { agent: AgentKind; raw: string } {
-  // pi's first line is its session header; Claude Code has none.
-  if (raw.startsWith('{"type":"session"')) return { agent: "pi", raw };
+  // pi's first line is its session header; Claude Code has none. The dash's copy of an OpenCode session names its agent there.
+  if (raw.startsWith('{"type":"session"')) return { agent: raw.split("\n", 1)[0].includes('"agent":"opencode"') ? "opencode" : "pi", raw };
   const out: unknown[] = [];
   let header = false;
   let reply: { id: string; message: { content: unknown[]; stopReason: string | null } } | null = null;
@@ -349,12 +349,17 @@ export class SessionIndex {
   /** Sessions in another agent's folder, by id, with their log file once it is found. */
   private readonly followed = new Map<string, { dir: string; file?: string }>();
 
-  constructor(dir: string, ticketPattern: RegExp) {
+  /** Brings a log folder up to date before it is read: OpenCode's logs are copies of its database. */
+  private readonly sync: (dir: string) => void;
+
+  constructor(dir: string, ticketPattern: RegExp, sync: (dir: string) => void = () => {}) {
     this.dir = dir;
     this.ticketPattern = ticketPattern;
+    this.sync = sync;
   }
 
   async scan(): Promise<ParsedSession[]> {
+    for (const dir of new Set([this.dir, ...[...this.followed.values()].map((f) => f.dir)])) this.sync(dir);
     const files: string[] = [];
     for (const project of await readdir(this.dir, { withFileTypes: true })) {
       if (!project.isDirectory()) continue;
@@ -389,7 +394,7 @@ export class SessionIndex {
   private async followedFiles(): Promise<string[]> {
     const out: string[] = [];
     for (const [id, f] of this.followed) {
-      // pi names a log `<time>_<id>.jsonl`, Claude Code `<id>.jsonl`, each in a folder per project.
+      // pi names a log `<time>_<id>.jsonl`, Claude Code and OpenCode `<id>.jsonl`, each in a folder per project.
       if (!f.file) {
         for (const project of await readdir(f.dir, { withFileTypes: true }).catch(() => [])) {
           if (!project.isDirectory()) continue;

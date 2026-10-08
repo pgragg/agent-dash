@@ -130,8 +130,14 @@ export function ticketProjectsOf(s: Settings, providers: TicketProviderConfig[])
   return [...new Set([...s.ticketProjects, ...own])];
 }
 
+/**
+ * OpenCode keeps its sessions in SQLite, not in log files. The dash copies each one here as a pi
+ * log, so every reader of a session file works the same for it.
+ */
+export const opencodeLogDir = (): string => env.AGENT_DASH_OPENCODE_LOG_DIR ?? join(home, ".agent-dash/opencode-sessions");
+
 /** The folder of an agent's session logs. */
-export const sessionsDirOf = (s: Settings, agent: Settings["agent"]): string => expandPath(agent === "claude" ? s.claudeProjectsDir : s.sessionsDir);
+export const sessionsDirOf = (s: Settings, agent: Settings["agent"]): string => (agent === "opencode" ? opencodeLogDir() : expandPath(agent === "claude" ? s.claudeProjectsDir : s.sessionsDir));
 
 export function buildConfig(s: Settings) {
   const providers = ticketProvidersOf(s);
@@ -141,6 +147,8 @@ export function buildConfig(s: Settings) {
     agent: s.agent,
     /** The session logs of the agent that the board shows. */
     sessionsDir: sessionsDirOf(s, s.agent),
+    /** OpenCode's own database, which the dash reads only. */
+    opencodeDb: expandPath(s.opencodeDb),
     /** The pi extension and the Claude Code hook write one status file per session here. */
     statusDir: env.AGENT_DASH_STATUS_DIR ?? join(home, ".agent-dash/status"),
     /** Replies typed in the dash go here, one folder per session; the extension delivers them. */

@@ -34,6 +34,7 @@ export interface Settings extends Team {
   port: number;
   sessionsDir: string;
   claudeProjectsDir: string;
+  opencodeDb: string;
   recentDays: number;
   jiraServer: string;
   jiraLogin: string;
@@ -87,6 +88,7 @@ export const DEFAULT_SETTINGS: Settings = {
   port: 7777,
   sessionsDir: "~/.pi/agent/sessions",
   claudeProjectsDir: "~/.claude/projects",
+  opencodeDb: "~/.local/share/opencode/opencode.db",
   recentDays: 14,
   jiraServer: "https://postmanlabs.atlassian.net",
   jiraLogin: "",
@@ -113,7 +115,7 @@ export const SETTING_FIELDS: SettingField[] = [
     key: "agent", group: "Agent", label: "Agent", kind: "choice", options: Object.entries(AGENT_LABEL).map(([value, label]) => ({ value, label })), env: "AGENT_DASH_AGENT",
     help: "The coding agent that agent-dash starts for runs, summaries and drafts, and whose session logs the board shows.",
     example: "pi",
-    find: "The agent you use for your coding sessions. `pi --version` and `claude --version` show which ones are installed.",
+    find: "The agent you use for your coding sessions. `pi --version`, `claude --version` and `opencode --version` show which ones are installed.",
   },
   {
     key: "userName", group: "You", label: "Your first name", kind: "text", pattern: /^[^\s"'`]{1,40}$/,
@@ -138,6 +140,12 @@ export const SETTING_FIELDS: SettingField[] = [
     help: "Where Claude Code writes its session logs. Used when the agent is Claude Code.",
     example: "~/.claude/projects",
     find: "Keep the default, unless `CLAUDE_CONFIG_DIR` is set: then it is `$CLAUDE_CONFIG_DIR/projects`. `ls ~/.claude/projects` shows one folder per project.",
+  },
+  {
+    key: "opencodeDb", group: "Server", label: "OpenCode database", kind: "path", env: "AGENT_DASH_OPENCODE_DB",
+    help: "The SQLite file where OpenCode 2 keeps its sessions. Used when the agent is OpenCode.",
+    example: "~/.local/share/opencode/opencode.db",
+    find: "Keep the default, unless `XDG_DATA_HOME` is set: then it is `$XDG_DATA_HOME/opencode/opencode.db`. `ls ~/.local/share/opencode` shows it when OpenCode is installed.",
   },
   {
     key: "recentDays", group: "Server", label: "Recent days", kind: "number", env: "AGENT_DASH_RECENT_DAYS",

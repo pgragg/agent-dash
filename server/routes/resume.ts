@@ -13,12 +13,14 @@ export function resumeBlocker(s: ParsedSession | undefined, reported: ReportedSt
   if (!s) return "no such session";
   // The spawn comes seconds before pi writes its status file, so a second click sees no live pid yet.
   if (opts.running) return "this session is still running";
+  const folderGone = !s.cwd || !existsSync(s.cwd) || !statSync(s.cwd).isDirectory() ? `its folder is gone: ${s.cwd}` : null;
+  // OpenCode's service owns the session and takes a message at any time: there is no second process to collide with.
+  if (s.agent === "opencode") return folderGone;
   // Without a status file, a terminal can still have it open. Copy resume is the way then.
   if (!reported) return "the dash cannot tell whether a terminal still has this session open";
   // A pid that is alive, even after "closed": the process can still be on its way out.
   if ((opts.alive ?? isAlive)(reported.pid)) return "this session is still running";
-  if (!s.cwd || !existsSync(s.cwd) || !statSync(s.cwd).isDirectory()) return `its folder is gone: ${s.cwd}`;
-  return null;
+  return folderGone;
 }
 
 async function readMessage(req: IncomingMessage): Promise<string | undefined> {

@@ -104,5 +104,5 @@ test("starting the setup agent needs the header and a known agent", async () => 
   assert.equal((await fetch(base, { method: "POST", body: JSON.stringify({ agent: "pi" }) })).status, 403);
   const res = await fetch(base, { method: "POST", headers: { "X-Agent-Dash": "1" }, body: JSON.stringify({ agent: "codex" }) });
   assert.equal(res.status, 400);
-  assert.match((await res.json()).error, /pi or claude/);
+  assert.match((await res.json()).error, /pi, claude or opencode/);
 });

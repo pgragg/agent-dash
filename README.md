@@ -14,7 +14,7 @@ For a tour with screenshots, see [docs/capabilities.md](docs/capabilities.md). T
 
 **The goal: one place for the whole developer workflow.** You find the next task, start agents, talk to them, and follow their PRs on this page, so you do not switch between iTerm and agent-dash. Each new feature moves one more step of the workflow from the terminal onto the page.
 
-It reads the session logs of your coding agent ([pi](https://github.com/badlogic/pi-mono) or [Claude Code](https://docs.claude.com/en/docs/claude-code), see [Choose the agent](#choose-the-agent)), your Jira tickets, and your GitHub PRs. You can act on the answer without leaving the page.
+It reads the session logs of your coding agent ([pi](https://github.com/badlogic/pi-mono), [Claude Code](https://docs.claude.com/en/docs/claude-code) or [OpenCode](https://opencode.ai), see [Choose the agent](#choose-the-agent)), your Jira tickets, and your GitHub PRs. You can act on the answer without leaving the page.
 
 The dashboard writes two things to Jira itself: a due date and a status move, from the [Ticket](#the-ticket-section) section or a drafted next step. It posts one thing to Slack as you: a [review request](#prs) when you click its **Post to Slack**. It never writes to GitHub. The other things it sends go to your own agent sessions: a reply that you type, a Stop, and the answer to an extension dialog. A [PR verb](#pr-verbs) button starts an agent on one small task, and that agent does the write: the click is your approval.
 
@@ -25,7 +25,7 @@ You need macOS, and these on your `PATH`:
 | Tool | For | Check |
 |---|---|---|
 | Node 24 or later, and pnpm | the server; Node runs the TypeScript directly | `node -v` |
-| [pi](https://github.com/badlogic/pi-mono) or [Claude Code](https://docs.claude.com/en/docs/claude-code) | the agents that the dash reads and starts | `pi --version` or `claude --version` |
+| [pi](https://github.com/badlogic/pi-mono), [Claude Code](https://docs.claude.com/en/docs/claude-code) or [OpenCode](https://opencode.ai) 2 | the agents that the dash reads and starts | `pi --version`, `claude --version` or `opencode --version` |
 | `gh`, logged in | your PRs, CI and reviews | `gh auth status` |
 | A Jira API token | your tickets ([make one](https://id.atlassian.com/manage-profile/security/api-tokens)), in a file with a `JIRA_API_TOKEN=…` line | |
 
@@ -38,7 +38,7 @@ pnpm install-extension   # once: exact run status and replies (see below)
 pnpm build && pnpm start # http://127.0.0.1:7777
 ```
 
-Until the settings are set, a banner on every view says what is missing, and the top bar says **Jira off**, not **Jira down**. Click **Set it up for me** in the banner to let an agent find your settings (see [Set it up for me](#set-it-up-for-me)), or open **Settings** (`#/settings`) and set them yourself: pick the agent first, with the **pi** / **Claude Code** toggle at the top, then your Jira login and token file, your ticket projects, and the other paths that you use. Each setting shows an example value and how to find it. Then restart. The settings go in `agent-dash.config.json`, which git ignores. See [Configuration](#configuration).
+Until the settings are set, a banner on every view says what is missing, and the top bar says **Jira off**, not **Jira down**. Click **Set it up for me** in the banner to let an agent find your settings (see [Set it up for me](#set-it-up-for-me)), or open **Settings** (`#/settings`) and set them yourself: pick the agent first, with the **pi** / **Claude Code** / **OpenCode** toggle at the top, then your Jira login and token file, your ticket projects, and the other paths that you use. Each setting shows an example value and how to find it. Then restart. The settings go in `agent-dash.config.json`, which git ignores. See [Configuration](#configuration).
 
 To start it and open the page with one command, add this to `~/.zshrc` (change the folder to your clone):
 
@@ -55,7 +55,7 @@ dash() {
 
 ## Choose the agent
 
-The **Agent** toggle at the top of Settings (`agent`: `pi` or `claude`) picks one agent for the whole dash. After a restart, every place uses it:
+The **Agent** toggle at the top of Settings (`agent`: `pi`, `claude` or `opencode`) picks one agent for the whole dash. After a restart, every place uses it:
 
 - **The board** reads that agent's session logs only: `~/.pi/agent/sessions` for pi, `~/.claude/projects` for Claude Code. `server/sources/sessions.ts` turns a Claude Code transcript into pi's log shape (`asPiLog`), so one parser finds the tickets, PRs, diagrams and status in both.
 - **Agents on the page** (Start a new agent, next steps, lanes, smoketests, PR verbs, plain conversations) start headless. Claude Code runs as `claude -p --input-format stream-json --output-format stream-json --permission-prompt-tool stdio`, with the same stdin FIFO and log as pi's rpc mode. **Open in iTerm** starts `claude --session-id … --name …` with the context inline, and **Copy resume** gives `claude --resume <id>`.
@@ -67,6 +67,16 @@ What Claude Code cannot do here:
 - **No Steer.** A message to a working agent waits until its turn ends. **Stop** works: the server sends an `interrupt` control request.
 - **Replies from the page go only to a headless run.** A Claude Code in a terminal reads only its own keys, so its card says to reply in the tab.
 - **Dialogs are tool permissions.** When Claude Code asks before a tool call, the card shows "Allow Write: /path?" with **Yes** and **No**. Yes runs the tool as asked; No and Stop deny it.
+
+### OpenCode
+
+OpenCode 2 runs every session in one background service and keeps them in SQLite (`opencodeDb`, default `~/.local/share/opencode/opencode.db`). So the dash needs no extension or hook in OpenCode, and `server/opencode.ts` does all of it:
+
+- **The board** reads the database read-only. Each scan writes each top-level session as a pi log in `~/.agent-dash/opencode-sessions/<folder>/<id>.jsonl` (`AGENT_DASH_OPENCODE_LOG_DIR`), so every reader of a session file works as for pi. A subagent's session is not on the board.
+- **Run status** comes from a poller in the server: every 1.5 s it asks the service which sessions run, and which permission requests are open, and writes the same status files as the pi extension. A session that ran in the last 4 hours waits on you; after that, or when you end it, it is finished, and **Resume here** sends it your next message. The poller finds the service in `~/.local/state/opencode/service.json`, and never starts it.
+- **Live control works for every session**, also one in a terminal: a reply, a **Steer**, **Stop** and a permission answer go to the service's HTTP API. A permission request shows as "Allow shell: <command>?" with **Yes** and **No**; a subagent's request shows on its parent's card. **End** stops the session and marks it finished. It never stops the service, which runs your other sessions.
+- **Agents on the page** start with two API calls: make the session with the dash's id (`ses_…`), name and folder, then send the first message. **Open in iTerm** makes the named session first, then runs `opencode --session <id> --prompt …`; **Copy resume** gives `opencode --session <id>`.
+- **Summaries and drafts** run `server/opencode-oneshot.ts`: it makes a session with its own tool rules (none for a draft; read, search and shell for a summary), runs `opencode run` on it, prints the reply, and deletes the session. The default draft model is `anthropic/claude-haiku-4-5`; `AGENT_DASH_DRAFT_MODEL` and `AGENT_DASH_SUMMARY_MODEL` still win.
 
 ## The page
 
@@ -302,7 +312,7 @@ Each agent card opens on a short summary of its conversation, in three lines: **
 
 ## Conversations on the page
 
-This section and the next two describe pi. For what is different with Claude Code, see [Choose the agent](#choose-the-agent).
+This section and the next two describe pi. For what is different with Claude Code or OpenCode, see [Choose the agent](#choose-the-agent).
 
 `POST /api/conversations` (body `{message, cwd}`, with the `X-Agent-Dash` guard) starts `pi --mode rpc --session-id <uuid>` in the folder. The server picks the session id, so the page can open the conversation before pi writes anything. A ticket agent from **Start a new agent** starts the same way, with `--name "<KEY>: …"` added.
 
@@ -402,8 +412,8 @@ The server listens on `127.0.0.1` only, because the page shows prompts and repli
 
 | Source | How | Notes |
 |---|---|---|
-| Agent sessions | `~/.pi/agent/sessions/**/*.jsonl` for pi, `~/.claude/projects/*/*.jsonl` for Claude Code | Re-parses only the files that changed. A cold scan of about 700 sessions takes about 1 s. |
-| Run status | `~/.agent-dash/status/<sessionId>.json`, written by `extension/agent-dash-status.ts` (pi) or `extension/claude-status-hook.ts` (Claude Code) | Without it, status is a guess from the log, marked `?` |
+| Agent sessions | `~/.pi/agent/sessions/**/*.jsonl` for pi, `~/.claude/projects/*/*.jsonl` for Claude Code, OpenCode's database for OpenCode (copied to `~/.agent-dash/opencode-sessions`) | Re-parses only the files that changed. A cold scan of about 700 sessions takes about 1 s. |
+| Run status | `~/.agent-dash/status/<sessionId>.json`, written by `extension/agent-dash-status.ts` (pi), `extension/claude-status-hook.ts` (Claude Code) or the server's OpenCode poller | Without it, status is a guess from the log, marked `?` |
 | Ticket providers | One per entry in the [`ticketProviders`](#ticket-providers) list | Each provider has the same interface (`server/tickets/provider.ts`). The two kinds are below. |
 | Jira | `POST /rest/api/3/search/jql` with the token in the Jira token file [setting](#configuration) (or `JIRA_API_TOKEN`) | Open tickets assigned to you, excluding the projects to leave out. The [Ticket](#the-ticket-section) section reads one ticket's description, comments and transitions with GETs, only when it opens. |
 | Local tickets | `<dir>/<status>/<PREFIX>-<n>-<slug>.md`, such as agent-dash's own `AD-<n>` tickets | The tickets are files. The folder is the status (`todo`, `in-progress`, `in-review`, `done`, `canceled`), and the `# AD-<n> — Title` heading is the title. They are read on each build, with no cache. The Ticket section shows the file, and **Move to** renames it into the other status folder; there is no due date. The key's link (`/api/local-ticket?key=AD-<n>`) shows the file as text. A key with the prefix but no file is not a ticket and links to nothing. |
@@ -546,11 +556,12 @@ Company-wide values (the Jira server, the Slack org, the deploy repos, the Postm
 
 | Setting | Key | Env var that wins over it | Default |
 |---|---|---|---|
-| The agent: `pi` or `claude` (Claude Code). See [Choose the agent](#choose-the-agent) | `agent` | `AGENT_DASH_AGENT` | `pi` |
+| The agent: `pi`, `claude` (Claude Code) or `opencode` (OpenCode). See [Choose the agent](#choose-the-agent) | `agent` | `AGENT_DASH_AGENT` | `pi` |
 | Your first name, as agents call you in prompts | `userName` | | none: "the user" |
 | Port | `port` | `AGENT_DASH_PORT` | `7777` |
 | pi sessions folder | `sessionsDir` | `AGENT_DASH_SESSIONS_DIR` | `~/.pi/agent/sessions` |
 | Claude Code projects folder | `claudeProjectsDir` | `AGENT_DASH_CLAUDE_PROJECTS_DIR` | `~/.claude/projects` |
+| OpenCode database | `opencodeDb` | `AGENT_DASH_OPENCODE_DB` | `~/.local/share/opencode/opencode.db` |
 | Recent days | `recentDays` | `AGENT_DASH_RECENT_DAYS` | `14` |
 | Jira server | `jiraServer` | `JIRA_SERVER` | `https://postmanlabs.atlassian.net`. Jira is off until the login is set too. |
 | Jira login | `jiraLogin` | `JIRA_LOGIN` | none |
@@ -592,19 +603,19 @@ A Jira entry can also have `projects` (it then owns only those prefixes) and an 
 - **`AGENT_DASH_CONFIG`** names another config file. `pnpm test` uses `test/config.json`, so your own settings never change a test.
 - **A server in a git worktree** with no `agent-dash.config.json` of its own reads the main checkout's file, so a test server runs with your settings. From there the Settings page is read-only, so a test server never changes the file that your real dashboard uses.
 
-Other env vars, all optional: `AGENT_DASH_STATUS_DIR`, `AGENT_DASH_INBOX_DIR`, `AGENT_DASH_CONVERSATIONS_DIR`, `AGENT_DASH_REMOTE_TTL_MS`, `AGENT_DASH_MCP_ADAPTER` (pi-mcp-adapter's `dist` folder, for posting to Slack).
+Other env vars, all optional: `AGENT_DASH_STATUS_DIR`, `AGENT_DASH_INBOX_DIR`, `AGENT_DASH_CONVERSATIONS_DIR`, `AGENT_DASH_OPENCODE_LOG_DIR`, `AGENT_DASH_REMOTE_TTL_MS`, `AGENT_DASH_MCP_ADAPTER` (pi-mcp-adapter's `dist` folder, for posting to Slack).
 
 ## Set it up for me
 
 **Set it up for me**, in the setup banner and at the top of the Settings page, starts an agent that fills in the settings for you.
 
-1. You pick the agent: **pi** or **Claude Code**.
+1. You pick the agent: **pi**, **Claude Code** or **OpenCode**.
 2. **Start** is your permission. `POST /api/setup` (with `{agent}` and the `X-Agent-Dash` guard) saves the agent to the config file, links the pi status extension when pi has none, and starts a headless agent in the repo folder. The page opens its conversation (`#/c:<id>`).
 
 - **Its first message** (`setupMessage` in `server/routes/setup.ts`) lists each setting with its description, example, way to find it, and current value, and starts with what the banner says is missing.
 - **It looks, and does not change.** It runs read-only commands, never prints the Jira token, and keeps a default when it finds nothing better. It saves with `node scripts/save-settings.ts < patch.json`, which changes only the keys in the JSON and checks each value as the Settings page does. When one value is bad, the script saves nothing and says why, so the agent fixes it and runs it again.
 - **It ends with a table** of each value and where it found it, and asks you for the rest in its reply. Then restart agent-dash.
-- **Claude Code asks before each command** on the page (Read, Grep, Glob and LS run without a dialog). pi asks before no tool call.
+- **Claude Code and OpenCode ask before each command** on the page (reads and searches run without a dialog; OpenCode also asks before a file change). pi asks before no tool call.
 - **Before the restart, the board reads the other agent's logs only for this session.** A Claude Code setup agent on a pi server (or the opposite) still shows on the page: the server follows its log file in the other agent's folder.
 - A server in a worktree reads the main checkout's settings read-only, so it refuses to start the setup agent.
 

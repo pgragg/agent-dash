@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { needsNothing, waitsOnReview } from "../shared/conversationSummary.ts";
 import type { ConversationSummary, ParkReason, ParkedRun, Run, ThreadStatusChange } from "../shared/types.ts";
 import { config } from "./config.ts";
+import { endHeadless } from "./conversations.ts";
 import { resolvedAway } from "./model.ts";
 import { isAlive, type ReportedStatus } from "./sources/status.ts";
 import * as db from "./summaries/db.ts";
@@ -140,7 +141,7 @@ export function sweep(input: Omit<ParkInput, "exempt">, reported: Map<string, Re
     if (!stillWaiting(c.run, s) || inboxHasMail(c.run.sessionId)) continue;
     db.addParked(parkedRow(c, now));
     try {
-      process.kill(s.pid, "SIGTERM");
+      void endHeadless(s);
       changes++;
     } catch {
       // The process exited on its own: the row still keeps the ask.

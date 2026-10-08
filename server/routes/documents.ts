@@ -1,9 +1,8 @@
-import { randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { config } from "../config.ts";
-import { startConversation } from "../conversations.ts";
+import { newSessionId, startConversation } from "../conversations.ts";
 import { MIME } from "../diagrams.ts";
 import { parseBrief } from "../../shared/brief.ts";
 import { BRIEF_SCRIPT, DOCUMENT_SCRIPT, editMessage, TICKET_SUMMARY_PROMPT, ticketSummaryMessage } from "../documents.ts";
@@ -84,7 +83,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   const briefScript = deps.briefScript ?? BRIEF_SCRIPT;
   // The agent opens the brief on this dashboard to look at it.
   const pageUrl = (docId: number) => `http://127.0.0.1:${config.port}/#/doc:${docId}`;
-  const sessionId = randomUUID();
+  const sessionId = newSessionId();
 
   if (editing) {
     const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";

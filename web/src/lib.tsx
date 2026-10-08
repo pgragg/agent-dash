@@ -93,6 +93,7 @@ export function runTitle(run: HistoryRun): string {
 
 export function resumeCommand(run: HistoryRun): string {
   const cd = `cd '${run.cwd.replace(/'/g, "'\\''")}' && `;
+  if (run.agent === "opencode") return `${cd}opencode --session ${run.sessionId}`;
   return run.agent === "claude" ? `${cd}claude --resume ${run.sessionId}` : `${cd}pi --session ${run.sessionId}`;
 }
 
