@@ -28,6 +28,7 @@ import * as reviewRoute from "./routes/reviewRequests.ts";
 import * as lanesRoute from "./routes/lanes.ts";
 import * as worktreesRoute from "./routes/worktrees.ts";
 import * as settingsRoute from "./routes/settings.ts";
+import * as wikiRoute from "./routes/wiki.ts";
 import * as setupRoute from "./routes/setup.ts";
 import { confirmDeployMessage, deployStageOf, parseEnvironment, planMessage } from "../shared/sdlc.ts";
 import { requestConversationSummaries, summariesFor } from "./conversationSummaries.ts";
@@ -359,6 +360,7 @@ const server = createServer(async (req, res) => {
     if (await lanesRoute.handle(req, res, url, { context: ticketContext, onChange: broadcast })) return;
     if (await worktreesRoute.handle(req, res, url, broadcast)) return;
     if (await settingsRoute.handle(req, res, url)) return;
+    if (wikiRoute.handle(req, res, url, config.wikiDir)) return;
     if (await setupRoute.handle(req, res, url, { follow: followSession })) return;
     if (await loginRoute.handle(req, res, url)) return;
     if (await slackRoute.handle(req, res, url)) return;

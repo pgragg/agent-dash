@@ -1,6 +1,8 @@
 import { Fragment, type MouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { Dashboard, HistoryRun, TicketDocumentWithBody, PrDetail, ThreadStatus, Transcript } from "../../shared/types.ts";
 import { setTeam } from "../../shared/team.ts";
+import { IMAGE_EXT, wikiLinkParts } from "../../shared/wiki.ts";
+import { href } from "./routes.ts";
 import { dashClick, internalHref, JIRA_BROWSE, splitTrailing } from "./links.ts";
 import { EmbeddedImage, MermaidFence, setKnownDiagrams } from "./mermaid.tsx";
 import { addUpdate, entryOf, entryOfSignal, type Group, groupNotification, needSignals, newlyWaiting, newSignals, type Pending, pruneSeen, releasePending, runsOf, runUpdate, type Seen, type SeenAt, signalUpdate, snapshot, type Update } from "./notify.ts";
@@ -425,8 +427,8 @@ export const api = {
 // ---- markdown -----------------------------------------------------------------------
 
 // Group 5 is a local image, `![alt](path)`, and group 6 a document's stored image; a web image stays a link.
-// Group 7 is *italic* or _italic_; a snake_case name is not.
-const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\(https?:\/\/[^)\s]+\))|(https?:\/\/[^\s)<>\]]+)|(!\[[^\]\n]*\]\((?![a-z]+:)<?[^)\s>]+\.(?:png|svg|jpe?g|gif|webp)>?\))|(!\[[^\]\n]*\]\(image:\d+\))|(\*(?![\s*])[^*\n]+?(?<!\s)\*|(?<!\w)_(?![\s_])[^_\n]+?(?<!\s)_(?!\w))/gi;
+// Group 7 is *italic* or _italic_; a snake_case name is not. Group 8 is an Obsidian `[[link]]` or `![[embed]]`.
+const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\(https?:\/\/[^)\s]+\))|(https?:\/\/[^\s)<>\]]+)|(!\[[^\]\n]*\]\((?![a-z]+:)<?[^)\s>]+\.(?:png|svg|jpe?g|gif|webp)>?\))|(!\[[^\]\n]*\]\(image:\d+\))|(\*(?![\s*])[^*\n]+?(?<!\s)\*|(?<!\w)_(?![\s_])[^_\n]+?(?<!\s)_(?!\w))|(!?\[\[[^\]\n]+\]\])/gi;
 
 function linkLabel(url: string): string {
   if (/github\.com\/.+\/pull\/\d+/.test(url)) return prName(url);
@@ -463,6 +465,34 @@ function Link({ url, label }: { url: string; label: ReactNode }) {
   );
 }
 
+// ---- wiki links ----------------------------------------------------------------------
+
+/** Every name a `[[link]]` can use for a wiki note, lower case. Null until the Wiki view loads the list. */
+let wikiNames: Set<string> | null = null;
+export function setWikiNames(names: Set<string>): void {
+  wikiNames = names;
+}
+
+/** `[[Note]]` opens the note in the Wiki view; `![[x.png]]` shows the image from the wiki; a broken link says so. */
+function WikiLink({ token }: { token: string }) {
+  const { embed, target, heading, label } = wikiLinkParts(token);
+  if (embed && IMAGE_EXT.test(target)) {
+    const src = `/api/wiki/file?ref=${encodeURIComponent(target)}`;
+    return (
+      <a className="md-image" href={src} target="_blank" rel="noreferrer" title={target}>
+        <img src={src} alt={label ?? target} loading="lazy" />
+      </a>
+    );
+  }
+  const missing = wikiNames !== null && !wikiNames.has(target.toLowerCase().replace(/\.md$/i, ""));
+  const text = label ?? (heading ? `${target} › ${heading}` : target);
+  return (
+    <a className={`wikilink ${missing ? "missing" : ""}`} href={href(`wiki:${target}`)} title={missing ? `No wiki note is named “${target}”` : `Open “${target}” in the wiki`}>
+      {embed ? `↪ ${text}` : text}
+    </a>
+  );
+}
+
 export function inline(text: string): ReactNode[] {
   const out: ReactNode[] = [];
   let last = 0;
@@ -472,6 +502,7 @@ export function inline(text: string): ReactNode[] {
     if (m[1]) out.push(<code key={m.index}>{tok.slice(1, -1)}</code>);
     else if (m[2]) out.push(<strong key={m.index}>{inline(tok.slice(2, -2))}</strong>);
     else if (m[7]) out.push(<em key={m.index}>{inline(tok.slice(1, -1))}</em>);
+    else if (m[8]) out.push(<WikiLink key={m.index} token={tok} />);
     else if (m[5]) {
       const [, alt, path] = tok.match(/^!\[([^\]]*)\]\(<?([^)\s>]+)>?\)$/)!;
       out.push(<EmbeddedImage key={m.index} alt={alt} path={path} />);

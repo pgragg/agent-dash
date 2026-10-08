@@ -15,6 +15,8 @@ import type { Dashboard } from "../../shared/types.ts";
  * | `#/c:SESSION`     | A conversation's page                             |
  * | `#/doc:ID`        | A document's page                                 |
  * | `#/documents`     | Every document                                    |
+ * | `#/wiki`          | The local Obsidian wiki: every note, and search   |
+ * | `#/wiki:REF`      | One wiki note, by path, file name, title or alias |
  * | `#/d:ID`          | The document of a diagram, from an older link     |
  * | `#/worktrees`     | Every git worktree, with Clean up                 |
  * | `#/settings`      | The config file: your own paths and accounts      |
@@ -31,6 +33,7 @@ export type Route =
   | { view: "history" }
   | { view: "conversation"; id: string | null }
   | { view: "documents" }
+  | { view: "wiki"; ref: string | null }
   | { view: "document"; id: number }
   | { view: "diagram"; id: number }
   | { view: "worktrees" }
@@ -46,6 +49,8 @@ export function parseHash(hash: string): Route {
   if (path === "history") return { view: "history" };
   // A diagram is a document now, so an older link to the list opens the documents.
   if (path === "documents" || path === "diagrams") return { view: "documents" };
+  if (path === "wiki") return { view: "wiki", ref: null };
+  if (path.startsWith("wiki:")) return { view: "wiki", ref: path.slice(5) || null };
   if (path === "worktrees") return { view: "worktrees" };
   if (path === "settings") return { view: "settings" };
   if (path === "help/local-url") return { view: "localUrl" };

@@ -161,6 +161,8 @@ export function buildConfig(s: Settings) {
       reloginCommand: s.slackReloginCommand,
     },
     smoketestGuide: expandPath(s.smoketestGuide),
+    /** The local Obsidian vault of the Wiki view; empty turns it off. */
+    wikiDir: expandPath(s.wikiDir),
     /** Runs and PRs older than this do not create "other ticket" groups or unlinked rows. */
     recentDays: s.recentDays,
     /** Remote tracker and GitHub answers are cached this long, so a page refresh does not hit the APIs. */
