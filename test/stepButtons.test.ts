@@ -23,12 +23,12 @@ test("the model's label is cleaned to one short line", () => {
   assert.equal(cleanLabel('"Open prod parcel bump PR."\n\nThis step…'), "Open prod parcel bump PR");
   assert.equal(cleanLabel("- Label: Run Beta smoketest"), "Run Beta smoketest");
   assert.equal(cleanLabel("**Start ticket**"), "Start ticket");
-  assert.equal(cleanLabel("Based on the step description, the button label is:\n\nOpen prod chart bump PR"), "Open prod chart bump PR");
+  assert.equal(cleanLabel("Based on the step description, the button label is:\n\nAgent opens the prod chart bump PR"), "Agent opens the prod chart bump PR");
   assert.equal(cleanLabel("\n\n"), null);
   assert.equal(cleanLabel("x".repeat(80))!.length, 60);
   const prompt = stepLabelPrompt("FSDK-1", "s".repeat(5_000));
   assert.match(prompt, /ticket FSDK-1/);
-  assert.ok(prompt.length < 3_000);
+  assert.ok(prompt.length < 3_500);
 });
 
 test("only the top step of each open ticket's newest finished draft gets a label", () => {
@@ -38,6 +38,9 @@ test("only the top step of each open ticket's newest finished draft gets a label
   db.createRequest("FSDK-12");
   const steps = topSteps([group("FSDK-10"), group("FSDK-11", "done"), group("FSDK-12"), group("FSDK-13")], summaries());
   assert.deepEqual(steps.map((s) => s.body), ["new first step"]);
+  const prompt = stepLabelPrompt("FSDK-10", "Piper moves the ticket to In Review");
+  assert.match(prompt, /starts with "Agent"/);
+  assert.match(prompt, /Move ticket to <status>/);
 });
 
 test("each label is drafted once; a failure is tried again only later; a new draft's top step gets its own label", async () => {
@@ -58,10 +61,10 @@ test("each label is drafted once; a failure is tried again only later; a new dra
   assert.equal(changes, 2);
   assert.equal(summaries()["FSDK-20"].latest.steps[0].label, "Start ticket");
   assert.equal(summaries()["FSDK-21"].latest.steps[0].label, null);
-  // A labelled step leaves the list; the failed one waits for the retry time.
-  assert.deepEqual(topSteps(groups, summaries()).map((s) => s.ticket), ["FSDK-21"]);
+  // A labelled step is not drafted again; the failed one waits for the retry time.
   assert.deepEqual(requestStepLabels(topSteps(groups, summaries()), () => {}, draft, new Date("2026-10-08T10:01:00.000Z")), []);
-  assert.equal(requestStepLabels(topSteps(groups, summaries()), () => {}, draft, new Date("2026-10-08T10:06:00.000Z")).length, 1);
+  const retried = requestStepLabels(topSteps(groups, summaries()), () => {}, draft, new Date("2026-10-08T10:06:00.000Z"));
+  assert.deepEqual(retried, [summaries()["FSDK-21"].latest.steps[0].id]);
 
   draftFor("FSDK-20", ["Piper moves the ticket to In Review"]);
   const [next] = topSteps(groups, summaries());
@@ -69,4 +72,21 @@ test("each label is drafted once; a failure is tried again only later; a new dra
   requestStepLabels([next], () => {}, async () => "Move to In Review", now);
   await new Promise((r) => setTimeout(r, 10));
   assert.equal(summaries()["FSDK-20"].latest.steps[0].label, "Move to In Review");
+});
+
+test("a label from an older prompt is drafted again, and a failed redraft keeps the old label", async () => {
+  draftFor("FSDK-30", ["An agent opens the prod parcel bump PR"]);
+  const [step] = topSteps([group("FSDK-30")], summaries());
+  const now = new Date("2026-10-08T10:00:00.000Z");
+  assert.deepEqual(db.claimStepLabels([step.id], 1, now.toISOString(), now), [step.id]);
+  db.finishStepLabel(step.id, "Open prod parcel bump PR");
+  assert.deepEqual(db.claimStepLabels([step.id], 1, now.toISOString(), now), []);
+  assert.equal(requestStepLabels([step], () => {}, async () => { throw new Error("down"); }, now).length, 1);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(summaries()["FSDK-30"].latest.steps[0].label, "Open prod parcel bump PR");
+  // The failed redraft counts as a try of the new prompt, so it waits for the retry time.
+  assert.deepEqual(requestStepLabels([step], () => {}, async () => "x", new Date("2026-10-08T10:01:00.000Z")), []);
+  assert.equal(requestStepLabels([step], () => {}, async () => "Agent opens prod parcel bump PR", new Date("2026-10-08T10:06:00.000Z")).length, 1);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(summaries()["FSDK-30"].latest.steps[0].label, "Agent opens prod parcel bump PR");
 });

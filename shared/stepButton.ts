@@ -5,22 +5,30 @@
 
 const MAX_LABEL = 60;
 
+/** Bump it when the prompt changes, so each top step gets a label in the new style. */
+export const LABEL_VERSION = 2;
+
 /** The label until the model's label comes, or when it gives nothing usable. */
-export const FALLBACK_LABEL = "Start next step";
+export const FALLBACK_LABEL = "Agent starts the next step";
 
-/** The prompt for the cheap model. It names the step; it does not choose it. */
+/** The prompt for the cheap model. It says what a click does; it does not choose the step. */
 export function stepLabelPrompt(key: string, step: string): string {
-  return `A kanban card for ticket ${key} has one button. A click starts the ticket's top next step, below. Write the button's label.
+  return `A kanban card for ticket ${key} has one button for the ticket's top next step, below. Write the button's label: what a click on it makes happen.
 
-Rules: 2 to 5 words, plain text, sentence case, start with a verb, no ticket key, no link, no quotes, no end period. Name what the step does, not who does it.
+What a click does:
+- When the step only moves the ticket to a new status in Jira, the click moves the ticket. The label is "Move ticket to <status>".
+- Else the click starts a coding agent, and its task is the step. The label says what that agent does, and starts with "Agent". When the step is for a person (Piper, a reviewer, a teammate), the agent cannot do it for them: say how the agent helps, for example it checks the state, drafts a message, or prepares the command.
+
+Rules: 3 to 7 words, plain text, sentence case, no ticket key, no link, no quotes, no end period.
 
 Examples of good labels:
-- Start ticket
-- Open prod parcel bump PR
-- Move to In Review
-- Run Beta smoketest
-- Get the PR approved
-- Refresh AWS beta login
+- Agent starts work on the ticket
+- Agent opens prod parcel bump PR
+- Agent re-runs the Beta smoketest
+- Agent checks PR for an approval
+- Agent drafts the reviewer nudge
+- Agent prepares the AWS login fix
+- Move ticket to In Review
 
 The step:
 ${step.slice(0, 2_000)}
@@ -31,11 +39,11 @@ Reply with the label only: one line, nothing before or after it.`;
 /**
  * The model's reply as one short label, with no list mark, quotes, link or end period. Null when
  * nothing is left. The cheap model can write a lead-in line ("Based on the step, the label is:"),
- * so the first line of at most 6 words that does not end in a colon counts.
+ * so the first line of at most 8 words that does not end in a colon counts.
  */
 export function cleanLabel(raw: string): string | null {
   const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
-  const line = lines.find((l) => !l.endsWith(":") && l.split(/\s+/).length <= 6) ?? lines[0] ?? "";
+  const line = lines.find((l) => !l.endsWith(":") && l.split(/\s+/).length <= 8) ?? lines[0] ?? "";
   const label = line
     .replace(/https?:\/\/\S+/g, "")
     .replace(/^(?:[-*•]|\d+[.)])\s+/, "")
