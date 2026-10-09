@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 
 import { clampWidth, DEFAULT_WIDTH } from "./viewWidth.ts";
 
@@ -73,4 +73,14 @@ export function FullScreenButton({ view }: { view: ViewWidth }) {
       {view.full ? "Exit full screen" : "Full screen"} <kbd>F</kbd>
     </button>
   );
+}
+
+/**
+ * The workspace's view buttons (Full screen, and Close in the kanban drawer). They sit in the workspace header row:
+ * a floating button covers the controls under it when you scroll.
+ */
+export const ViewTools = createContext<ReactNode>(null);
+
+export function ViewToolsSlot() {
+  return <>{useContext(ViewTools)}</>;
 }

@@ -3,6 +3,7 @@ import type { Dashboard, ParkedRun, ParkReason, Ticket } from "../../shared/type
 import { conversationHash } from "./agents.tsx";
 import { age, inline, plural, post, stamp } from "./lib.tsx";
 import { splitParked } from "./parkedRows.ts";
+import { ViewToolsSlot } from "./resizeView.tsx";
 import { href } from "./routes.ts";
 
 /** The waiting agents that agent-dash stopped, grouped by ticket, with what each one needed. */
@@ -125,6 +126,8 @@ export function ParkedAsksPane({ ticketKey, rows, data, onBoard, now }: { ticket
           <span className="meta">
             {rows.length ? `${plural(rows.length, "agent")} parked, each with its own ask. Send or Resume continues the same session, and Dismiss removes the ask.` : "No parked ask here any more."}
           </span>
+          <span className="grow" />
+          <ViewToolsSlot />
         </div>
       </header>
       {error && <pre className="error">{error}</pre>}
