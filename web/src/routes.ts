@@ -18,7 +18,6 @@ import type { Dashboard } from "../../shared/types.ts";
  * | `#/wiki`          | The local Obsidian wiki: every note, and search   |
  * | `#/wiki:REF`      | One wiki note, by path, file name, title or alias |
  * | `#/d:ID`          | The document of a diagram, from an older link     |
- * | `#/worktrees`     | Every git worktree, with Clean up                 |
  * | `#/settings`      | The config file: your own paths and accounts      |
  * | `#/help/local-url` | How to open agent-dash at your own HTTPS URL     |
  *
@@ -35,14 +34,13 @@ export type Route =
   | { view: "wiki"; ref: string | null }
   | { view: "document"; id: number }
   | { view: "diagram"; id: number }
-  | { view: "worktrees" }
   | { view: "settings" }
   | { view: "localUrl" };
 
 export function parseHash(hash: string): Route {
   const path = decodeURIComponent(hash.replace(/^#\/?/, ""));
-  // The old Notifications view: its entries are the board's Up next.
-  if (path === "needs") return { view: "board", ref: null };
+  // The old Notifications view: its entries are the board's Up next. The old Worktrees view is gone.
+  if (path === "needs" || path === "worktrees") return { view: "board", ref: null };
   if (path === "parked") return { view: "parked" };
   if (path === "prs") return { view: "prs", pr: null };
   if (path.startsWith("pr:")) return { view: "prs", pr: path };
@@ -51,7 +49,6 @@ export function parseHash(hash: string): Route {
   if (path === "documents" || path === "diagrams") return { view: "documents" };
   if (path === "wiki") return { view: "wiki", ref: null };
   if (path.startsWith("wiki:")) return { view: "wiki", ref: path.slice(5) || null };
-  if (path === "worktrees") return { view: "worktrees" };
   if (path === "settings") return { view: "settings" };
   if (path === "help/local-url") return { view: "localUrl" };
   if (/^doc:\d+$/.test(path)) return { view: "document", id: Number(path.slice(4)) };
@@ -60,9 +57,10 @@ export function parseHash(hash: string): Route {
   return { view: "board", ref: path || null };
 }
 
-/** The hash to replace an old address with, or null. The Notifications view is the board now. */
+/** The hash to replace an old address with, or null. The Notifications and Worktrees views are gone, so their links open the board. */
 export function redirectHash(hash: string): string | null {
-  return decodeURIComponent(hash.replace(/^#\/?/, "")) === "needs" ? "#/" : null;
+  const path = decodeURIComponent(hash.replace(/^#\/?/, ""));
+  return path === "needs" || path === "worktrees" ? "#/" : null;
 }
 
 /** `#/t:ABC-123`: the ref stays readable, and only what would break the hash is escaped. */

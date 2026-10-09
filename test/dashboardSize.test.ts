@@ -34,7 +34,6 @@ function dashboard(): Dashboard {
     reviewDrafts: {},
     conversationSummaries: {},
     reviewRequests: {},
-    lanes: {},
     parked: [parked()],
     sources: {},
     extensionInstalled: false,

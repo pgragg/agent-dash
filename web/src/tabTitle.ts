@@ -105,8 +105,6 @@ export function tabTitle({ route, data, needsYou, open }: TitleInput): string {
     }
     case "parked":
       return join("Parked", data.parked.length || null);
-    case "worktrees":
-      return join("Worktrees", null);
     case "settings":
       return join("Settings", null);
     case "localUrl":

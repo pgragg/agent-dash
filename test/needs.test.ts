@@ -16,6 +16,11 @@ test("#/needs opens the board: the Notifications view is gone", () => {
   assert.equal(redirectHash("#/t:FSDK-1"), null);
 });
 
+test("#/worktrees opens the board: the Worktrees view is gone", () => {
+  assert.deepEqual(parseHash("#/worktrees"), { view: "board", ref: null });
+  assert.equal(redirectHash("#/worktrees"), "#/");
+});
+
 test("each signal leads to the place in agent-dash where you act on it", () => {
   assert.deepEqual(needStep(item({ sessionId: "s1" }), null, "t:FSDK-1"), { label: "Reply to the agent", ref: "r:s1" });
   assert.deepEqual(needStep(item({ kind: "run_error", sessionId: "s1" }), null, "t:FSDK-1"), { label: "Open the agent", ref: "r:s1" });

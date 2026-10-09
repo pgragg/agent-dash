@@ -34,8 +34,6 @@ export interface ParkInput {
   exempt: Set<string>;
   /** Tickets with an entry in the queue: there, a resolved agent's ask is already shown. */
   shown?: Set<string>;
-  /** Agents of parallel lanes: they work side by side, so a newer lane does not replace an older one. */
-  laneSessions?: Set<string>;
   now: number;
   cap?: number;
 }
@@ -79,7 +77,7 @@ export function choosePark(input: ParkInput): ParkChoice[] {
   const live = runs.filter((r) => r.status !== "finished" && !chosen.has(r.sessionId));
   for (const r of candidates) {
     if (chosen.has(r.sessionId)) continue;
-    if (r.tickets[0] && !input.laneSessions?.has(r.sessionId) && live.some((o) => o.sessionId !== r.sessionId && o.tickets[0] === r.tickets[0] && o.startedAt > r.startedAt)) park(r, "superseded");
+    if (r.tickets[0] && live.some((o) => o.sessionId !== r.sessionId && o.tickets[0] === r.tickets[0] && o.startedAt > r.startedAt)) park(r, "superseded");
     else if (waited(r) > STALE_MS && !r.askedQuestion) park(r, "stale");
   }
 

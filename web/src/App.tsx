@@ -6,13 +6,12 @@ import { awaitsOwner, ownerWaitText } from "../../shared/ownerApproval.ts";
 import { prRef } from "../../shared/refs.ts";
 import { hideUrls } from "../../shared/runTitle.ts";
 import { READ_FEEDBACK, REVIEW_AND_MERGE } from "../../shared/prVerbs.ts";
-import { type AttentionItem, type AttentionKind, type ConversationSummary, type Dashboard, type HistoryRun, type NextStep, type Note, PARKED_ASK_CHARS, type ParkedRun, type PullRequest, type Run, type LaneMode, type ThreadStatusChange, type TicketGroup, type TicketSummary, type TicketSummaryState } from "../../shared/types.ts";
+import { type AttentionItem, type AttentionKind, type ConversationSummary, type Dashboard, type HistoryRun, type NextStep, type Note, PARKED_ASK_CHARS, type ParkedRun, type PullRequest, type Run, type ThreadStatusChange, type TicketGroup, type TicketSummary, type TicketSummaryState } from "../../shared/types.ts";
 import { conversationHash, launchAgent, ResumeHere, resuming } from "./agents.tsx";
 import { ParkedAskList, ParkedAsksPane, ParkedView } from "./parked.tsx";
 import { askKey, askRef, type AskGroup, needsYouCount, parkedAsks, splitParked } from "./parkedRows.ts";
 import { CADDY_HTTP, CADDY_HTTPS, caddyCommands, cleanHost, cleanPort, rootScript, undoCommands } from "./localUrl.ts";
 import { SettingsView, SetupBanner } from "./settings.tsx";
-import { FIRST_LANES, type LaneDraft, LanesCard, LanesEditor, type LaneRun, WorktreesView } from "./lanes.tsx";
 import { filterHistory, groupByDay } from "./history.ts";
 import { PrPanel, PrVerbButton } from "./prPanel.tsx";
 import { ciTag } from "./prView.ts";
@@ -319,12 +318,6 @@ function statusText(run: HistoryRun, now: number, summary?: ConversationSummary)
 function runTone(run: HistoryRun, summary?: ConversationSummary): string {
   const state = agentState(run, summary);
   return run.endedInError ? "bad" : state === "awaiting_input" ? "waiting" : state === "working" || state === "waits_on_review" ? "working" : "muted";
-}
-
-/** A lane's agent state, from the ticket's runs. Null until pi saves the first message. */
-function laneRun(s: Subject, sessionId: string, now: number, summary?: ConversationSummary): LaneRun | null {
-  const run = s.ticket?.runs.find((r) => r.sessionId === sessionId);
-  return run ? { tone: runTone(run, summary), text: statusText(run, now, summary), working: run.status === "working" } : null;
 }
 
 // ---- queue (left rail) --------------------------------------------------------------
@@ -733,29 +726,22 @@ function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd:
   const folders = workFolders(s);
   const [message, setMessage] = useState("");
   const [starting, setStarting] = useState(false);
-  const [started, setStarted] = useState<{ at: number; sessionId: string | null; lanes?: boolean } | null>(null);
+  const [started, setStarted] = useState<{ at: number; sessionId: string | null } | null>(null);
   const [terminal, setTerminal] = useState(false);
   const [context, setContext] = useState<string | null>(null);
-  const [parallel, setParallel] = useState(false);
-  const [lanes, setLanes] = useState<LaneDraft[]>(FIRST_LANES);
-  const [laneMode, setLaneMode] = useState<LaneMode>("land");
-  const [base, setBase] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     if (focusSignal) ref.current?.focus();
   }, [focusSignal]);
-  const ready = parallel ? lanes.every((l) => l.name.trim() && l.message.trim()) : !!message.trim();
+  const ready = !!message.trim();
   const start = async () => {
     if (!ready) return;
     setStarting(true);
     try {
-      // Lanes are always headless; their sessions show on the Parallel lanes card.
-      const body = parallel ? { message, cwd, lanes, laneMode, base: base.trim() || undefined } : { message, cwd, terminal };
-      const sessionId = await launchAgent(key, body);
+      const sessionId = await launchAgent(key, { message, cwd, terminal });
       onError(null);
       setMessage("");
-      if (parallel) setLanes(FIRST_LANES);
-      setStarted({ at: Date.now(), sessionId, lanes: parallel });
+      setStarted({ at: Date.now(), sessionId });
     } catch (err) {
       onError((err as Error).message);
     }
@@ -772,7 +758,7 @@ function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd:
           ref={ref}
           rows={3}
           value={message}
-          placeholder={parallel ? `Brief that every lane on ${key} gets (optional)…` : `First message for the new agent on ${key}…`}
+          placeholder={`First message for the new agent on ${key}…`}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -792,23 +778,17 @@ function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd:
               ))}
             </datalist>
           </label>
-          <label className="meta" title="Start one agent per lane, each in its own git worktree of this folder's repo">
-            <input type="checkbox" checked={parallel} onChange={(e) => setParallel(e.target.checked)} /> parallel lanes
+          <label className="meta" title={`Open ${agentLabel()} in a new iTerm tab instead of on this page`}>
+            <input type="checkbox" checked={terminal} onChange={(e) => setTerminal(e.target.checked)} /> in iTerm
           </label>
-          {!parallel && (
-            <label className="meta" title={`Open ${agentLabel()} in a new iTerm tab instead of on this page`}>
-              <input type="checkbox" checked={terminal} onChange={(e) => setTerminal(e.target.checked)} /> in iTerm
-            </label>
-          )}
           <button className="btn primary" onClick={start} disabled={starting || !ready || !cwd.trim()}>
-            {starting ? "Starting…" : parallel ? `Start ${lanes.length} lanes` : "Start agent"} <Kbd>⌘↵</Kbd>
+            {starting ? "Starting…" : "Start agent"} <Kbd>⌘↵</Kbd>
           </button>
         </div>
-        {parallel && <LanesEditor ticket={key} lanes={lanes} setLanes={setLanes} mode={laneMode} setMode={setLaneMode} base={base} setBase={setBase} />}
       </div>
       {started && Date.now() - started.at < 30_000 && (
         <p className="meta started">
-          {started.lanes ? "Started. Each lane shows under Parallel lanes, with its own worktree and agent." : started.sessionId ? <>Started. It shows under Agents once {agentLabel()} saves the first message, or <a href={conversationHash(started.sessionId)}>open its page</a>.</> : "Started in a new iTerm tab. It shows under Agents once it is running."}
+          {started.sessionId ? <>Started. It shows under Agents once {agentLabel()} saves the first message, or <a href={conversationHash(started.sessionId)}>open its page</a>.</> : "Started in a new iTerm tab. It shows under Agents once it is running."}
         </p>
       )}
       <details
@@ -1410,8 +1390,6 @@ function Workspace({ s, parked, data, now, position, doneForNow, onDoneForNow, o
           ))}
         </div>
       )}
-
-      {s.ticket && (data.lanes[s.ticket.ticket.key]?.length ?? 0) > 0 && <LanesCard ticket={s.ticket.ticket.key} title={s.ticket.ticket.summary} lanes={data.lanes[s.ticket.ticket.key]} prs={prs} runFor={(id) => laneRun(s, id, now, data.conversationSummaries[id])} onError={setError} />}
 
       {prs.length > 0 && (
         <div className="stack">
@@ -2163,9 +2141,6 @@ export function App() {
             <a href="#/wiki" className={view === "wiki" ? "active" : ""} aria-current={view === "wiki" ? "page" : undefined}>
               Wiki
             </a>
-            <a href="#/worktrees" className={view === "worktrees" ? "active" : ""} aria-current={view === "worktrees" ? "page" : undefined}>
-              Worktrees
-            </a>
             <a href="#/settings" className={view === "settings" ? "active" : ""} aria-current={view === "settings" ? "page" : undefined}>
               Settings
             </a>
@@ -2221,10 +2196,6 @@ export function App() {
       ) : route.view === "wiki" ? (
         <main className="main">
           {route.ref ? <WikiNoteView key={route.ref} refId={route.ref} /> : <WikiListView />}
-        </main>
-      ) : route.view === "worktrees" ? (
-        <main className="main">
-          <WorktreesView now={now} />
         </main>
       ) : route.view === "settings" ? (
         <main className="main">
