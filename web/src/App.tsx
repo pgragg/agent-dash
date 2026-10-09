@@ -39,7 +39,7 @@ import { SessionScope } from "./mermaid.tsx";
 import { CardStep } from "./cardStep.tsx";
 import { type BoardMode, kanbanColumns, type Searchable, searchCards, stageOf, useBoardMode } from "./kanban.ts";
 import { starredFirst } from "./star.ts";
-import { FullScreenButton, ResizeHandle, useViewWidth } from "./resizeView.tsx";
+import { FullScreenButton, ResizeHandle, useViewWidth, ViewTools, ViewToolsSlot } from "./resizeView.tsx";
 import { rowName, rowType } from "./whyRow.ts";
 import { DEFAULT_SNOOZE, isSnoozed, SNOOZE_OPTIONS, type SnoozeOption, snoozeUntil, untilLabel } from "./snooze.ts";
 import { tabTitle } from "./tabTitle.ts";
@@ -960,19 +960,23 @@ function History({ runs: allRuns, suggested = [], summaries = {}, now, onError, 
       {shown.map((r) => (
         <li key={r.sessionId} id={`h:r:${r.sessionId}`} className={open === r.sessionId ? "open" : ""}>
           <div className="h-row">
-            <Dot tone={runTone(r, summaries[r.sessionId])} pulse={r.status === "working"} />
-            <button className="h-title" onClick={() => setOpen(open === r.sessionId ? null : r.sessionId)} title={r.firstPrompt}>
-              {runTitle(r)}
-            </button>
-            <span className="meta">
-              {shortDate(r.startedAt)} · {dirLabel(r.cwd)} · {plural(r.userMessageCount, "prompt")}
-              {r.createdPrs.length > 0 && ` · opened ${plural(r.createdPrs.length, "PR")}`}
+            <span className="h-main">
+              <Dot tone={runTone(r, summaries[r.sessionId])} pulse={r.status === "working"} />
+              <button className="h-title" onClick={() => setOpen(open === r.sessionId ? null : r.sessionId)} title={r.firstPrompt}>
+                {runTitle(r)}
+              </button>
+              <span className="meta">
+                {shortDate(r.startedAt)} · {dirLabel(r.cwd)} · {plural(r.userMessageCount, "prompt")}
+                {r.createdPrs.length > 0 && ` · opened ${plural(r.createdPrs.length, "PR")}`}
+              </span>
             </span>
-            <span className="grow" />
-            <span className="meta">{statusText(r, now, summaries[r.sessionId])}</span>
-            {ticket && <ThreadButtons ticket={ticket} run={r} onError={onError} className="btn ghost small" />}
-            <OpenTab run={r} onError={onError} className="btn ghost small" label="Open" />
+            <span className="meta h-status">{statusText(r, now, summaries[r.sessionId])}</span>
+            <span className="h-actions">
+              {ticket && <ThreadButtons ticket={ticket} run={r} onError={onError} className="btn ghost small" />}
+              <OpenTab run={r} onError={onError} className="btn ghost small" label="Open" />
+            </span>
           </div>
+          {open !== r.sessionId && r.lastReply && <p className="h-last">{r.lastReply}</p>}
           {open === r.sessionId && r.lastMessage && (
             <div className="h-message">
               <SessionScope sessionId={r.sessionId}>
@@ -986,21 +990,24 @@ function History({ runs: allRuns, suggested = [], summaries = {}, now, onError, 
         suggested.map((r) => (
           <li key={r.sessionId} id={`h:r:${r.sessionId}`} className="suggested">
             <div className="h-row">
-              <Dot tone="muted" />
-              <span className="h-title" title={r.firstPrompt}>
-                {runTitle(r)}
+              <span className="h-main">
+                <Dot tone="muted" />
+                <span className="h-title" title={r.firstPrompt}>
+                  {runTitle(r)}
+                </span>
+                <span className="meta" title="The thread names the ticket only in its text: no name, branch or PR has the key. It gives no signal until you link it.">
+                  {shortDate(r.startedAt)} · mentions {ticket}
+                </span>
               </span>
-              <span className="meta" title="The thread names the ticket only in its text: no name, branch or PR has the key. It gives no signal until you link it.">
-                {shortDate(r.startedAt)} · mentions {ticket}
+              <span className="h-actions">
+                <button className="btn ghost small" onClick={async () => onError(await api.setThread(ticket, r.sessionId, "relevant"))} title={`This thread is about ${ticket}: link it`}>
+                  Link
+                </button>
+                <button className="btn ghost small" onClick={async () => onError(await api.setThread(ticket, r.sessionId, "unlinked"))} title="Hide this suggestion">
+                  Hide
+                </button>
+                <OpenTab run={r} onError={onError} className="btn ghost small" label="Open" />
               </span>
-              <span className="grow" />
-              <button className="btn ghost small" onClick={async () => onError(await api.setThread(ticket, r.sessionId, "relevant"))} title={`This thread is about ${ticket}: link it`}>
-                Link
-              </button>
-              <button className="btn ghost small" onClick={async () => onError(await api.setThread(ticket, r.sessionId, "unlinked"))} title="Hide this suggestion">
-                Hide
-              </button>
-              <OpenTab run={r} onError={onError} className="btn ghost small" label="Open" />
             </div>
           </li>
         ))}
@@ -1018,19 +1025,22 @@ function History({ runs: allRuns, suggested = [], summaries = {}, now, onError, 
           return (
             <li key={r.sessionId} id={`h:r:${r.sessionId}`} className="resolved">
               <div className="h-row">
-                <span className="resolved-mark" aria-hidden>
-                  ✓
+                <span className="h-main">
+                  <span className="resolved-mark" aria-hidden>
+                    ✓
+                  </span>
+                  <span className="h-title" title={r.firstPrompt}>
+                    {runTitle(r)}
+                  </span>
+                  <span className="meta" title={t.createdAt}>
+                    resolved {age(t.createdAt, now)} ago{t.reason ? ` · ${t.reason}` : ""}
+                  </span>
                 </span>
-                <span className="h-title" title={r.firstPrompt}>
-                  {runTitle(r)}
+                <span className="h-actions">
+                  <button className="btn ghost small" onClick={async () => onError(await api.setThread(ticket, r.sessionId, "relevant"))} title={`Count this thread for ${ticket} again`}>
+                    Mark relevant
+                  </button>
                 </span>
-                <span className="meta" title={t.createdAt}>
-                  resolved {age(t.createdAt, now)} ago{t.reason ? ` · ${t.reason}` : ""}
-                </span>
-                <span className="grow" />
-                <button className="btn ghost small" onClick={async () => onError(await api.setThread(ticket, r.sessionId, "relevant"))} title={`Count this thread for ${ticket} again`}>
-                  Mark relevant
-                </button>
               </div>
             </li>
           );
@@ -1366,6 +1376,7 @@ function Workspace({ s, parked, data, now, position, doneForNow, onDoneForNow, o
                 Done for now <Kbd>E</Kbd>
               </button>
             ))}
+          <ViewToolsSlot />
         </div>
         {s.ticket && <SdlcBar group={s.ticket} events={data.sdlcEvents[s.ticket.ticket.key] ?? []} cwd={cwd} onError={setError} />}
         {s.items.length + parked.length > 0 && <WhyList s={s} parked={parked} data={data} now={now} cwd={cwd} lastLook={lastLook} onError={setError} />}
@@ -1586,31 +1597,34 @@ function HistoryView({ data, now }: { data: Dashboard; now: number }) {
         <div className="stack" key={g.label}>
           <h2 className="section-title">{g.label}</h2>
           <div className="card flush">
-            <ol className="history">
+            <ol className="history chats">
               {g.runs.map((r) => (
                 <li key={r.sessionId} className={open === r.sessionId ? "open" : ""}>
-                  <div className="h-row one-line">
-                    <Dot tone={runTone(r, data.conversationSummaries[r.sessionId])} pulse={r.status === "working"} />
-                    <button className="h-title" onClick={() => setOpen(open === r.sessionId ? null : r.sessionId)} title={r.firstPrompt}>
-                      {runTitle(r)}
-                    </button>
-                    {r.tickets.map((k) =>
-                      tickets.has(k) ? (
-                        <a key={k} className="key-link" href={href(`t:${k}`)} title={`${tickets.get(k)!.summary} · open on the board`}>
-                          {k}
-                        </a>
-                      ) : (
-                        <span key={k} className="key-link">
-                          {k}
-                        </span>
-                      ),
-                    )}
-                    <span className="meta shrink">
-                      {dirLabel(r.cwd)} · {plural(r.userMessageCount, "prompt")} · started {stamp(r.startedAt)}
+                  <div className="h-row">
+                    <span className="h-main">
+                      <Dot tone={runTone(r, data.conversationSummaries[r.sessionId])} pulse={r.status === "working"} />
+                      <button className="h-title" onClick={() => setOpen(open === r.sessionId ? null : r.sessionId)} title={r.firstPrompt}>
+                        {runTitle(r)}
+                      </button>
+                      {r.tickets.map((k) =>
+                        tickets.has(k) ? (
+                          <a key={k} className="key-link" href={href(`t:${k}`)} title={`${tickets.get(k)!.summary} · open on the board`}>
+                            {k}
+                          </a>
+                        ) : (
+                          <span key={k} className="key-link">
+                            {k}
+                          </span>
+                        ),
+                      )}
+                      <span className="meta">
+                        {dirLabel(r.cwd)} · {plural(r.userMessageCount, "prompt")} · started {stamp(r.startedAt)}
+                      </span>
                     </span>
-                    <span className="grow" />
-                    <span className="meta">{statusText(r, now, data.conversationSummaries[r.sessionId])}</span>
-                    <OpenTab run={r} onError={setActionError} className="btn ghost small" label="Open" />
+                    <span className="meta h-status">{statusText(r, now, data.conversationSummaries[r.sessionId])}</span>
+                    <span className="h-actions">
+                      <OpenTab run={r} onError={setActionError} className="btn ghost small" label="Open" />
+                    </span>
                   </div>
                   {open !== r.sessionId && r.lastReply && <p className="h-last">{r.lastReply}</p>}
                   {/* A live chat reloads with the dashboard, so new turns show up; a finished one never changes. */}
@@ -2267,13 +2281,18 @@ export function App() {
             <aside className={`kanban-drawer ${viewWidth.full ? "full" : ""}`} aria-label="Workspace" style={viewWidth.full ? undefined : { width: `min(${viewWidth.width}px, 100%)` }}>
               {!viewWidth.full && <ResizeHandle side="left" scale={1} view={viewWidth} max={() => kanbanRef.current?.clientWidth ?? window.innerWidth} />}
               <div className="drawer-scroll">
-                <div className="drawer-tools">
-                  <FullScreenButton view={viewWidth} />
-                  <button className="btn ghost small" onClick={() => setDrawer(false)} title="Close the workspace (Esc)">
-                    Close <Kbd>Esc</Kbd>
-                  </button>
-                </div>
-                {workspace}
+                <ViewTools.Provider
+                  value={
+                    <>
+                      <FullScreenButton view={viewWidth} />
+                      <button className="btn ghost small" onClick={() => setDrawer(false)} title="Close the workspace (Esc)">
+                        Close <Kbd>Esc</Kbd>
+                      </button>
+                    </>
+                  }
+                >
+                  {workspace}
+                </ViewTools.Provider>
               </div>
             </aside>
           )}
@@ -2359,10 +2378,7 @@ export function App() {
             <div className="ws-frame" style={viewWidth.full ? undefined : { maxWidth: viewWidth.width }}>
               {!viewWidth.full && <ResizeHandle side="left" scale={2} view={viewWidth} max={() => mainRef.current?.clientWidth ?? window.innerWidth} />}
               {!viewWidth.full && <ResizeHandle side="right" scale={2} view={viewWidth} max={() => mainRef.current?.clientWidth ?? window.innerWidth} />}
-              <div className="ws-tools">
-                <FullScreenButton view={viewWidth} />
-              </div>
-              {workspace}
+              <ViewTools.Provider value={<FullScreenButton view={viewWidth} />}>{workspace}</ViewTools.Provider>
             </div>
           </main>
         </div>
