@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -31,7 +31,7 @@ Object.assign(globalThis, {
   document: { addEventListener: (_: string, fn: typeof onClick) => (onClick = fn) },
   fetch: async (_: string, init: { body: string }) => void sent.push(JSON.parse(init.body)),
 });
-const { recordView, usage } = await import("../web/src/usage.ts");
+const { recordControl, recordView, usage } = await import("../web/src/usage.ts");
 
 test("a posted usage row needs a known kind and a short plain name; other ticket keys are dropped", () => {
   assert.deepEqual(parseUsage({ kind: "control", name: "snooze:until-change", ticket: "FSDK-1" }, PATTERN), { kind: "control", name: "snooze:until-change", ticket: "FSDK-1" });
@@ -82,4 +82,29 @@ test("the page sends a view row only when the view changes, and one row per tagg
     { kind: "control", name: "snooze:1h", ticket: "FSDK-3" },
     { kind: "control", name: "board:kanban", ticket: null },
   ]);
+});
+
+test("a key-fired control sends one row from its action, with no ticket when none is given", () => {
+  sent.length = 0;
+  recordControl("snooze:until-change", "FSDK-4");
+  recordControl("board:queue");
+  assert.deepEqual(sent, [
+    { kind: "control", name: "snooze:until-change", ticket: "FSDK-4" },
+    { kind: "control", name: "board:queue", ticket: null },
+  ]);
+});
+
+// The page has no render tests, so this reads App.tsx, as layout.test.ts does.
+test("each snooze and board switch is recorded at one place, so a click or a key adds one row", () => {
+  const app = readFileSync(new URL("../web/src/App.tsx", import.meta.url), "utf8");
+  const count = (needle: string) => app.split(needle).length - 1;
+  // A usage attribute on the Snooze button would count a click a second time.
+  assert.equal(count("usage(`snooze:"), 0);
+  assert.equal(count('recordControl("snooze:until-change"'), 1);
+  assert.equal(count("recordControl(`snooze:${choice}`"), 1);
+  // The toggle's buttons count clicks with the attribute; only V records in code.
+  assert.equal(count("usage(`board:${m}`)"), 1);
+  assert.equal(count("recordControl(`board:"), 1);
+  assert.match(app, /e\.key === "e"\) doneAndAdvance\(\)/);
+  assert.match(app, /onMark=\{doneAndAdvance\}/);
 });
