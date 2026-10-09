@@ -19,6 +19,19 @@ function download(name: string, text: string, type: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/** A closed brief: its title, its ask and "At a glance", with a button to read the rest. */
+export function BriefGlance({ brief, onRead }: { brief: Brief; onRead: () => void }) {
+  const html = useMemo(() => briefHtml(brief, { glanceOnly: true }), [brief]);
+  return (
+    <div className="brief-host brief-glance">
+      <div dangerouslySetInnerHTML={{ __html: html }} />
+      <button className="btn small brief-read" onClick={onRead}>
+        Read the brief
+      </button>
+    </div>
+  );
+}
+
 export function BriefView({ brief, compact = false }: { brief: Brief; compact?: boolean }) {
   // The renderer escapes every text of the spec, and makes links of http(s) URLs only.
   const html = useMemo(() => briefHtml(brief), [brief]);

@@ -804,6 +804,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 /* A ticket brief: its own layout is in shared/briefRender.ts, so the exported file looks the same. */
 .brief-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
 .brief-bar .grow { flex: 1; }
+.brief-glance .brief-read { margin-top: 12px; }
 .brief-notes { font-size: 12.5px; max-width: 100%; }
 .brief-notes summary { cursor: pointer; text-align: right; }
 .brief-notes ul { margin: 6px 0 0; padding-left: 18px; color: var(--ink-2); }

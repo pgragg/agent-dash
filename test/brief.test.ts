@@ -120,6 +120,16 @@ test("the page has one tab per map view, the pins, and the ledger collapsed", ()
   assert.ok(svgs.every((s) => s.svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"') && s.svg.includes("<style>")));
 });
 
+test("at a glance, the page stops after the title, the ask and the At a glance section", () => {
+  const b = example();
+  const html = briefHtml(b, { glanceOnly: true });
+  assert.match(html, /class="tb-title"/);
+  assert.match(html, /class="tb-ask"/);
+  assert.match(html, /<h2>At a glance<\/h2>/);
+  assert.doesNotMatch(html, /<svg |tb-evidence|tb-system/);
+  assert.ok(briefHtml(b).startsWith(html.slice(0, -"</div>".length)));
+});
+
 test("the text, the TL;DR and the diff", () => {
   const b = example();
   const text = briefText(b);
