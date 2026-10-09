@@ -1,10 +1,15 @@
 import { useState } from "react";
 import type { Dashboard } from "../../shared/types.ts";
 
-/** Sources with a Fix login button; the server keeps the same fixed list. With no pi-auth target, the server answers how to log in by hand. */
+/** Sources with a Fix login button; the server keeps the same fixed list. When it cannot log in, it answers how to log in by hand. */
 const FIXABLE: Record<string, string> = { jira: "Jira", github: "GitHub", slack: "Slack" };
+const HOW: Record<string, string> = {
+  jira: "Run pi-auth ensure jira. It can open Chrome.",
+  github: "Run gh auth login. It can open Chrome.",
+  slack: "Check both Slack logins again, and show the steps for the one that failed.",
+};
 
-/** A "Fix login" button for each down source. It runs pi-auth on the server, then refreshes. */
+/** A "Fix login" button for each down source. The server tries the login, then the page refreshes. */
 export function FixLogin({ sources, onFixed }: { sources: Dashboard["sources"]; onFixed: () => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [result, setResult] = useState<Record<string, string>>({});
@@ -27,8 +32,8 @@ export function FixLogin({ sources, onFixed }: { sources: Dashboard["sources"]; 
   return (
     <>
       {down.map(([name]) => (
-        <button key={name} className="btn small" disabled={busy !== null} onClick={() => fix(name)} title={`Run pi-auth ensure for ${FIXABLE[name]}. It can open Chrome.`}>
-          {busy === name ? `Logging in to ${FIXABLE[name]}… (can take minutes)` : `Fix ${FIXABLE[name]} login`}
+        <button key={name} className="btn small" disabled={busy !== null} onClick={() => fix(name)} title={HOW[name]}>
+          {busy === name ? (name === "slack" ? "Checking Slack…" : `Logging in to ${FIXABLE[name]}… (can take minutes)`) : `Fix ${FIXABLE[name]} login`}
         </button>
       ))}
       {shown && (

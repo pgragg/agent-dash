@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { searchLogin, slackHealth, slackLoginGap } from "../server/sources/slack.ts";
+import { searchLogin, slackFixSteps, slackHealth, slackLoginGap } from "../server/sources/slack.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "agent-dash-slack-"));
 const state = (cookies: unknown[]) => {
@@ -47,6 +47,22 @@ test("one Slack health for both logins", () => {
   assert.equal(slackHealth(good, { ok: true }, gap, "2026-10-08T23:00:00Z").ok, true);
   // With search off, a gap is not a Slack failure.
   assert.equal(slackHealth({ off: "x" }, { ok: true }, gap, null).ok, true);
+});
+
+test("Fix Slack login gives the steps for only the half that failed", () => {
+  const slack = { stateFile: join(dir, "state.json"), reloginCommand: "" };
+  const good = { ok: true as const, savedAt: "2026-10-05T10:00:00Z" };
+  const gap = { at: "2026-10-08T22:41:36Z", ticket: "FSDK-2073" };
+  const search = slackFixSteps(slackHealth(good, { ok: true }, gap, null), slack);
+  assert.match(search, /^For Slack search, .*chrome:\/\/inspect\/#remote-debugging.*--auto-connect state save .*slack\\\\\.com\$.*state\.json"/);
+  assert.doesNotMatch(search, /Post to Slack|pi-auth/);
+  // A README next to the state file is named, so the user can read the full steps.
+  writeFileSync(join(dir, "README.md"), "");
+  assert.match(slackFixSteps(slackHealth(good, { ok: true }, gap, null), slack), / More in .*README\.md\.$/);
+  const post = slackFixSteps(slackHealth(good, { ok: false, error: "The Slack sign-in expired." }, null, null), { ...slack, reloginCommand: "pi mcp login slack" });
+  assert.equal(post, "For Post to Slack, run `pi mcp login slack` in a terminal and allow the grant.");
+  const both = slackFixSteps(slackHealth({ ok: false, error: "the saved Slack login expired" }, { ok: false, error: "x" }, null, null), slack);
+  assert.match(both, /^For Slack search, .* For Post to Slack, /);
 });
 
 test("slack-post.ts --check posts nothing and says off, ok, or why not", async () => {

@@ -111,9 +111,14 @@ test("other paths and methods are not this route", async () => {
   assert.equal(await handle({ method: "POST", headers: {} } as IncomingMessage, res, new URL("http://x/api/other")), false);
 });
 
-test("slack with no pi-auth target answers how to sign in by hand", async () => {
+test("slack never runs pi-auth, and gives the steps for only the half that failed", async () => {
+  const { setSlackCheck } = await import("../server/routes/login.ts");
+  setSlackCheck(async () => ({ ok: false, label: "Slack", error: "Slack search: the saved Slack login expired" }));
   const out = await call("slack");
-  assert.equal(out.code, 501);
-  assert.match(out.body.error, /pi-auth has no slack target\. For Post to Slack, .*Slack sign-in command/);
-  assert.doesNotMatch(readFileSync(piAuthCalls, "utf8"), /^ensure slack$/m);
+  assert.equal(out.code, 401);
+  assert.match(out.body.error, /^Slack search: the saved Slack login expired\. For Slack search, .*remote-debugging/);
+  assert.doesNotMatch(out.body.error, /pi-auth|Post to Slack/);
+  setSlackCheck(async () => ({ ok: true, label: "Slack" }));
+  assert.equal((await call("slack")).code, 200);
+  assert.doesNotMatch(readFileSync(piAuthCalls, "utf8"), /slack/);
 });
