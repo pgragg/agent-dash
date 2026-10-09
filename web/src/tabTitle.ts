@@ -1,5 +1,6 @@
 import type { Dashboard, PullRequest } from "../../shared/types.ts";
 import { prRef } from "../../shared/refs.ts";
+import { runTitle } from "../../shared/runTitle.ts";
 import { agentState } from "./notify.ts";
 import type { Route } from "./routes.ts";
 
@@ -93,7 +94,7 @@ export function tabTitle({ route, data, needsYou, open }: TitleInput): string {
       if (!run) return join("Chat", null);
       // No view word: the tab is narrow, and the run's name says enough. ✋ waits on you, 👀 on a review, ⚙️ works.
       const state = { awaiting_input: "✋ ", waits_on_review: "👀 ", working: "⚙️ ", finished: "" }[agentState(run, summaries[run.sessionId])];
-      return join(`${state}${short(run.name ?? run.firstPrompt)}`, null);
+      return join(`${state}${short(runTitle(run))}`, null);
     }
     case "documents":
       return join("Documents", data.documents.length || null);

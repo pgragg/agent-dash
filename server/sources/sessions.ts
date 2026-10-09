@@ -14,6 +14,8 @@ export interface ParsedSession {
   sessionFile: string;
   cwd: string;
   name: string | null;
+  /** Set by the server from the drafted summary, not from the log. */
+  title?: string | null;
   firstPrompt: string;
   lastReply: string;
   /** The whole latest reply, up to LAST_MESSAGE_MAX characters (the end is kept). */

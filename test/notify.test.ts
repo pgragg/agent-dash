@@ -99,6 +99,9 @@ test("an agent stop says finished or waiting, and shows the summary, else the la
   assert.deepEqual(runUpdate(waiting, summary()), { key: "agent:s1", title: "Agent finished", line: "A run\nThe lint step passes now." });
   assert.deepEqual(runUpdate(waiting, summary({ needs: "Approve the merge" })), { key: "agent:s1", title: "Agent is waiting on you", line: "A run\nThe lint step passes now.\nNeeds from you: Approve the merge" });
   assert.deepEqual(runUpdate(waiting, undefined), { key: "agent:s1", title: "Agent is waiting on you", line: "A run\nDone. PR 12 is open." });
+  // A run with no name shows its drafted title, else its first prompt with no URLs.
+  assert.match(runUpdate({ ...waiting, name: null, title: "Wiki: database sources of truth" }, undefined).line, /^Wiki: database sources of truth\n/);
+  assert.match(runUpdate({ ...waiting, name: null, firstPrompt: "Read https://start.1password.com/open/i?a=1 now" }, undefined).line, /^Read \[start\.1password\.com\] now\n/);
 });
 
 // ---- one notification per board entry ----

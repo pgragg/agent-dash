@@ -4,6 +4,7 @@ import { type MoveTarget, moveStepTarget, moveTargets } from "../../shared/jiraV
 import { splitSummary } from "../../shared/nextSteps.ts";
 import { awaitsOwner, ownerWaitText } from "../../shared/ownerApproval.ts";
 import { prRef } from "../../shared/refs.ts";
+import { hideUrls } from "../../shared/runTitle.ts";
 import { READ_FEEDBACK, REVIEW_AND_MERGE } from "../../shared/prVerbs.ts";
 import type { AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, NextStep, Note, ParkedRun, PullRequest, Run, LaneMode, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState } from "../../shared/types.ts";
 import { conversationHash, launchAgent, ResumeHere, resuming } from "./agents.tsx";
@@ -134,7 +135,7 @@ function buildSubjects(d: Dashboard): Map<string, Subject> {
     const finished = a.kind === "awaiting_input" && agentFinished(run, summary);
     // The reviewer has the next move, so the stop waits on others, as a PR out for review does.
     const review = a.kind === "awaiting_input" && agentWaitsOnReview(run, summary);
-    const name = run && `“${run.name ?? run.firstPrompt.slice(0, 60)}”`;
+    const name = run && `“${runTitle(run).slice(0, 60)}”`;
     // The server's reason says "is waiting for you", which a finished agent is not.
     const reason = review && name ? `${name} waits on a PR review` : finished && name ? `${name} finished ${age(run.statusSince, Date.parse(d.generatedAt))} ago` : a.reason;
     const status = review ? "waits on review" : finished ? "finished" : a.status;
@@ -471,7 +472,7 @@ function searchFields(s: Subject, data: Dashboard): Searchable {
   const prs = s.ticket ? s.ticket.prs : data.prs.filter((p) => p.url === s.prUrl);
   return {
     keys: s.ticket ? [s.ticket.ticket.key] : [...runs.flatMap((r) => r.tickets), ...prs.flatMap((p) => p.tickets)],
-    text: [s.ticket?.ticket.summary ?? "", ...runs.flatMap((r) => [r.name ?? "", r.firstPrompt, r.lastReply]), ...prs.flatMap((p) => [p.title, p.headRef, p.url])],
+    text: [s.ticket?.ticket.summary ?? "", ...runs.flatMap((r) => [r.name ?? "", r.title ?? "", r.firstPrompt, r.lastReply]), ...prs.flatMap((p) => [p.title, p.headRef, p.url])],
   };
 }
 
@@ -858,7 +859,7 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket, summary }:
       <header className="card-head">
         <Dot tone={runTone(run, summary)} pulse={run.status === "working"} />
         <div className="agent-title">
-          <h3 title={run.firstPrompt}>{runTitle(run)}</h3>
+          <h3 title={hideUrls(run.firstPrompt)}>{runTitle(run)}</h3>
           <span className="meta">
             {statusText(run, now, summary)} · {dirLabel(run.cwd)} · {plural(run.userMessageCount, "prompt")}
           </span>
@@ -962,7 +963,7 @@ function History({ runs: allRuns, suggested = [], summaries = {}, now, onError, 
           <div className="h-row">
             <span className="h-main">
               <Dot tone={runTone(r, summaries[r.sessionId])} pulse={r.status === "working"} />
-              <button className="h-title" onClick={() => setOpen(open === r.sessionId ? null : r.sessionId)} title={r.firstPrompt}>
+              <button className="h-title" onClick={() => setOpen(open === r.sessionId ? null : r.sessionId)} title={hideUrls(r.firstPrompt)}>
                 {runTitle(r)}
               </button>
               <span className="meta">
@@ -992,7 +993,7 @@ function History({ runs: allRuns, suggested = [], summaries = {}, now, onError, 
             <div className="h-row">
               <span className="h-main">
                 <Dot tone="muted" />
-                <span className="h-title" title={r.firstPrompt}>
+                <span className="h-title" title={hideUrls(r.firstPrompt)}>
                   {runTitle(r)}
                 </span>
                 <span className="meta" title="The thread names the ticket only in its text: no name, branch or PR has the key. It gives no signal until you link it.">
@@ -1029,7 +1030,7 @@ function History({ runs: allRuns, suggested = [], summaries = {}, now, onError, 
                   <span className="resolved-mark" aria-hidden>
                     ✓
                   </span>
-                  <span className="h-title" title={r.firstPrompt}>
+                  <span className="h-title" title={hideUrls(r.firstPrompt)}>
                     {runTitle(r)}
                   </span>
                   <span className="meta" title={t.createdAt}>
@@ -1603,7 +1604,7 @@ function HistoryView({ data, now }: { data: Dashboard; now: number }) {
                   <div className="h-row">
                     <span className="h-main">
                       <Dot tone={runTone(r, data.conversationSummaries[r.sessionId])} pulse={r.status === "working"} />
-                      <button className="h-title" onClick={() => setOpen(open === r.sessionId ? null : r.sessionId)} title={r.firstPrompt}>
+                      <button className="h-title" onClick={() => setOpen(open === r.sessionId ? null : r.sessionId)} title={hideUrls(r.firstPrompt)}>
                         {runTitle(r)}
                       </button>
                       {r.tickets.map((k) =>

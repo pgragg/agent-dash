@@ -1,4 +1,5 @@
 import { Fragment, type MouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { runTitle } from "../../shared/runTitle.ts";
 import type { Dashboard, HistoryRun, TicketDocumentWithBody, PrDetail, ThreadStatus, Transcript } from "../../shared/types.ts";
 import { setTeam } from "../../shared/team.ts";
 import { IMAGE_EXT, wikiLinkParts } from "../../shared/wiki.ts";
@@ -87,9 +88,7 @@ export function dirLabel(cwd: string): string {
   return cwd.split("/").filter(Boolean).pop() ?? cwd;
 }
 
-export function runTitle(run: HistoryRun): string {
-  return run.name ?? run.firstPrompt;
-}
+export { runTitle } from "../../shared/runTitle.ts";
 
 export function resumeCommand(run: HistoryRun): string {
   const cd = `cd '${run.cwd.replace(/'/g, "'\\''")}' && `;
@@ -242,7 +241,7 @@ function entryLabel(d: Dashboard, id: string): string {
   }
   if (id.startsWith("r:")) {
     const r = runsOf(d).find((x) => x.sessionId === id.slice(2));
-    return r ? (r.name ?? r.firstPrompt) : "Agent";
+    return r ? runTitle(r) : "Agent";
   }
   return prName(id.slice(2));
 }

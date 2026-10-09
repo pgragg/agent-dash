@@ -42,6 +42,7 @@ export function toRuns(sessions: ParsedSession[], reported: Map<string, Reported
         sessionFile: s.sessionFile,
         cwd: s.cwd,
         name: s.name,
+        title: s.title ?? null,
         firstPrompt: s.firstPrompt,
         lastReply: s.lastReply,
         lastMessage: s.lastMessage,

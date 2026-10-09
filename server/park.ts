@@ -1,6 +1,7 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { needsNothing, waitsOnReview } from "../shared/conversationSummary.ts";
+import { runTitle } from "../shared/runTitle.ts";
 import type { ConversationSummary, ParkReason, ParkedRun, Run, ThreadStatusChange } from "../shared/types.ts";
 import { config } from "./config.ts";
 import { endHeadless } from "./conversations.ts";
@@ -113,7 +114,7 @@ export function parkedRow(c: ParkChoice, now: Date): ParkedRun {
   return {
     sessionId: c.run.sessionId,
     ticket: c.run.tickets[0] ?? null,
-    name: c.run.name ?? c.run.firstPrompt.slice(0, 80),
+    name: runTitle(c.run).slice(0, 80),
     cwd: c.run.cwd,
     reason: c.reason,
     parkedAt: now.toISOString(),

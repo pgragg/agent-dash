@@ -13,6 +13,8 @@ export interface Run {
   sessionFile: string;
   cwd: string;
   name: string | null;
+  /** A short title that agent-dash drafted for a run with no name. Null until it is drafted. */
+  title: string | null;
   firstPrompt: string;
   /** Last non-empty line of the latest assistant reply. */
   lastReply: string;

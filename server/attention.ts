@@ -1,5 +1,6 @@
 import { awaitsOwner, ownerWaitText } from "../shared/ownerApproval.ts";
 import { checkList } from "../shared/prVerbs.ts";
+import { runTitle } from "../shared/runTitle.ts";
 import type { AttentionItem, PullRequest, Run, Ticket } from "../shared/types.ts";
 
 const MIN = 60_000;
@@ -29,8 +30,8 @@ function runItems(runs: Run[], now: number): Draft[] {
   const items: Draft[] = [];
   for (const run of runs) {
     const waited = now - Date.parse(run.statusSince);
-    const label = run.name ?? run.firstPrompt.slice(0, 60);
-    const base = { ticketKey: run.tickets[0] ?? null, sessionId: run.sessionId, since: run.statusSince, updatedAt: run.lastActivityAt, name: run.name ?? run.firstPrompt };
+    const label = runTitle(run).slice(0, 60);
+    const base = { ticketKey: run.tickets[0] ?? null, sessionId: run.sessionId, since: run.statusSince, updatedAt: run.lastActivityAt, name: runTitle(run) };
     if (run.status === "awaiting_input" && run.endedInError) {
       items.push({ ...base, kind: "run_error", score: 110, status: "API error", reason: `“${label}” stopped on an API error ${ago(waited)} ago — retry it` });
     } else if (run.status === "awaiting_input") {
