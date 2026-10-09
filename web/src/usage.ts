@@ -17,12 +17,13 @@ export const recordControl = (name: string, ticket?: string | null) => send({ ki
 /** The attributes that make a button count its clicks. */
 export const usage = (name: string, ticket?: string | null) => ({ "data-usage": name, "data-ticket": ticket ?? undefined });
 
-let lastView: string | null = null;
+// Per tab, and kept over a reload: a restart or a new build reloads every open tab, which is no view open.
+const LAST_VIEW = "agent-dash:usage-view";
 
-/** Adds a row only when the view is not the one recorded last, so a re-render or a poll adds none. */
+/** Adds a row only when the view is not the one this tab recorded last, so a re-render, a poll or a reload adds none. */
 export function recordView(name: string): void {
-  if (name === lastView) return;
-  lastView = name;
+  if (name === sessionStorage.getItem(LAST_VIEW)) return;
+  sessionStorage.setItem(LAST_VIEW, name);
   send({ kind: "view", name, ticket: null });
 }
 
