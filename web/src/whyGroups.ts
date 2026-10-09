@@ -2,7 +2,7 @@ import type { AttentionItem } from "../../shared/types.ts";
 
 /**
  * The ticket header's two groups: what needs you, and news. Kept free of React so the tests can
- * import it. The queue rail and the Notifications view keep their score order.
+ * import it. The queue rail keeps its score order.
  */
 
 export interface WhyEntry {

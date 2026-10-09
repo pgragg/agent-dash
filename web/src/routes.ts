@@ -10,7 +10,7 @@ import type { Dashboard } from "../../shared/types.ts";
  * | `#/step:ID`       | A drafted next step, on its ticket                |
  * | `#/note:ID`       | A note, on its ticket                             |
  * | `#/pr:OWNER/REPO/N` | The PR panel (a view under PRs)                 |
- * | `#/needs`         | The list behind "N notifications"                 |
+ * | `#/asks:KEY`      | A ticket's parked asks on the board (`asks:none`: no ticket) |
  * | `#/parked`        | The waiting agents that agent-dash parked          |
  * | `#/c:SESSION`     | A conversation's page                             |
  * | `#/doc:ID`        | A document's page                                 |
@@ -27,7 +27,6 @@ import type { Dashboard } from "../../shared/types.ts";
 
 export type Route =
   | { view: "board"; ref: string | null }
-  | { view: "needs" }
   | { view: "parked" }
   | { view: "prs"; pr: string | null }
   | { view: "history" }
@@ -42,7 +41,8 @@ export type Route =
 
 export function parseHash(hash: string): Route {
   const path = decodeURIComponent(hash.replace(/^#\/?/, ""));
-  if (path === "needs") return { view: "needs" };
+  // The old Notifications view: its entries are the board's Up next.
+  if (path === "needs") return { view: "board", ref: null };
   if (path === "parked") return { view: "parked" };
   if (path === "prs") return { view: "prs", pr: null };
   if (path.startsWith("pr:")) return { view: "prs", pr: path };
@@ -58,6 +58,11 @@ export function parseHash(hash: string): Route {
   if (/^d:\d+$/.test(path)) return { view: "diagram", id: Number(path.slice(2)) };
   if (path === "c" || path.startsWith("c:")) return { view: "conversation", id: path.slice(2) || null };
   return { view: "board", ref: path || null };
+}
+
+/** The hash to replace an old address with, or null. The Notifications view is the board now. */
+export function redirectHash(hash: string): string | null {
+  return decodeURIComponent(hash.replace(/^#\/?/, "")) === "needs" ? "#/" : null;
 }
 
 /** `#/t:ABC-123`: the ref stays readable, and only what would break the hash is escaped. */

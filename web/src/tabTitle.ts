@@ -1,6 +1,6 @@
 import type { Dashboard, PullRequest } from "../../shared/types.ts";
 import { prRef } from "../../shared/refs.ts";
-import { agentState, waitingOnYou } from "./notify.ts";
+import { agentState } from "./notify.ts";
 import type { Route } from "./routes.ts";
 
 /**
@@ -21,8 +21,8 @@ type TitleData = Pick<Dashboard, "prs" | "documents" | "parked" | "counts" | "my
 export interface TitleInput {
   route: Route;
   data: TitleData | null;
-  /** How many entries are in the queue. */
-  queue: number;
+  /** The one count of work, as in the top bar's "Needs you N": the Up next entries plus the Parked asks entries. */
+  needsYou: number;
   /** The title of the board entry that the workspace shows, or null when none is open. */
   open: string | null;
 }
@@ -64,18 +64,13 @@ function join(view: string, counts: string | number | null, object?: string | nu
   return [head, object && short(object), APP].filter(Boolean).join(" · ");
 }
 
-export function tabTitle({ route, data, queue, open }: TitleInput): string {
+export function tabTitle({ route, data, needsYou, open }: TitleInput): string {
   if (!data) return APP;
   const runs = () => [...data.myTickets, ...data.otherTickets].flatMap((g) => g.runs).concat(data.unlinkedRuns);
   const summaries = data.conversationSummaries ?? {};
   switch (route.view) {
-    case "board": {
-      // Most entries in the queue are agents that wait on you, but an agent can wait without one.
-      const n = queue || waitingOnYou(data.counts.awaiting_input, runs(), summaries);
-      return join("Board", n ? `(${n})` : null, open);
-    }
-    case "needs":
-      return join("Notifications", queue ? `(${queue})` : null);
+    case "board":
+      return join("Board", needsYou ? `(${needsYou})` : null, open);
     case "prs": {
       if (route.pr) {
         const ref = route.pr.toLowerCase();
