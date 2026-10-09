@@ -33,6 +33,8 @@ export interface Run {
   stoppedByUser: boolean;
   /** Ticket keys, strongest link first. */
   tickets: string[];
+  /** Tickets that the run only names in its prompts or replies. They give no signal until you link them. */
+  suggestedTickets: string[];
   /** PRs that this run opened with `gh pr create`. */
   createdPrs: string[];
   /** Every PR URL that this run named. Used to link a run to a ticket through its PR. */
@@ -393,6 +395,8 @@ export interface TicketGroup {
   ticket: Ticket;
   /** Oldest first. Resolved threads stay here; `threads` says which ones they are. */
   runs: Run[];
+  /** Runs that only mention the ticket: suggested links, oldest first. They give no queue signal. */
+  suggested?: Run[];
   prs: PullRequest[];
   /** The newest status change per session, for this ticket's threads that have one. No entry means relevant. */
   threads: Record<string, ThreadStatusChange>;

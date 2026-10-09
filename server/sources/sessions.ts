@@ -26,7 +26,10 @@ export interface ParsedSession {
   lastStopReason: string | null;
   /** The last message is not a finished assistant turn, so the agent was mid-run when the log stopped. */
   midRun: boolean;
+  /** Tickets with strong evidence: see `parseSession`. Only these link the run. */
   tickets: string[];
+  /** Tickets that the run only names in prompts or replies. A suggested link, until you link it. */
+  suggestedTickets: string[];
   createdPrs: string[];
   mentionedPrs: string[];
   userMessageCount: number;
@@ -37,7 +40,7 @@ export interface ParsedSession {
 const PR_URL = /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/g;
 
 /**
- * Ticket weights by where the key appears. The user's own words and the session name say
+ * Ticket weights for a suggested link, by where the key appears. The user's own words and the session name say
  * what the run is about. Tool results are ignored: one `board` call lists every open ticket.
  */
 const WEIGHT = { name: 5, user: 3, toolCall: 1, assistant: 1 } as const;
@@ -57,6 +60,26 @@ const REPORT_SKILLS = ["daily-progress-report", "standup-daily-summary", "itemiz
 const REPORT_SKILL_INVOKED = new RegExp(`<skill name="(?:${REPORT_SKILLS.join("|")})"|<command-name>/(?:${REPORT_SKILLS.join("|")})</command-name>`);
 const REPORT_SKILL_READ = new RegExp(`/skills/(?:${REPORT_SKILLS.join("|")})/SKILL\\.md`);
 const LAST_MESSAGE_MAX = 6_000;
+
+/** The marker that `stripHandoff` leaves: the agent started from agent-dash with this ticket's context. */
+const HANDOFF_MARK = /\[agent-dash context for ([A-Z][A-Z0-9]*-\d+)\]/g;
+/** A git command that makes a branch: `checkout -b`, `switch -c`, `worktree add -b`. */
+const GIT_NEW_BRANCH = /\bgit\s+(?:-C\s+\S+\s+)?(?:checkout|switch|worktree\s+add)\b([^;&|\n]*)/g;
+const BRANCH_FLAG = /(?:^|\s)(?:-[bBcC]|--create|--force-create)\s+(['"]?)([^\s'"]+)\1/;
+const PR_TITLE = /\bgh\s+pr\s+create\b[^;&|\n]*?(?:--title|-t)[=\s]+(?:"([^"]*)"|'([^']*)'|(\S+))/g;
+
+/** Names of the branches that a shell command makes. */
+export function newBranches(command: string): string[] {
+  return [...command.matchAll(GIT_NEW_BRANCH)].flatMap((m) => {
+    const name = m[1].match(BRANCH_FLAG)?.[2];
+    return name ? [name] : [];
+  });
+}
+
+/** Titles of the PRs that a shell command opens with `gh pr create --title`. */
+export function prTitles(command: string): string[] {
+  return [...command.matchAll(PR_TITLE)].map((m) => m[1] ?? m[2] ?? m[3]);
+}
 
 const HEREDOC = /<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\s*\2(?=\s|$)/g;
 
@@ -174,6 +197,13 @@ export function asPiLog(raw: string): { agent: AgentKind; raw: string } {
   return { agent: "claude", raw: out.map((o) => JSON.stringify(o)).join("\n") };
 }
 
+/**
+ * A run links to a ticket only on strong evidence: the key is in the session name, in a branch
+ * that the run made, or in the title of a PR that it opened, or the run started from agent-dash
+ * with that ticket's context. A PR that `gh pr create` returned links its keys later, in
+ * `crossLink`. A key that is only in prompts and replies is a suggested link: a thread that
+ * mentions a ticket in passing must not put that ticket in the queue.
+ */
 export function parseSession(log: string, sessionFile: string, mtime: Date, ticketPattern: RegExp): ParsedSession | null {
   const { agent, raw } = asPiLog(log);
   let header: { id?: string; cwd?: string; timestamp?: string } | null = null;
@@ -186,6 +216,8 @@ export function parseSession(log: string, sessionFile: string, mtime: Date, tick
   let userMessageCount = 0;
   let usedReportSkill = false;
   const scores = new Map<string, number>();
+  /** Keys from the handoff, a branch the run made, or a PR title it opened. The name is added at the end. */
+  const strong = new Set<string>();
   const created = new Set<string>();
   const mentioned = new Set<string>();
   const prCreateCalls = new Set<string>();
@@ -224,6 +256,7 @@ export function parseSession(log: string, sessionFile: string, mtime: Date, tick
         // A dash handoff lists other tickets and PRs as background; count only the ticket it is for.
         const text = stripHandoff(textOf(msg.content));
         if (REPORT_SKILL_INVOKED.test(text)) usedReportSkill = true;
+        for (const m of text.matchAll(HANDOFF_MARK)) extractTickets(m[1], ticketPattern).forEach((k) => strong.add(k));
         userMessageCount += 1;
         if (!firstPrompt) firstPrompt = oneLine(text, 400);
         score(text, "user");
@@ -241,7 +274,9 @@ export function parseSession(log: string, sessionFile: string, mtime: Date, tick
           const args = JSON.stringify(part.arguments ?? {});
           if (part.name === "read" && REPORT_SKILL_READ.test(args)) usedReportSkill = true;
           if (part.name === "Skill" && REPORT_SKILLS.includes(String((part.arguments as { skill?: unknown } | undefined)?.skill))) usedReportSkill = true;
-          score(toolCallIntent(part.name, part.arguments), "toolCall");
+          const intent = toolCallIntent(part.name, part.arguments);
+          score(intent, "toolCall");
+          if (part.name === "bash") for (const t of [...newBranches(intent), ...prTitles(intent)]) extractTickets(t, ticketPattern).forEach((k) => strong.add(k));
           mention(args);
           if (part.name === "bash" && args.includes("gh pr create") && part.id) prCreateCalls.add(part.id);
           if (part.name === "write") {
@@ -265,6 +300,7 @@ export function parseSession(log: string, sessionFile: string, mtime: Date, tick
 
   if (!header?.id) return null;
   if (name) score(name, "name");
+  const linked = [...new Set([...(name ? extractTickets(name, ticketPattern) : []), ...strong])].slice(0, MAX_TICKETS);
 
   const replyLines = nonEmptyLines(lastReplyText);
   return {
@@ -282,7 +318,8 @@ export function parseSession(log: string, sessionFile: string, mtime: Date, tick
     model,
     lastStopReason,
     midRun,
-    tickets: pickTickets(scores),
+    tickets: linked,
+    suggestedTickets: pickTickets(scores).filter((k) => !linked.includes(k)),
     createdPrs: [...created],
     mentionedPrs: [...mentioned],
     userMessageCount,

@@ -367,6 +367,9 @@ a.pr-group-title:hover { text-decoration: underline; text-underline-offset: 3px;
 .history > li.resolved { background: var(--hover); }
 .history > li.resolved .h-title { cursor: default; color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line-2); }
 .history > li.resolved .h-title:hover { text-decoration: line-through; }
+/* suggested links: a thread that only mentions the ticket */
+.history > li.suggested .h-title { cursor: default; color: var(--muted); }
+.composer-open { margin: 4px 0 0 -9px; }
 .resolved-mark { width: 8px; color: var(--good); font-size: 12px; text-align: center; }
 
 /* markdown */

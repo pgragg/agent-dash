@@ -11,7 +11,7 @@ const build = (prs: ReturnType<typeof pr>[], createdPrs: string[] = []) =>
       {
         agent: "pi", sessionId: "s", sessionFile: "/f", cwd: "/repo", name: null, firstPrompt: "p", lastReply: "", lastMessage: "", askedQuestion: false,
         startedAt: minutesAgo(100), lastActivityAt: minutesAgo(90), model: null, lastStopReason: "stop", midRun: false,
-        tickets: ["FSDK-2"], createdPrs, mentionedPrs: [], userMessageCount: 1,
+        tickets: ["FSDK-2"], suggestedTickets: [], createdPrs, mentionedPrs: [], userMessageCount: 1,
       },
     ],
     reported: new Map(),

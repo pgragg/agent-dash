@@ -1,5 +1,6 @@
 import type { Dashboard, PullRequest } from "../../shared/types.ts";
 import { prRef } from "../../shared/refs.ts";
+import { agentState, waitingOnYou } from "./notify.ts";
 import type { Route } from "./routes.ts";
 
 /**
@@ -12,10 +13,10 @@ import type { Route } from "./routes.ts";
  *   Board (3) · Fix the login redirect · agent-dash
  *   PRs 5 · 2✓ 1💬 1✗ · agent-dash          5 open, 2 approved, 1 with feedback, 1 with red CI
  *   PR ✓ 💬2 · Fix the login redirect · agent-dash
- *   ✋ Deploy FDR · agent-dash               a chat that waits on you (⚙️ when it works)
+ *   ✋ Deploy FDR · agent-dash               a chat that waits on you (⚙️ when it works, 👀 when it waits on review)
  */
 
-type TitleData = Pick<Dashboard, "prs" | "documents" | "parked" | "counts" | "myTickets" | "otherTickets" | "unlinkedRuns">;
+type TitleData = Pick<Dashboard, "prs" | "documents" | "parked" | "counts" | "myTickets" | "otherTickets" | "unlinkedRuns"> & Partial<Pick<Dashboard, "conversationSummaries">>;
 
 export interface TitleInput {
   route: Route;
@@ -66,10 +67,11 @@ function join(view: string, counts: string | number | null, object?: string | nu
 export function tabTitle({ route, data, queue, open }: TitleInput): string {
   if (!data) return APP;
   const runs = () => [...data.myTickets, ...data.otherTickets].flatMap((g) => g.runs).concat(data.unlinkedRuns);
+  const summaries = data.conversationSummaries ?? {};
   switch (route.view) {
     case "board": {
       // Most entries in the queue are agents that wait on you, but an agent can wait without one.
-      const n = queue || data.counts.awaiting_input;
+      const n = queue || waitingOnYou(data.counts.awaiting_input, runs(), summaries);
       return join("Board", n ? `(${n})` : null, open);
     }
     case "needs":
@@ -94,8 +96,8 @@ export function tabTitle({ route, data, queue, open }: TitleInput): string {
       if (!route.id) return join("New chat", null);
       const run = runs().find((r) => r.sessionId === route.id);
       if (!run) return join("Chat", null);
-      // No view word: the tab is narrow, and the run's name says enough. ✋ waits on you, ⚙️ works.
-      const state = run.status === "awaiting_input" ? "✋ " : run.status === "working" ? "⚙️ " : "";
+      // No view word: the tab is narrow, and the run's name says enough. ✋ waits on you, 👀 on a review, ⚙️ works.
+      const state = { awaiting_input: "✋ ", waits_on_review: "👀 ", working: "⚙️ ", finished: "" }[agentState(run, summaries[run.sessionId])];
       return join(`${state}${short(run.name ?? run.firstPrompt)}`, null);
     }
     case "documents":
