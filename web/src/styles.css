@@ -758,8 +758,6 @@ body.resizing { cursor: col-resize; user-select: none; }
 
 /* Parked agents */
 .parked-group { margin-top: 14px; }
-.parked-rest { margin-top: 18px; }
-.parked-rest > summary { cursor: pointer; color: var(--muted); }
 .parked-head { padding: 10px 18px 0; flex-wrap: wrap; }
 .parked-head h3 { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .action.parked { align-items: flex-start; }
@@ -858,7 +856,5 @@ a.wikilink.missing { color: var(--bad); border-bottom-style: dashed; }
 /* ---- one Needs-you count (AD-57) ---- */
 .headline .live-status { gap: 10px; font-size: 12px; color: var(--muted); }
 .q-need { font-size: 12px; color: var(--muted); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 2px; }
-.rail-link { display: block; padding: 6px 12px 4px; font-size: 12px; color: var(--muted); }
-.rail-link:hover { color: var(--ink); }
 .why-parked { margin: 2px 0 6px; border: 1px solid var(--line); border-radius: 10px; }
 .why-parked > .action:last-child { border-bottom: 0; }

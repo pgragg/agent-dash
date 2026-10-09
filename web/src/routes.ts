@@ -11,7 +11,6 @@ import type { Dashboard } from "../../shared/types.ts";
  * | `#/note:ID`       | A note, on its ticket                             |
  * | `#/pr:OWNER/REPO/N` | The PR panel (a view under PRs)                 |
  * | `#/asks:KEY`      | A ticket's parked asks on the board (`asks:none`: no ticket) |
- * | `#/parked`        | The waiting agents that agent-dash parked          |
  * | `#/c:SESSION`     | A conversation's page                             |
  * | `#/doc:ID`        | A document's page                                 |
  * | `#/documents`     | Every document                                    |
@@ -26,7 +25,6 @@ import type { Dashboard } from "../../shared/types.ts";
 
 export type Route =
   | { view: "board"; ref: string | null }
-  | { view: "parked" }
   | { view: "prs"; pr: string | null }
   | { view: "history" }
   | { view: "conversation"; id: string | null }
@@ -37,11 +35,12 @@ export type Route =
   | { view: "settings" }
   | { view: "localUrl" };
 
+const GONE = new Set(["needs", "worktrees", "parked"]);
+
 export function parseHash(hash: string): Route {
   const path = decodeURIComponent(hash.replace(/^#\/?/, ""));
-  // The old Notifications view: its entries are the board's Up next. The old Worktrees view is gone.
-  if (path === "needs" || path === "worktrees") return { view: "board", ref: null };
-  if (path === "parked") return { view: "parked" };
+  // Old views that are gone: Notifications (now Up next), Worktrees, and Parked (now the rail's Parked asks).
+  if (GONE.has(path)) return { view: "board", ref: null };
   if (path === "prs") return { view: "prs", pr: null };
   if (path.startsWith("pr:")) return { view: "prs", pr: path };
   if (path === "history") return { view: "history" };
@@ -57,10 +56,9 @@ export function parseHash(hash: string): Route {
   return { view: "board", ref: path || null };
 }
 
-/** The hash to replace an old address with, or null. The Notifications and Worktrees views are gone, so their links open the board. */
+/** The hash to replace an old address with, or null. A view that is gone opens the board. */
 export function redirectHash(hash: string): string | null {
-  const path = decodeURIComponent(hash.replace(/^#\/?/, ""));
-  return path === "needs" || path === "worktrees" ? "#/" : null;
+  return GONE.has(decodeURIComponent(hash.replace(/^#\/?/, ""))) ? "#/" : null;
 }
 
 /** `#/t:ABC-123`: the ref stays readable, and only what would break the hash is escaped. */

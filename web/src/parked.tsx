@@ -2,11 +2,10 @@ import { useState } from "react";
 import { type Dashboard, PARKED_ASK_CHARS, type ParkedRun, type ParkReason, type Ticket } from "../../shared/types.ts";
 import { conversationHash } from "./agents.tsx";
 import { age, inline, plural, post, stamp } from "./lib.tsx";
-import { splitParked } from "./parkedRows.ts";
 import { ViewToolsSlot } from "./resizeView.tsx";
 import { href } from "./routes.ts";
 
-/** The waiting agents that agent-dash stopped, grouped by ticket, with what each one needed. */
+/** The parked asks on the board: a ticket's why list, and the Parked asks pane. Each has Send, Resume and Dismiss. */
 
 const REASON: Record<ParkReason, string> = {
   ticket_done: "ticket Done",
@@ -21,20 +20,6 @@ interface Group {
   key: string | null;
   ticket: Ticket | undefined;
   rows: ParkedRun[];
-}
-
-/** Open tickets first, then no ticket, then Done tickets; each group newest park first. */
-export function parkedGroups(data: Pick<Dashboard, "parked" | "myTickets" | "otherTickets">): Group[] {
-  const tickets = new Map([...data.myTickets, ...data.otherTickets].map((g) => [g.ticket.key, g.ticket]));
-  const groups = new Map<string, Group>();
-  for (const p of data.parked) {
-    const id = p.ticket ?? "";
-    const g = groups.get(id) ?? { key: p.ticket, ticket: p.ticket ? tickets.get(p.ticket) : undefined, rows: [] };
-    g.rows.push(p);
-    groups.set(id, g);
-  }
-  const rank = (g: Group) => (!g.key ? 1 : g.ticket?.statusCategory === "done" ? 2 : 0);
-  return [...groups.values()].sort((a, b) => rank(a) - rank(b) || b.rows[0].parkedAt.localeCompare(a.rows[0].parkedAt));
 }
 
 function ParkedRow({ p, now, onError }: { p: ParkedRun; now: number; onError: (m: string | null) => void }) {
@@ -88,7 +73,7 @@ function ParkedRow({ p, now, onError }: { p: ParkedRun; now: number; onError: (m
   );
 }
 
-/** A ticket's parked asks inside its "why" list, with the same Send, Resume and Dismiss as `#/parked`. */
+/** A ticket's parked asks inside its "why" list, with the same Send, Resume and Dismiss as the Parked asks pane. */
 export function ParkedAskList({ rows, now, onError }: { rows: ParkedRun[]; now: number; onError: (m: string | null) => void }) {
   return (
     <ol className="actions why-parked">
@@ -132,39 +117,6 @@ export function ParkedAsksPane({ ticketKey, rows, data, onBoard, now }: { ticket
       </header>
       {error && <pre className="error">{error}</pre>}
       {rows.length > 0 && <ParkedGroups groups={[{ key: ticketKey, ticket, rows }]} now={now} onError={setError} dismissAll={dismissAll} />}
-      <a href="#/parked">All {plural(data.parked.length, "parked agent")}, also the ones that need nothing from you →</a>
-    </article>
-  );
-}
-
-export function ParkedView({ data, now }: { data: Dashboard; now: number }) {
-  const [error, setError] = useState<string | null>(null);
-  const { needsYou, rest } = splitParked(data);
-  const dismissAll = async (rows: ParkedRun[]) => {
-    for (const p of rows) {
-      const err = await post(`/api/parked/dismiss?session=${encodeURIComponent(p.sessionId)}`);
-      if (err) return setError(err);
-    }
-    setError(null);
-  };
-  return (
-    <article className="workspace">
-      <header className="ws-head">
-        <h1>{data.parked.length ? `${plural(data.parked.length, "parked agent")}` : "No parked agents"}</h1>
-        <div className="ws-meta">
-          <span className="meta">
-            {needsYou.length} could need you. At most 15 agents wait for you. agent-dash stops the others and keeps what each one needed. Reply or Resume continues the same session.
-          </span>
-        </div>
-      </header>
-      {error && <pre className="error">{error}</pre>}
-      <ParkedGroups groups={parkedGroups({ ...data, parked: needsYou })} now={now} onError={setError} dismissAll={dismissAll} />
-      {rest.length > 0 && (
-        <details className="parked-rest">
-          <summary>{plural(rest.length, "parked agent")} that need nothing from you: ticket Done, thread resolved, a newer agent took over, or nothing to ask</summary>
-          <ParkedGroups groups={parkedGroups({ ...data, parked: rest })} now={now} onError={setError} dismissAll={dismissAll} />
-        </details>
-      )}
     </article>
   );
 }
