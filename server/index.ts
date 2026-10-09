@@ -40,6 +40,7 @@ import { approvalCount } from "../shared/ownerApproval.ts";
 import type { TicketProvider } from "./tickets/provider.ts";
 import { ticketProviders } from "./tickets/registry.ts";
 import { SessionIndex, transcriptTurns } from "./sources/sessions.ts";
+import { type Half, postLogin, searchLogin, slackHealth, slackLoginGap } from "./sources/slack.ts";
 import { isAlive, readReportedStatuses } from "./sources/status.ts";
 import { requestStepLabels, topSteps } from "./stepButtons.ts";
 import * as summaryDb from "./summaries/db.ts";
@@ -128,7 +129,25 @@ function providerHealth(s: ProviderState): SourceHealth {
 const prs = new Cached<PullWithFeedback[]>([], () => fetchMyPrs(config.recentDays, config.ticketPattern));
 /** Force a refresh of GitHub data after login. */
 export const refreshGitHub = () => prs.get(true);
-loginRoute.setOnGitHubLogin(refreshGitHub);
+/** Can the slack MCP grant post? Its own child process, so a slow Slack never holds up a build. */
+const slackPost = new Cached<Half>({ off: "not checked yet" }, postLogin);
+/** When a Fix Slack login last worked: a draft's login gap from before it no longer counts. */
+let slackFixedAt: string | null = null;
+loginRoute.setOnLogin((source) => {
+  if (source === "github") void refreshGitHub();
+  if (source === "slack") {
+    slackFixedAt = new Date().toISOString();
+    void slackPost.get(true);
+  }
+});
+
+/** The newest finished next-steps draft, when its Gaps line says that the Slack login failed. */
+function slackGap(summaries: Dashboard["summaries"]): { at: string; ticket: string } | null {
+  const newest = Object.values(summaries)
+    .flatMap((s) => (s.lastDone?.generatedAt ? [s.lastDone] : []))
+    .sort((a, b) => b.generatedAt!.localeCompare(a.generatedAt!))[0];
+  return newest?.summary && slackLoginGap(newest.summary) ? { at: newest.generatedAt!, ticket: newest.ticket } : null;
+}
 
 /** Every key with the provider's prefix that a session or PR names, at any time. */
 function allKeys(sessions: { tickets: string[]; suggestedTickets: string[] }[], pulls: { tickets: string[] }[], p: TicketProvider): string[] {
@@ -146,7 +165,7 @@ function withToAddress({ feedback, ...pr }: PullWithFeedback): PullRequest {
 async function dashboard(force: boolean) {
   const now = Date.now();
   let sessionsHealth: SourceHealth = { ok: true, fetchedAt: new Date(now).toISOString() };
-  const [scanned, reported, remoteMine, rawPulls] = await Promise.all([
+  const [scanned, reported, remoteMine, rawPulls, slackPostLogin] = await Promise.all([
     sessions.scan().catch((err: Error) => {
       sessionsHealth = { ok: false, error: err.message };
       return [];
@@ -154,6 +173,7 @@ async function dashboard(force: boolean) {
     readReportedStatuses(config.statusDir),
     Promise.all(providerStates.map((s) => s.mine?.get(force) ?? [])),
     prs.get(force),
+    slackPost.get(force),
   ]);
 
   // Exhaustive providers are cheap, so they are read again on each build and never cached.
@@ -214,7 +234,7 @@ async function dashboard(force: boolean) {
     prs: pulls,
     now,
     recentDays: config.recentDays,
-    sources: { ...Object.fromEntries(providerStates.map((s) => [s.provider.source.id, providerHealth(s)])), github: { ...prs.health, label: "GitHub" }, sessions: sessionsHealth },
+    sources: { ...Object.fromEntries(providerStates.map((s) => [s.provider.source.id, providerHealth(s)])), github: { ...prs.health, label: "GitHub" }, slack: slackHealth(searchLogin(config.slack.stateFile, now), slackPostLogin, slackGap(summaries), slackFixedAt), sessions: sessionsHealth },
     // OpenCode needs no install: its service reports every session.
     extensionInstalled: config.agent === "opencode" || (config.agent === "claude" ? claudeHooksInstalled() : existsSync(piExtensionFile())),
     summaries,
