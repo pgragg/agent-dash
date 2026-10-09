@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { EXIT_KINDS, type Exit, type ExitCount } from "../shared/exits.ts";
+import { EXIT_KINDS, type Exit, type ExitCount, type Usage } from "../shared/exits.ts";
 // Same file as the summaries; a second connection is safe in WAL mode.
 import { DB_PATH } from "./summaries/db.ts";
 
@@ -17,6 +17,14 @@ CREATE TABLE IF NOT EXISTS exits (
   ticket  TEXT
 );
 CREATE INDEX IF NOT EXISTS exits_by_at ON exits (at);
+-- Append-only: one row per view open or queue control click. Its own table, so exits.kind keeps its CHECK.
+CREATE TABLE IF NOT EXISTS usage (
+  id     INTEGER PRIMARY KEY AUTOINCREMENT,
+  at     TEXT NOT NULL,
+  kind   TEXT NOT NULL CHECK (kind IN ('view', 'control')),
+  name   TEXT NOT NULL,
+  ticket TEXT
+);
 `;
 
 let db: DatabaseSync | null = null;
@@ -43,7 +51,17 @@ export function recordExit(e: Exit, now = new Date()): void {
   }
 }
 
-/** True just after an exit was saved, so the DB watcher can skip a page refresh it does not need. */
+/** Never throws, for the same reason as `recordExit`. */
+export function recordUsage(u: Usage, now = new Date()): void {
+  try {
+    open().prepare("INSERT INTO usage (at, kind, name, ticket) VALUES (?, ?, ?, ?)").run(now.toISOString(), u.kind, u.name, u.ticket);
+    lastWrite = Date.now();
+  } catch (err) {
+    console.error(`could not record usage: ${(err as Error).message}`);
+  }
+}
+
+/** True just after an exit or usage row was saved, so the DB watcher can skip a page refresh it does not need. */
 export function wroteRecently(ms = 1000): boolean {
   return Date.now() - lastWrite < ms;
 }
