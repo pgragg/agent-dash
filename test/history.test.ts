@@ -18,7 +18,7 @@ test("a transcript keeps prompts and replies in order, drops tool traffic, and c
 });
 
 test("history has every chat with no time window, newest first, without the whole last message", () => {
-  const old = parseSession(jsonl(header("old"), user("ancient FSDK-3"), reply("done")), "/a.jsonl", new Date(NOW - 90 * 86_400_000), PATTERN)!;
+  const old = parseSession(jsonl(header("old"), name("ancient FSDK-3"), user("go"), reply("done")), "/a.jsonl", new Date(NOW - 90 * 86_400_000), PATTERN)!;
   const fresh = parseSession(jsonl(header("new"), name("New one"), user("go"), reply("ok")), "/b.jsonl", new Date(NOW - 60_000), PATTERN)!;
   const unused = parseSession(jsonl(header("empty")), "/c.jsonl", new Date(NOW), PATTERN)!;
   const h = buildHistory([old, fresh, unused], new Map(), [], NOW);

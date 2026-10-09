@@ -5,7 +5,7 @@ import { NOW, PATTERN, header, jsonl, minutesAgo, name, reply, toolCall, toolRes
 
 const parse = (raw: string, mtimeMinutesAgo = 1) => parseSession(raw, "/f.jsonl", new Date(NOW - mtimeMinutesAgo * 60_000), PATTERN)!;
 
-test("links the ticket the user asked about, not every ticket a tool printed", () => {
+test("a key the user names is only a suggested link, and a ticket a tool printed is not even that", () => {
   const s = parse(
     jsonl(
       header(),
@@ -15,7 +15,8 @@ test("links the ticket the user asked about, not every ticket a tool printed", (
       reply("Done. See also FSDK-9 for context."),
     ),
   );
-  assert.deepEqual(s.tickets, ["FSDK-2046"]);
+  assert.deepEqual(s.tickets, []);
+  assert.deepEqual(s.suggestedTickets, ["FSDK-2046"]);
 });
 
 test("the session name links a ticket, and lowercase branch names count", () => {
@@ -93,14 +94,14 @@ test("heuristic: a finished turn waits for input for a few hours, then counts as
 
 test("tickets named after a report skill starts do not link the session", () => {
   const invoked = parse(jsonl(header(), user('<skill name="daily-progress-report" location="/x">…</skill>\nToday: FSDK-1, FSDK-2'), reply("FSDK-1 shipped")));
-  assert.deepEqual(invoked.tickets, []);
+  assert.deepEqual([...invoked.tickets, ...invoked.suggestedTickets], []);
   const read = { type: "message", message: { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "t1", name: "read", arguments: { path: "/h/.pi/agent/skills/standup-daily-summary/SKILL.md" } }] } };
-  assert.deepEqual(parse(jsonl(header(), user("standup please"), read, reply("Yesterday: FSDK-1"), user("add FSDK-2"), reply("ok"))).tickets, []);
+  assert.deepEqual(parse(jsonl(header(), user("standup please"), read, reply("Yesterday: FSDK-1"), user("add FSDK-2"), reply("ok"))).suggestedTickets, []);
   // Only using the skill counts: a session that edits its SKILL.md still links.
-  assert.deepEqual(parse(jsonl(header(), user("FSDK-3: fix ~/.pi/agent/skills/daily-progress-report/SKILL.md"), reply("ok"))).tickets, ["FSDK-3"]);
+  assert.deepEqual(parse(jsonl(header(), user("FSDK-3: fix ~/.pi/agent/skills/daily-progress-report/SKILL.md"), reply("ok"))).suggestedTickets, ["FSDK-3"]);
   // Work before the report keeps its link.
   const late = parse(jsonl(header(), user("begin work on FSDK-4"), reply("done"), user('<skill name="daily-progress-report" location="/x">…</skill>'), reply("FSDK-5, FSDK-6, FSDK-7 shipped")));
-  assert.deepEqual(late.tickets, ["FSDK-4"]);
+  assert.deepEqual(late.suggestedTickets, ["FSDK-4"]);
 });
 
 test("a ticket named only in passing in many replies does not link the run", () => {
@@ -112,5 +113,27 @@ test("a ticket named only in passing in many replies does not link the run", () 
 test("a key in AGENT_DASH_IGNORE_TICKETS (default FSDK-1) never links, in any case", async () => {
   const { config } = await import("../server/config.ts");
   const raw = jsonl(header(), name("FSDK-1 and FSDK-12"), user("fsdk-1, FSDK-12, FSDK-10"));
-  assert.deepEqual(parseSession(raw, "/f.jsonl", new Date(NOW), config.ticketPattern)!.tickets.sort(), ["FSDK-10", "FSDK-12"]);
+  const s = parseSession(raw, "/f.jsonl", new Date(NOW), config.ticketPattern)!;
+  assert.deepEqual(s.tickets, ["FSDK-12"]);
+  assert.deepEqual(s.suggestedTickets, ["FSDK-10"]);
+});
+
+test("a run links a ticket only on strong evidence: name, handoff, a branch it made, or a PR it opened", () => {
+  const chat = [user("Agent dashboard review. FSDK-2073 is #1 in the queue; look at FSDK-2073 again."), reply("FSDK-2073 ranks first because of this thread.")];
+  const weak = parse(jsonl(header(), ...chat));
+  assert.deepEqual(weak.tickets, []);
+  assert.deepEqual(weak.suggestedTickets, ["FSDK-2073"]);
+  // Only checking out, reading or naming a branch is not making it.
+  const read = parse(jsonl(header(), ...chat, toolCall("t1", "git checkout fsdk-2073-x && git log fsdk-2073-x"), reply("ok")));
+  assert.deepEqual(read.tickets, []);
+
+  const strong = (...lines: Parameters<typeof jsonl>) => parse(jsonl(header(), user("go"), ...lines, reply("ok"))).tickets;
+  assert.deepEqual(strong(user("[agent-dash context for FSDK-7]\nsee FSDK-8")), ["FSDK-7"]);
+  assert.deepEqual(strong(toolCall("t1", "cd /r && git switch -c fsdk-7-fix")), ["FSDK-7"]);
+  assert.deepEqual(strong(toolCall("t1", "git -C /r worktree add -b FSDK-7-fix ../r-7 origin/main")), ["FSDK-7"]);
+  assert.deepEqual(strong(toolCall("t1", "git checkout -B 'fsdk-7'")), ["FSDK-7"]);
+  assert.deepEqual(strong(toolCall("t1", "gh pr create --base main --title 'FSDK-7: fix' --body 'see FSDK-8'")), ["FSDK-7"]);
+  // A strong key also outranks a suggested one, which stays a suggestion.
+  const both = parse(jsonl(header(), name("FSDK-7: fix"), user("FSDK-8 FSDK-8"), reply("ok")));
+  assert.deepEqual([both.tickets, both.suggestedTickets], [["FSDK-7"], ["FSDK-8"]]);
 });

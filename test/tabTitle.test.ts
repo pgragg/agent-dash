@@ -64,3 +64,11 @@ test("a conversation gives its status and name; the other views give their count
   assert.equal(title("#/settings", d), "Settings · agent-dash");
   assert.equal(tabTitle({ route: parseHash("#/prs"), data: null, queue: 0, open: null }), "agent-dash");
 });
+
+test("an agent that only waits on a PR review is not waiting on you in the tab title", () => {
+  const needs = (n: string) => ({ s1: { sessionId: "s1", status: "done", about: "a", latest: "PR is open.", needs: n, generatedAt: "", error: null, stale: false } as const });
+  const d = data({ unlinkedRuns: [run({ sessionId: "s1", name: "Deploy FDR", status: "awaiting_input" })], counts: { working: 0, awaiting_input: 1, finished: 0 } });
+  assert.equal(title("#/c:s1", { ...d, conversationSummaries: needs("Waiting on review: PR 12") }), "👀 Deploy FDR · agent-dash");
+  assert.equal(title("#/", { ...d, conversationSummaries: needs("Waiting on review: PR 12") }), "Board · agent-dash");
+  assert.equal(title("#/", { ...d, conversationSummaries: needs("Restart the pod") }), "Board (1) · agent-dash");
+});

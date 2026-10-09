@@ -43,6 +43,7 @@ export function run(over: Partial<Run> = {}): Run {
     endedInError: false,
     stoppedByUser: false,
     tickets: [],
+    suggestedTickets: [],
     createdPrs: [],
     mentionedPrs: [],
     userMessageCount: 1,

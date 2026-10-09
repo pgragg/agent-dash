@@ -19,7 +19,7 @@ import { countPrs, groupOpenPrs } from "./prs.ts";
 import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, lastSeen, resumeCommand, runTitle, shortDate, stamp, useDashboard, useFlash, useLook, useNow, usePageFocus, useWaitNotifications } from "./lib.tsx";
 import { Composer, LivePanel } from "./liveControl.tsx";
 import { needStep } from "./needs.ts";
-import { agentFinished, agentWaitsOnReview, asksNothing, isNewSince, readySummary, runsOf, summaryText } from "./notify.ts";
+import { agentFinished, agentState, agentWaitsOnReview, asksNothing, isNewSince, readySummary, runsOf, summaryText, waitingOnYou } from "./notify.ts";
 import { needsNothing } from "../../shared/conversationSummary.ts";
 import { href, humanAge, parseHash, resolveBoardRef, type Route } from "./routes.ts";
 import { FixLogin } from "./fixLogin.tsx";
@@ -305,21 +305,25 @@ function OpenTab({ run, onError, className = "btn ghost", label = "Open in iTerm
   );
 }
 
-function statusText(run: HistoryRun, now: number): string {
+/** With the run's conversation summary, an agent that only waits on a PR review says so: see `agentState`. */
+function statusText(run: HistoryRun, now: number, summary?: ConversationSummary): string {
   const guess = run.statusSource === "heuristic" ? " (guess)" : "";
+  if (agentState(run, summary) === "waits_on_review") return `waits on review ${age(run.statusSince, now)}`;
   if (run.status === "awaiting_input") return `waiting ${age(run.statusSince, now)}${guess}`;
   if (run.status === "working") return `working ${age(run.statusSince, now)}${guess}`;
   return `finished ${age(run.lastActivityAt, now)} ago`;
 }
 
-function runTone(run: HistoryRun): string {
-  return run.endedInError ? "bad" : run.status === "awaiting_input" ? "waiting" : run.status === "working" ? "working" : "muted";
+/** An agent that waits on review is blue, as a PR out for review is: the next move is the reviewer's. */
+function runTone(run: HistoryRun, summary?: ConversationSummary): string {
+  const state = agentState(run, summary);
+  return run.endedInError ? "bad" : state === "awaiting_input" ? "waiting" : state === "working" || state === "waits_on_review" ? "working" : "muted";
 }
 
 /** A lane's agent state, from the ticket's runs. Null until pi saves the first message. */
-function laneRun(s: Subject, sessionId: string, now: number): LaneRun | null {
+function laneRun(s: Subject, sessionId: string, now: number, summary?: ConversationSummary): LaneRun | null {
   const run = s.ticket?.runs.find((r) => r.sessionId === sessionId);
-  return run ? { tone: runTone(run), text: statusText(run, now), working: run.status === "working" } : null;
+  return run ? { tone: runTone(run, summary), text: statusText(run, now, summary), working: run.status === "working" } : null;
 }
 
 // ---- queue (left rail) --------------------------------------------------------------
@@ -814,13 +818,13 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket, summary }:
   const details = detailsChoice ?? !summary?.about;
   const long = run.lastMessage.length > 900;
   return (
-    <section className={`card agent tone-border-${runTone(run)}`} id={`r:${run.sessionId}`}>
+    <section className={`card agent tone-border-${runTone(run, summary)}`} id={`r:${run.sessionId}`}>
       <header className="card-head">
-        <Dot tone={runTone(run)} pulse={run.status === "working"} />
+        <Dot tone={runTone(run, summary)} pulse={run.status === "working"} />
         <div className="agent-title">
           <h3 title={run.firstPrompt}>{runTitle(run)}</h3>
           <span className="meta">
-            {statusText(run, now)} · {dirLabel(run.cwd)} · {plural(run.userMessageCount, "prompt")}
+            {statusText(run, now, summary)} · {dirLabel(run.cwd)} · {plural(run.userMessageCount, "prompt")}
           </span>
         </div>
         <span className="grow" />
@@ -849,8 +853,25 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket, summary }:
           {chat ? "Show only the last message" : "Show the conversation"}
         </button>
       )}
-      {run.status !== "finished" && <Composer run={run} onError={onError} focusSignal={primary ? focusSignal : 0} />}
+      {run.status !== "finished" && (agentState(run, summary) === "waits_on_review" ? <FoldedComposer run={run} onError={onError} focusSignal={primary ? focusSignal : 0} /> : <Composer run={run} onError={onError} focusSignal={primary ? focusSignal : 0} />)}
     </section>
+  );
+}
+
+/** The reply box of an agent that waits on review: it asks nothing of you, so the box starts closed. `r` opens it. */
+function FoldedComposer({ run, onError, focusSignal }: { run: Run; onError: (m: string | null) => void; focusSignal: number }) {
+  const [open, setOpen] = useState(false);
+  const seen = useRef(focusSignal);
+  useEffect(() => {
+    if (focusSignal === seen.current) return;
+    seen.current = focusSignal;
+    setOpen(true);
+  }, [focusSignal]);
+  if (open) return <Composer run={run} onError={onError} focusSignal={focusSignal} />;
+  return (
+    <button className="btn ghost small composer-open" onClick={() => setOpen(true)}>
+      Reply to the agent
+    </button>
   );
 }
 
@@ -876,7 +897,7 @@ function PrRow({ pr, now }: { pr: PullRequest; now: number }) {
   );
 }
 
-function History({ runs: allRuns, now, onError, ticket, threads = {}, focus = null }: { runs: Run[]; now: number; onError: (m: string | null) => void; ticket?: string; threads?: Record<string, ThreadStatusChange>; focus?: string | null }) {
+function History({ runs: allRuns, suggested = [], summaries = {}, now, onError, ticket, threads = {}, focus = null }: { runs: Run[]; suggested?: Run[]; summaries?: Record<string, ConversationSummary>; now: number; onError: (m: string | null) => void; ticket?: string; threads?: Record<string, ThreadStatusChange>; focus?: string | null }) {
   const [open, setOpen] = useState<string | null>(null);
   const [all, setAll] = useState(false);
   const [showResolved, setShowResolved] = useState(false);
@@ -903,7 +924,7 @@ function History({ runs: allRuns, now, onError, ticket, threads = {}, focus = nu
       {shown.map((r) => (
         <li key={r.sessionId} id={`h:r:${r.sessionId}`} className={open === r.sessionId ? "open" : ""}>
           <div className="h-row">
-            <Dot tone={runTone(r)} pulse={r.status === "working"} />
+            <Dot tone={runTone(r, summaries[r.sessionId])} pulse={r.status === "working"} />
             <button className="h-title" onClick={() => setOpen(open === r.sessionId ? null : r.sessionId)} title={r.firstPrompt}>
               {runTitle(r)}
             </button>
@@ -912,7 +933,7 @@ function History({ runs: allRuns, now, onError, ticket, threads = {}, focus = nu
               {r.createdPrs.length > 0 && ` · opened ${plural(r.createdPrs.length, "PR")}`}
             </span>
             <span className="grow" />
-            <span className="meta">{statusText(r, now)}</span>
+            <span className="meta">{statusText(r, now, summaries[r.sessionId])}</span>
             {ticket && <ThreadButtons ticket={ticket} run={r} onError={onError} className="btn ghost small" />}
             <OpenTab run={r} onError={onError} className="btn ghost small" label="Open" />
           </div>
@@ -925,6 +946,28 @@ function History({ runs: allRuns, now, onError, ticket, threads = {}, focus = nu
           )}
         </li>
       ))}
+      {ticket &&
+        suggested.map((r) => (
+          <li key={r.sessionId} id={`h:r:${r.sessionId}`} className="suggested">
+            <div className="h-row">
+              <Dot tone="muted" />
+              <span className="h-title" title={r.firstPrompt}>
+                {runTitle(r)}
+              </span>
+              <span className="meta" title="The thread names the ticket only in its text: no name, branch or PR has the key. It gives no signal until you link it.">
+                {shortDate(r.startedAt)} · mentions {ticket}
+              </span>
+              <span className="grow" />
+              <button className="btn ghost small" onClick={async () => onError(await api.setThread(ticket, r.sessionId, "relevant"))} title={`This thread is about ${ticket}: link it`}>
+                Link
+              </button>
+              <button className="btn ghost small" onClick={async () => onError(await api.setThread(ticket, r.sessionId, "unlinked"))} title="Hide this suggestion">
+                Hide
+              </button>
+              <OpenTab run={r} onError={onError} className="btn ghost small" label="Open" />
+            </div>
+          </li>
+        ))}
       {ticket && resolved.length > 0 && (
         <li className="resolved-group">
           <button className="btn ghost small" onClick={() => setShowResolved(!showResolved)}>
@@ -1217,6 +1260,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
   const featured = live.length ? live : primary && !isResolved(s, primary) ? [primary] : relevant.length ? [relevant.at(-1)!] : [];
   const prs = s.ticket?.prs ?? [];
   const runs = s.ticket?.runs ?? (s.run ? [s.run] : []);
+  const suggested = s.ticket?.suggested ?? [];
   // A ticket's documents, or a run's when the entry is a run with no ticket.
   const documents = data.documents.filter((d) => (s.ticket ? d.ticket === s.ticket.ticket.key : d.sessionId === s.run?.sessionId));
   const top = lead(s);
@@ -1300,7 +1344,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
 
       {s.ticket && <Smoketests group={s.ticket} events={data.sdlcEvents[s.ticket.ticket.key] ?? []} now={now} cwd={cwd} onError={setError} />}
 
-      {s.ticket && (data.lanes[s.ticket.ticket.key]?.length ?? 0) > 0 && <LanesCard ticket={s.ticket.ticket.key} title={s.ticket.ticket.summary} lanes={data.lanes[s.ticket.ticket.key]} prs={prs} runFor={(id) => laneRun(s, id, now)} onError={setError} />}
+      {s.ticket && (data.lanes[s.ticket.ticket.key]?.length ?? 0) > 0 && <LanesCard ticket={s.ticket.ticket.key} title={s.ticket.ticket.summary} lanes={data.lanes[s.ticket.ticket.key]} prs={prs} runFor={(id) => laneRun(s, id, now, data.conversationSummaries[id])} onError={setError} />}
 
       {s.ticket && <StartAgent key={s.id} s={s} cwd={cwd} setCwd={setCwd} onError={setError} focusSignal={agentSignal} />}
 
@@ -1331,11 +1375,14 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
       )}
 
 
-      {runs.length > 0 && (
+      {runs.length + suggested.length > 0 && (
         <div className="stack">
-          <h2 className="section-title">History · {plural(runs.length, "run")}</h2>
+          <h2 className="section-title">
+            History · {plural(runs.length, "run")}
+            {suggested.length > 0 && ` · ${plural(suggested.length, "mention")}`}
+          </h2>
           <div className="card flush">
-            <History runs={runs} now={now} onError={setError} ticket={s.ticket?.ticket.key} threads={s.ticket?.threads} focus={anchor} />
+            <History runs={runs} suggested={suggested} summaries={data.conversationSummaries} now={now} onError={setError} ticket={s.ticket?.ticket.key} threads={s.ticket?.threads} focus={anchor} />
           </div>
         </div>
       )}
@@ -1567,7 +1614,7 @@ function HistoryView({ data, now }: { data: Dashboard; now: number }) {
               {g.runs.map((r) => (
                 <li key={r.sessionId} className={open === r.sessionId ? "open" : ""}>
                   <div className="h-row one-line">
-                    <Dot tone={runTone(r)} pulse={r.status === "working"} />
+                    <Dot tone={runTone(r, data.conversationSummaries[r.sessionId])} pulse={r.status === "working"} />
                     <button className="h-title" onClick={() => setOpen(open === r.sessionId ? null : r.sessionId)} title={r.firstPrompt}>
                       {runTitle(r)}
                     </button>
@@ -1586,7 +1633,7 @@ function HistoryView({ data, now }: { data: Dashboard; now: number }) {
                       {dirLabel(r.cwd)} · {plural(r.userMessageCount, "prompt")} · started {stamp(r.startedAt)}
                     </span>
                     <span className="grow" />
-                    <span className="meta">{statusText(r, now)}</span>
+                    <span className="meta">{statusText(r, now, data.conversationSummaries[r.sessionId])}</span>
                     <OpenTab run={r} onError={setActionError} className="btn ghost small" label="Open" />
                   </div>
                   {open !== r.sessionId && r.lastReply && <p className="h-last">{r.lastReply}</p>}
@@ -1705,9 +1752,9 @@ function ConversationView({ sessionId, data, now }: { sessionId: string; data: D
         <div className="ws-meta">
           {run ? (
             <>
-              <Dot tone={runTone(run)} pulse={run.status === "working"} />
+              <Dot tone={runTone(run, data.conversationSummaries[sessionId])} pulse={run.status === "working"} />
               <span className="meta">
-                {statusText(run, now)} · {dirLabel(run.cwd)} · {plural(run.userMessageCount, "prompt")}
+                {statusText(run, now, data.conversationSummaries[sessionId])} · {dirLabel(run.cwd)} · {plural(run.userMessageCount, "prompt")}
               </span>
               {run.headless ? (
                 <button className="btn ghost small" title={`Stop this ${agentLabel()} process. Resume here continues it later.`} onClick={async () => setError(await api.endConversation(sessionId))}>
@@ -2024,7 +2071,7 @@ export function App() {
 
   if (!data) return <main className="loading">{error ? <pre className="error">{error}</pre> : <span className="shimmer wide" />}</main>;
 
-  const waitingRuns = data.counts.awaiting_input;
+  const waitingRuns = waitingOnYou(data.counts.awaiting_input, runsOf(data), data.conversationSummaries);
   const workingRuns = data.counts.working;
   const position = selected && queue.includes(selected) ? `${queue.indexOf(selected) + 1} of ${queue.length} in the queue` : null;
   const sources = Object.entries(data.sources);

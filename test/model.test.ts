@@ -23,6 +23,7 @@ function session(over: Partial<ParsedSession>): ParsedSession {
     lastStopReason: "stop",
     midRun: false,
     tickets: [],
+    suggestedTickets: [],
     createdPrs: [],
     mentionedPrs: [],
     userMessageCount: 1,
@@ -199,6 +200,25 @@ test("an unlinked thread leaves the ticket, and so does a PR with no key that it
 
   const relinked = build([waiting], [pr({ url, tickets: [] })], [ticket()], [{ ...unlinked, id: 2, status: "relevant" }]);
   assert.deepEqual(relinked.myTickets[0].runs.map((r) => r.sessionId), ["w"]);
+});
+
+test("a suggested link gives no queue signal until you link it", () => {
+  const waiting = session({ sessionId: "w", suggestedTickets: ["FSDK-1"], lastActivityAt: minutesAgo(5), lastStopReason: "stop", midRun: false });
+  const d = build([waiting], []);
+  assert.deepEqual(d.myTickets[0].runs, []);
+  assert.deepEqual(d.myTickets[0].suggested?.map((r) => r.sessionId), ["w"]);
+  assert.equal(d.attention.find((a) => a.kind === "awaiting_input")?.ticketKey, null, "the wait is no signal on FSDK-1");
+  assert.deepEqual(d.unlinkedRuns.map((r) => r.sessionId), ["w"], "the run still shows on its own");
+
+  // Link records "relevant" for the pair: the run becomes a normal thread on the ticket.
+  const linked = build([waiting], [], [ticket()], [{ id: 1, ticket: "FSDK-1", sessionId: "w", status: "relevant", reason: null, createdAt: minutesAgo(1) }]);
+  assert.deepEqual(linked.myTickets[0].runs.map((r) => r.sessionId), ["w"]);
+  assert.deepEqual(linked.myTickets[0].suggested, []);
+  assert.equal(linked.attention.find((a) => a.kind === "awaiting_input")?.ticketKey, "FSDK-1");
+
+  // Unlink on a suggestion hides it.
+  const unlinked = build([waiting], [], [ticket()], [{ id: 1, ticket: "FSDK-1", sessionId: "w", status: "unlinked", reason: null, createdAt: minutesAgo(1) }]);
+  assert.deepEqual([unlinked.myTickets[0].runs, unlinked.myTickets[0].suggested], [[], []]);
 });
 
 test("a waiting run counts for its open ticket first; on a Done ticket it is context only", () => {

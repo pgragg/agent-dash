@@ -131,8 +131,8 @@ export const refreshGitHub = () => prs.get(true);
 loginRoute.setOnGitHubLogin(refreshGitHub);
 
 /** Every key with the provider's prefix that a session or PR names, at any time. */
-function allKeys(sessions: { tickets: string[] }[], pulls: { tickets: string[] }[], p: TicketProvider): string[] {
-  const keys = new Set([...sessions, ...pulls].flatMap((x) => x.tickets));
+function allKeys(sessions: { tickets: string[]; suggestedTickets: string[] }[], pulls: { tickets: string[] }[], p: TicketProvider): string[] {
+  const keys = new Set([...sessions.flatMap((s) => s.suggestedTickets), ...[...sessions, ...pulls].flatMap((x) => x.tickets)]);
   return [...keys].filter((k) => ticketProviders.providerFor(k) === p);
 }
 
@@ -172,7 +172,7 @@ async function dashboard(force: boolean) {
     const s = stateFor(k);
     return !s?.provider.exhaustive || s.all.has(k);
   };
-  const parsed = scanned.map((s) => (s.tickets.every(real) ? s : { ...s, tickets: s.tickets.filter(real) }));
+  const parsed = scanned.map((s) => (s.tickets.every(real) && s.suggestedTickets.every(real) ? s : { ...s, tickets: s.tickets.filter(real), suggestedTickets: s.suggestedTickets.filter(real) }));
   const pulls = rawPulls.map(withToAddress).map((p) => (p.tickets.every(real) ? p : { ...p, tickets: p.tickets.filter(real) }));
   const exhaustiveMine = await Promise.all(providerStates.map((s) => (s.provider.exhaustive && s.provider.enabled ? s.provider.listMine().catch(() => []) : [])));
   const mine = [...remoteMine.flat(), ...exhaustiveMine.flat()];

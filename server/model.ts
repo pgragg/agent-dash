@@ -55,6 +55,7 @@ export function toRuns(sessions: ParsedSession[], reported: Map<string, Reported
         endedInError: !s.midRun && s.lastStopReason === "error",
         stoppedByUser: !s.midRun && s.lastStopReason === "aborted",
         tickets: [...s.tickets],
+        suggestedTickets: [...s.suggestedTickets],
         createdPrs: s.createdPrs,
         mentionedPrs: s.mentionedPrs,
         userMessageCount: s.userMessageCount,
@@ -80,14 +81,20 @@ const threadMap = (threads: ThreadStatusChange[]): ThreadMap => new Map(threads.
 /**
  * Link runs and PRs, then take each run off the tickets that you unlinked it from. The first pass
  * stops a PR with no key from taking an unlinked ticket; the second removes one that a PR named.
+ * A suggested link that you linked (any status other than unlinked) becomes a normal link.
  */
 function linkRuns(runs: Run[], prs: PullRequest[], threads: ThreadMap): void {
+  const status = (k: string, r: Run) => threads.get(threadKey(k, r.sessionId))?.status;
+  for (const r of runs) {
+    for (const k of r.suggestedTickets) if (status(k, r) && status(k, r) !== "unlinked" && !r.tickets.includes(k)) r.tickets.push(k);
+  }
   const unlink = () => {
-    for (const r of runs) r.tickets = r.tickets.filter((k) => threads.get(threadKey(k, r.sessionId))?.status !== "unlinked");
+    for (const r of runs) r.tickets = r.tickets.filter((k) => status(k, r) !== "unlinked");
   };
   unlink();
   crossLink(runs, prs);
   unlink();
+  for (const r of runs) r.suggestedTickets = r.suggestedTickets.filter((k) => !r.tickets.includes(k) && status(k, r) !== "unlinked");
 }
 
 export function crossLink(runs: Run[], prs: PullRequest[]): void {
@@ -133,6 +140,7 @@ function group(ticket: Ticket, runs: Run[], prs: PullRequest[], threads: ThreadM
   return {
     ticket,
     runs: mine,
+    suggested: runs.filter((r) => r.suggestedTickets.includes(ticket.key)).sort((a, b) => a.startedAt.localeCompare(b.startedAt)),
     prs: prs.filter((p) => p.tickets.includes(ticket.key)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
     threads: states,
   };
