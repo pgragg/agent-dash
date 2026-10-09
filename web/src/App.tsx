@@ -1371,10 +1371,6 @@ function Workspace({ s, parked, data, now, position, doneForNow, onDoneForNow, o
         {s.items.length + parked.length > 0 && <WhyList s={s} parked={parked} data={data} now={now} cwd={cwd} lastLook={lastLook} onError={setError} />}
       </header>
 
-      {t && <TicketPanel key={t.key} ticket={t} onError={setError} />}
-
-      {s.ticket && <TicketSummaryDoc key={`summary-${s.id}`} documents={documents} runs={runs} cwd={cwd} now={now} onError={setError} />}
-
       {error && (
         <div className="toast" role="alert">
           {error}
@@ -1386,16 +1382,6 @@ function Workspace({ s, parked, data, now, position, doneForNow, onDoneForNow, o
 
       {s.ticket && <NextSteps s={s} state={data.summaries[s.ticket.ticket.key]} notes={data.notes[s.ticket.ticket.key] ?? []} now={now} cwd={cwd} onError={setError} />}
 
-      {s.ticket && <Smoketests group={s.ticket} events={data.sdlcEvents[s.ticket.ticket.key] ?? []} now={now} cwd={cwd} onError={setError} />}
-
-      {s.ticket && (data.lanes[s.ticket.ticket.key]?.length ?? 0) > 0 && <LanesCard ticket={s.ticket.ticket.key} title={s.ticket.ticket.summary} lanes={data.lanes[s.ticket.ticket.key]} prs={prs} runFor={(id) => laneRun(s, id, now, data.conversationSummaries[id])} onError={setError} />}
-
-      {s.ticket && <StartAgent key={s.id} s={s} cwd={cwd} setCwd={setCwd} onError={setError} focusSignal={agentSignal} />}
-
-      {s.ticket && <Notes ticket={s.ticket.ticket.key} notes={data.notes[s.ticket.ticket.key] ?? []} now={now} onError={setError} focusSignal={noteSignal} />}
-
-      {(s.ticket || documents.length > 0) && <Documentation key={`docs-${s.id}`} documents={documents} runs={runs} cwd={cwd} now={now} onError={setError} />}
-
       {featured.length > 0 && (
         <div className="stack">
           <h2 className="section-title">{live.length ? (live.length === 1 ? "Agent" : `Agents · ${live.length}`) : "Last run"}</h2>
@@ -1404,6 +1390,8 @@ function Workspace({ s, parked, data, now, position, doneForNow, onDoneForNow, o
           ))}
         </div>
       )}
+
+      {s.ticket && (data.lanes[s.ticket.ticket.key]?.length ?? 0) > 0 && <LanesCard ticket={s.ticket.ticket.key} title={s.ticket.ticket.summary} lanes={data.lanes[s.ticket.ticket.key]} prs={prs} runFor={(id) => laneRun(s, id, now, data.conversationSummaries[id])} onError={setError} />}
 
       {prs.length > 0 && (
         <div className="stack">
@@ -1418,6 +1406,17 @@ function Workspace({ s, parked, data, now, position, doneForNow, onDoneForNow, o
         </div>
       )}
 
+      {s.ticket && <Smoketests group={s.ticket} events={data.sdlcEvents[s.ticket.ticket.key] ?? []} now={now} cwd={cwd} onError={setError} />}
+
+      {s.ticket && <TicketSummaryDoc key={`summary-${s.id}`} ticket={s.ticket.ticket.key} documents={documents} runs={runs} cwd={cwd} now={now} onError={setError} />}
+
+      {t && <TicketPanel key={t.key} ticket={t} onError={setError} />}
+
+      {s.ticket && <StartAgent key={s.id} s={s} cwd={cwd} setCwd={setCwd} onError={setError} focusSignal={agentSignal} />}
+
+      {s.ticket && <Notes ticket={s.ticket.ticket.key} notes={data.notes[s.ticket.ticket.key] ?? []} now={now} onError={setError} focusSignal={noteSignal} />}
+
+      {(s.ticket || documents.length > 0) && <Documentation key={`docs-${s.id}`} documents={documents} runs={runs} cwd={cwd} now={now} onError={setError} />}
 
       {runs.length + suggested.length > 0 && (
         <div className="stack">
