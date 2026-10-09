@@ -98,6 +98,10 @@ export function pickTicket(hash: string, boxHrefs: string[] | null, workspaceHre
 }
 
 const cap = (v: unknown, n: number) => (typeof v === "string" && v.trim() ? v.trim().slice(0, n) : null);
+const knownKey = (v: unknown, pattern: RegExp) => {
+  const key = cap(v, 32);
+  return key && new RegExp(`^${pattern.source}$`).test(key) ? key : null;
+};
 
 /**
  * Validates an exit posted by the page. Null when the kind is unknown, so the table holds only
@@ -107,13 +111,27 @@ export function parseExit(body: unknown, ticketPattern: RegExp): Exit | null {
   if (!body || typeof body !== "object") return null;
   const b = body as Record<string, unknown>;
   if (!EXIT_KINDS.includes(b.kind as ExitKind)) return null;
-  const ticket = cap(b.ticket, 32);
   const view = EXIT_VIEWS.includes(b.view as ExitView) ? (b.view as ExitView) : null;
   return {
     kind: b.kind as ExitKind,
     host: cap(b.host, 100)?.toLowerCase() ?? null,
     view,
     section: cap(b.section, 40),
-    ticket: ticket && new RegExp(`^${ticketPattern.source}$`).test(ticket) ? ticket : null,
+    ticket: knownKey(b.ticket, ticketPattern),
   };
+}
+
+/** One view open, or one click on a queue control. `name` is the view, or the control and its option. */
+export interface Usage {
+  kind: "view" | "control";
+  name: string;
+  ticket: string | null;
+}
+
+/** Validates a usage row posted by the page. Null when the kind or the name is not one the page sends. */
+export function parseUsage(body: unknown, ticketPattern: RegExp): Usage | null {
+  const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+  if (b.kind !== "view" && b.kind !== "control") return null;
+  const name = typeof b.name === "string" && /^[A-Za-z][\w:-]{0,39}$/.test(b.name) ? b.name : null;
+  return name ? { kind: b.kind, name, ticket: knownKey(b.ticket, ticketPattern) } : null;
 }

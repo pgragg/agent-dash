@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { HistoryRun } from "../../shared/types.ts";
+import { usage } from "./usage.ts";
 
 /** The custom header makes the browser send a CORS preflight, which the server never answers. */
 async function postJson(path: string, body?: unknown): Promise<{ sessionId?: string }> {
@@ -44,6 +45,7 @@ export function ResumeHere({ run, onError, small = false }: { run: HistoryRun; o
       className={`btn ${small ? "small" : ""}`}
       disabled={busy || resuming(run.sessionId)}
       title="Continue this session on its page, with no terminal"
+      {...usage("resume-here")}
       onClick={async () => {
         setBusy(true);
         try {

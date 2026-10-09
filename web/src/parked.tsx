@@ -4,6 +4,7 @@ import { conversationHash } from "./agents.tsx";
 import { age, inline, plural, post, stamp } from "./lib.tsx";
 import { ViewToolsSlot } from "./resizeView.tsx";
 import { href } from "./routes.ts";
+import { usage } from "./usage.ts";
 
 /** The parked asks on the board: a ticket's why list, and the Parked asks pane. Each has Send, Resume and Dismiss. */
 
@@ -63,10 +64,10 @@ function ParkedRow({ p, now, onError }: { p: ParkedRun; now: number; onError: (m
       <button className="btn small primary" disabled={busy || !reply.trim()} onClick={() => resume(reply.trim())} title="Resume the agent with this reply (⌘↵)">
         Send
       </button>
-      <button className="btn small" disabled={busy} onClick={() => resume()} title="Continue this session on its page, with no reply yet">
+      <button className="btn small" disabled={busy} onClick={() => resume()} {...usage("resume", p.ticket)} title="Continue this session on its page, with no reply yet">
         {busy ? "Resuming…" : "Resume"}
       </button>
-      <button className="btn small ghost" disabled={busy} onClick={async () => onError(await post(`/api/parked/dismiss?session=${encodeURIComponent(p.sessionId)}`))} title="You do not need this ask any more. The conversation stays in History.">
+      <button className="btn small ghost" disabled={busy} {...usage("dismiss", p.ticket)} onClick={async () => onError(await post(`/api/parked/dismiss?session=${encodeURIComponent(p.sessionId)}`))} title="You do not need this ask any more. The conversation stays in History.">
         Dismiss
       </button>
     </li>

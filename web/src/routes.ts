@@ -56,6 +56,12 @@ export function parseHash(hash: string): Route {
   return { view: "board", ref: path || null };
 }
 
+/** The view name in the usage table: the board's layout, and a PR's panel apart from the PR list. */
+export function usageView(route: Route, boardMode: "queue" | "kanban"): string {
+  if (route.view === "board") return boardMode === "kanban" ? "kanban" : "board";
+  return route.view === "prs" && route.pr ? "pr" : route.view;
+}
+
 /** The hash to replace an old address with, or null. A view that is gone opens the board. */
 export function redirectHash(hash: string): string | null {
   return GONE.has(decodeURIComponent(hash.replace(/^#\/?/, ""))) ? "#/" : null;

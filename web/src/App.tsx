@@ -21,7 +21,7 @@ import { Composer, LivePanel } from "./liveControl.tsx";
 import { needStep } from "./needs.ts";
 import { agentFinished, agentState, agentWaitsOnReview, asksNothing, isNewSince, readySummary, runsOf, summaryText, waitingOnYou } from "./notify.ts";
 import { needsNothing } from "../../shared/conversationSummary.ts";
-import { href, humanAge, parseHash, redirectHash, resolveBoardRef, type Route } from "./routes.ts";
+import { href, humanAge, parseHash, redirectHash, resolveBoardRef, type Route, usageView } from "./routes.ts";
 import { FixLogin } from "./fixLogin.tsx";
 import { rowKey } from "./rowNav.ts";
 import { ReviewRequest, useReviewDrafts } from "./reviewRequest.tsx";
@@ -41,6 +41,7 @@ import { type BoardMode, kanbanColumns, type Searchable, searchCards, stageOf, u
 import { starredFirst } from "./star.ts";
 import { FullScreenButton, ResizeHandle, useViewWidth, ViewTools, ViewToolsSlot } from "./resizeView.tsx";
 import { rowName, rowType } from "./whyRow.ts";
+import { recordView, usage } from "./usage.ts";
 import { DEFAULT_SNOOZE, isSnoozed, SNOOZE_OPTIONS, type SnoozeChoice, snoozeAction, UNTIL_CHANGE_LABEL, untilLabel } from "./snooze.ts";
 import { importLegacy, isMarked, type Marks, type Pending, settle, withPending } from "./untilChange.ts";
 import { tabTitle } from "./tabTitle.ts";
@@ -457,7 +458,7 @@ function AskItem({ g, title, selected, onSelect, now }: { g: AskGroup; title: st
 
 function BoardModeToggle({ mode, setMode }: { mode: BoardMode; setMode: (m: BoardMode) => void }) {
   const option = (m: BoardMode, label: string, title: string) => (
-    <button role="radio" aria-checked={mode === m} className={`btn small ${mode === m ? "" : "ghost"}`} onClick={() => setMode(m)} title={`${title} (V)`}>
+    <button role="radio" aria-checked={mode === m} className={`btn small ${mode === m ? "" : "ghost"}`} onClick={() => setMode(m)} {...usage(`board:${m}`)} title={`${title} (V)`}>
       {label}
     </button>
   );
@@ -827,10 +828,10 @@ function ThreadButtons({ ticket, run, onError, className = "btn ghost" }: { tick
   };
   return (
     <>
-      <button className={className} onClick={() => set("resolved")} disabled={saving} title={`This thread no longer matters to ${ticket}`}>
+      <button className={className} onClick={() => set("resolved")} disabled={saving} {...usage("resolve", ticket)} title={`This thread no longer matters to ${ticket}`}>
         Resolve
       </button>
-      <button className={className} onClick={() => set("unlinked")} disabled={saving} title={`This thread has nothing to do with ${ticket}: take it off the ticket`}>
+      <button className={className} onClick={() => set("unlinked")} disabled={saving} {...usage("unlink", ticket)} title={`This thread has nothing to do with ${ticket}: take it off the ticket`}>
         Unlink
       </button>
     </>
@@ -999,10 +1000,10 @@ function History({ runs: allRuns, suggested = [], summaries = {}, now, onError, 
                 </span>
               </span>
               <span className="h-actions">
-                <button className="btn ghost small" onClick={async () => onError(await api.setThread(ticket, r.sessionId, "relevant"))} title={`This thread is about ${ticket}: link it`}>
+                <button className="btn ghost small" onClick={async () => onError(await api.setThread(ticket, r.sessionId, "relevant"))} {...usage("link", ticket)} title={`This thread is about ${ticket}: link it`}>
                   Link
                 </button>
-                <button className="btn ghost small" onClick={async () => onError(await api.setThread(ticket, r.sessionId, "unlinked"))} title="Hide this suggestion">
+                <button className="btn ghost small" onClick={async () => onError(await api.setThread(ticket, r.sessionId, "unlinked"))} {...usage("hide", ticket)} title="Hide this suggestion">
                   Hide
                 </button>
                 <OpenTab run={r} onError={onError} className="btn ghost small" label="Open" />
@@ -1057,7 +1058,7 @@ function StarButton({ ticket, starred, onError }: { ticket: string; starred: boo
     setBusy(false);
   };
   return (
-    <button className={`btn ghost star-btn ${starred ? "on" : ""}`} onClick={toggle} disabled={busy} aria-pressed={starred} title={starred ? "Unstar: back to its normal place" : "Star: pin it to the top of the board and the PRs view"}>
+    <button className={`btn ghost star-btn ${starred ? "on" : ""}`} onClick={toggle} disabled={busy} {...usage(starred ? "unstar" : "star", ticket)} aria-pressed={starred} title={starred ? "Unstar: back to its normal place" : "Star: pin it to the top of the board and the PRs view"}>
       {starred ? "★ Starred" : "☆ Star"}
     </button>
   );
@@ -1130,7 +1131,7 @@ function SnoozeControl({ ticket, until, marked, canMark, now, signal, onMark, on
   const title = action?.kind === "change" ? "Hide until something about it changes" : action ? `Hide from the board until ${action.at.toLocaleString()}` : "Pick a date in the future";
   return (
     <span className="verb">
-      <button className="btn" onClick={press} disabled={!action || busy} title={title}>
+      <button className="btn" onClick={press} disabled={!action || busy} title={title} {...usage(`snooze:${choice === "change" ? "until-change" : choice}`, ticket)}>
         Snooze <Kbd>{choice === "change" ? "E" : "Z"}</Kbd>
       </button>
       {options.length > 1 && (
@@ -2091,6 +2092,9 @@ export function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [move, doneAndAdvance, selected, data, view, help, boardMode, setBoardMode, drawer, viewWidth]);
+
+  const viewName = usageView(route, boardMode);
+  useEffect(() => recordView(viewName), [viewName]);
 
   const openTitle = view === "board" && (boardMode === "queue" || drawer) && selected ? subjectTitle(selected) : null;
   useEffect(() => {

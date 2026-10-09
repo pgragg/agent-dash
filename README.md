@@ -354,6 +354,7 @@ Everything you write lives in SQLite at `~/.agent-dash/agent-dash.db`:
 | `until_change` | One per entry that you snoozed until something changes: `entry_id` (`t:KEY`, a run, or a PR), `fingerprint` (its signals at the click; empty after **Back to the queue**), `marked_at` (the click, or the one-time import from localStorage) |
 | `review_drafts` | One per open PR: `pr_url`, `status` (`in_progress`, `done` or `failed`), `text` (the drafted Slack message), `error`, `requested_at` |
 | `exits` | One per time you leave the dash for another tool: `at`, `kind`, `host`, `view`, `section`, `ticket`. Append-only. See [Exits](#exits). |
+| `usage` | One per view open or queue control click: `at`, `kind` (`view` or `control`), `name`, `ticket`. Append-only. See [Usage](#usage). |
 | `diagrams` | One per picture an agent showed in its log, the scan's record of what it found: `key` (session id and source hash), `session_id`, `ticket`, `kind`, `title`, `origin` (`reply`, or the file path as the agent wrote it), `hash`, `source`, `created_at` (when the agent wrote it), `deleted_at` (its document was deleted). Each one gets a document. |
 | `documents` | One per [document](#documents): `ticket`, `type` (`document` or `ticket-summary`; at most one ticket summary per ticket), `title`, `body` (markdown, or a [ticket brief](#ticket-briefs) spec as JSON; empty while an agent writes the first version), `session_id` (the conversation that made it), `diagram_id` (the picture that it was made from), `created_at`, `updated_at`, and `edit_prompt`, `edit_session_id` and `edit_started_at` for an agent edit that has not saved yet |
 | `document_images` | One per image in a document: `document_id`, `kind`, `hash`, `data` (SVG text, or base64), `created_at`. The markdown says `![alt](image:<id>)`. |
@@ -468,6 +469,18 @@ Each link out of the dash is a sign of a missing view or verb. The dash counts t
 ```
 jira · workspace header   · 23
 github_pr · agent message · 11
+```
+
+## Usage
+
+The `usage` table shows which views and queue controls you use, so an audit reads one table.
+
+- A `view` row is added when the view changes, not on a poll or a re-render. The names are the route's view (`board`, `prs`, `history`, `conversation`, `documents`, `document`, `wiki`, `settings`, …), with `kanban` for the board as columns and `pr` for one PR's panel.
+- A `control` row is added for each click on a tagged button: `star` or `unstar`, `snooze:<option>` (`snooze:until-change`, `snooze:1h`, `snooze:tomorrow`, …), `resolve`, `unlink`, `link`, `hide`, `resume` and `dismiss` on a parked ask, `resume-here`, and `board:queue` or `board:kanban`. A key press (`E`, `Z`, `V`) adds no row. To count a new button, give it `{...usage("name", ticket)}` from `web/src/usage.ts`.
+- The page posts each row to `POST /api/usage`. A lost row never breaks the click.
+
+```
+sqlite3 ~/.agent-dash/agent-dash.db "SELECT kind, name, count(*) FROM usage WHERE at >= date('now','-14 days') GROUP BY 1, 2 ORDER BY 3 DESC"
 ```
 
 ## Queue ranking
