@@ -7,6 +7,11 @@
  * button: that click is the approval. It reuses pi-mcp-adapter's sign-in,
  * because copied Slack cookies get the session revoked. The grant needs chat:write; the adapter
  * config hides the send tool from pi agents, so only this script can post.
+ *
+ *   node scripts/slack-post.ts --check
+ *
+ * Posts nothing: prints {"ok":true} when the grant can post, or {"off":"<why>"} when posting is
+ * not set up, and fails with the reason otherwise. The top bar's Slack health runs it.
  */
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -29,18 +34,26 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-const { values } = parseArgs({ options: { channel: { type: "string" } } });
+const { values } = parseArgs({ options: { channel: { type: "string" }, check: { type: "boolean" } } });
+const check = values.check ?? false;
 const channel = values.channel ?? "";
-if (!/^[CGD][A-Z0-9]{6,}$/.test(channel)) fail("usage: node scripts/slack-post.ts --channel <channel id> < message.txt");
-const text = (await readStdin()).trim();
-if (!text) fail("empty message");
+if (!check && !/^[CGD][A-Z0-9]{6,}$/.test(channel)) fail("usage: node scripts/slack-post.ts --channel <channel id> < message.txt");
+const text = check ? "" : (await readStdin()).trim();
+if (!check && !text) fail("empty message");
+
+/** A missing adapter or server means posting is not set up: not a failure for --check. */
+function notSetUp(message: string): never {
+  if (!check) fail(message);
+  console.log(JSON.stringify({ off: message }));
+  process.exit(0);
+}
 
 const [config, auth, manager] = await Promise.all([import(`${ADAPTER}/config.js`), import(`${ADAPTER}/mcp-auth.js`), import(`${ADAPTER}/server-manager.js`)]).catch((err: Error) =>
-  fail(`pi-mcp-adapter is not installed at ${ADAPTER}: ${err.message}`),
+  notSetUp(`pi-mcp-adapter is not installed at ${ADAPTER}: ${err.message}`),
 );
 const loaded = config.loadMcpConfigWithSources(undefined, homedir());
 const def = loaded.config.mcpServers[SERVER];
-if (!def) fail(`no "${SERVER}" server in ~/.pi/agent/mcp-adapter.json`);
+if (!def) notSetUp(`no "${SERVER}" server in ~/.pi/agent/mcp-adapter.json`);
 const servers = new manager.McpServerManager(homedir());
 servers.setAuthStorageOptions(auth.getAuthStorageOptions(loaded.config.settings?.oauthDir, homedir(), loaded.config.settings?.oauthCredentialStore));
 
@@ -51,6 +64,10 @@ try {
   const { tools } = await conn.client.listTools();
   const tool = tools.find((t: { name: string }) => t.name === SEND_TOOL);
   if (!tool) fail(`The Slack sign-in cannot post: it has no chat:write scope. ${RELOGIN}`);
+  if (check) {
+    console.log(JSON.stringify({ ok: true }));
+    process.exit(0);
+  }
   const props = Object.keys(tool.inputSchema?.properties ?? {});
   const channelKey = props.includes("channel_id") ? "channel_id" : "channel";
   const textKey = props.includes("message") ? "message" : "text";

@@ -1,8 +1,8 @@
 import { useState } from "react";
 import type { Dashboard } from "../../shared/types.ts";
 
-/** Sources whose login `pi-auth ensure` can refresh; the server keeps the same fixed list. */
-const FIXABLE: Record<string, string> = { jira: "Jira", github: "GitHub" };
+/** Sources with a Fix login button; the server keeps the same fixed list. With no pi-auth target, the server answers how to log in by hand. */
+const FIXABLE: Record<string, string> = { jira: "Jira", github: "GitHub", slack: "Slack" };
 
 /** A "Fix login" button for each down source. It runs pi-auth on the server, then refreshes. */
 export function FixLogin({ sources, onFixed }: { sources: Dashboard["sources"]; onFixed: () => void }) {
