@@ -16,7 +16,7 @@ function rule(selector: string): string {
 test("Full screen is in the workspace header row, not a floating button", () => {
   assert.doesNotMatch(css, /\.(ws|drawer)-tools\b/);
   assert.doesNotMatch(app, /className="(ws|drawer)-tools"/);
-  assert.match(app, /Done for now <Kbd>E<\/Kbd>\s*<\/button>\s*\)\)}\s*<ViewToolsSlot \/>/);
+  assert.match(app, /<SnoozeControl [^\n]*\/>\s*<ViewToolsSlot \/>/);
 });
 
 test("Refresh, ?, and the source dot never shrink out of the top bar", () => {

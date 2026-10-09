@@ -1,4 +1,8 @@
-/** "Snooze" hides a ticket from the board until a time, for work that needs a follow-up later. */
+/**
+ * "Snooze" hides an entry. "Until something changes" (`E`) hides a queue entry until a signal on
+ * it changes (see untilChange.ts). The times hide a ticket from the board until then, for work
+ * that needs a follow-up later.
+ */
 
 export type SnoozeOption = "1h" | "4h" | "tomorrow" | "3d" | "monday" | "1w" | "2w" | "date";
 
@@ -14,6 +18,20 @@ export const SNOOZE_OPTIONS: { id: SnoozeOption; label: string }[] = [
 ];
 
 export const DEFAULT_SNOOZE: SnoozeOption = "tomorrow";
+
+/** An option of the Snooze control: "until something changes" first, then the times. */
+export type SnoozeChoice = "change" | SnoozeOption;
+
+export const UNTIL_CHANGE_LABEL = "Until something changes";
+
+export type SnoozeAction = { kind: "change" } | { kind: "time"; at: Date };
+
+/** What the Snooze button (or `Z`) does with the picked option. Null when the option needs a valid date. */
+export function snoozeAction(choice: SnoozeChoice, now: Date, date = ""): SnoozeAction | null {
+  if (choice === "change") return { kind: "change" };
+  const at = snoozeUntil(choice, now, date);
+  return at && { kind: "time", at };
+}
 
 /** A follow-up is a start-of-day task, so each option longer than a day lands at 9:00 local time. */
 function morning(now: Date, days: number): Date {

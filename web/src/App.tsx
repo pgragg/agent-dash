@@ -41,7 +41,8 @@ import { type BoardMode, kanbanColumns, type Searchable, searchCards, stageOf, u
 import { starredFirst } from "./star.ts";
 import { FullScreenButton, ResizeHandle, useViewWidth, ViewTools, ViewToolsSlot } from "./resizeView.tsx";
 import { rowName, rowType } from "./whyRow.ts";
-import { DEFAULT_SNOOZE, isSnoozed, SNOOZE_OPTIONS, type SnoozeOption, snoozeUntil, untilLabel } from "./snooze.ts";
+import { DEFAULT_SNOOZE, isSnoozed, SNOOZE_OPTIONS, type SnoozeChoice, snoozeAction, UNTIL_CHANGE_LABEL, untilLabel } from "./snooze.ts";
+import { importLegacy, isMarked, type Marks, type Pending, settle, withPending } from "./untilChange.ts";
 import { tabTitle } from "./tabTitle.ts";
 
 /**
@@ -50,8 +51,8 @@ import { tabTitle } from "./tabTitle.ts";
  * The left rail is a queue: one entry per ticket (or per ticket-less run or PR), ranked by
  * its most urgent signal. The right side is a workspace for the selected entry, with
  * everything needed to act on it in place: the drafted next steps, the agent's full last
- * message with a reply box, the PRs, and the run history. "Done for now" clears an entry
- * until something about it changes, so the queue works like an inbox.
+ * message with a reply box, the PRs, and the run history. "Snooze until something changes"
+ * clears an entry until something about it changes, so the queue works like an inbox.
  */
 
 // ---- subjects: the things you can select --------------------------------------------
@@ -65,7 +66,7 @@ interface Subject {
   prUrl: string | null;
   /** Most urgent first. */
   items: Item[];
-  /** Changes whenever a signal changes, so "done for now" expires on news. */
+  /** Changes whenever a signal changes, so "snooze until something changes" expires on news. */
   fingerprint: string;
 }
 
@@ -213,23 +214,31 @@ function primaryRun(s: Subject): Run | undefined {
   return s.items.find((a) => a.run?.status === "awaiting_input")?.run ?? liveRuns(s)[0] ?? s.items.find((a) => a.run)?.run;
 }
 
-// ---- "done for now" -----------------------------------------------------------------
+// ---- snooze until something changes ------------------------------------------------
 
-const DONE_FOR_NOW_KEY = "agent-dash:done-for-now";
+const NO_MARKS: Marks = {};
 
-function useDoneForNow() {
-  const [map, setMap] = useState<Record<string, string>>(() => JSON.parse(localStorage.getItem(DONE_FOR_NOW_KEY) ?? "{}"));
-  const save = (next: Record<string, string>) => {
-    setMap(next);
-    localStorage.setItem(DONE_FOR_NOW_KEY, JSON.stringify(next));
+function useUntilChange(server: Marks | undefined) {
+  const [pending, setPending] = useState<Pending>({});
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (server) setPending((p) => settle(server, p));
+  }, [server]);
+  useEffect(() => {
+    importLegacy(localStorage, api.importUntilChange);
+  }, []);
+  const marks = withPending(server ?? NO_MARKS, pending);
+  const save = async (s: Subject, fingerprint: string | null) => {
+    setPending((p) => ({ ...p, [s.id]: fingerprint }));
+    const err = await api.untilChange(s.id, fingerprint);
+    setError(err);
+    if (err) setPending(({ [s.id]: _gone, ...rest }) => rest);
   };
   return {
-    isDone: (s: Subject) => map[s.id] === s.fingerprint,
-    markDone: (s: Subject) => save({ ...map, [s.id]: s.fingerprint }),
-    wake: (s: Subject) => {
-      const { [s.id]: _gone, ...rest } = map;
-      save(rest);
-    },
+    error,
+    isMarked: (s: Subject) => isMarked(marks, s),
+    mark: (s: Subject) => save(s, s.fingerprint),
+    unmark: (s: Subject) => save(s, null),
   };
 }
 
@@ -322,7 +331,7 @@ function runTone(run: HistoryRun, summary?: ConversationSummary): string {
 
 // ---- queue (left rail) --------------------------------------------------------------
 
-function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snoozedUntil, card = false, dim = false, starred = false, need = null, footer }: { s: Subject; selected: boolean; onSelect: () => void; now: number; summary?: TicketSummaryState; rank?: number; notes?: number; snoozedUntil?: string; card?: boolean; dim?: boolean; starred?: boolean; need?: string | null; footer?: React.ReactNode }) {
+function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snoozedUntil, untilChange = false, card = false, dim = false, starred = false, need = null, footer }: { s: Subject; selected: boolean; onSelect: () => void; now: number; summary?: TicketSummaryState; rank?: number; notes?: number; snoozedUntil?: string; untilChange?: boolean; card?: boolean; dim?: boolean; starred?: boolean; need?: string | null; footer?: React.ReactNode }) {
   const top = lead(s);
   const run = primaryRun(s);
   const ref = useRef<HTMLButtonElement & HTMLDivElement>(null);
@@ -362,6 +371,7 @@ function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snooz
           {summary && !done && <span className="tag tone-muted" title="Next steps drafted">✦ next steps</span>}
           {notes > 0 && <span className="tag tone-muted" title={`${plural(notes, "note")}`}>✎ {notes}</span>}
           {snoozedUntil && <span className="tag tone-muted" title={new Date(snoozedUntil).toLocaleString()}>until {untilLabel(snoozedUntil, now)}</span>}
+          {untilChange && <span className="tag tone-muted" title="Back in the queue when something changes">until a change</span>}
         </span>
         {footer && (
           // A click on the footer's own button does not also open the card.
@@ -1053,26 +1063,46 @@ function StarButton({ ticket, starred, onError }: { ticket: string; starred: boo
   );
 }
 
-/** Hides the ticket from the board until a time. `Z` snoozes with the picked option. */
-function SnoozeControl({ ticket, until, now, signal, onSnoozed, onError }: { ticket: string; until: string | undefined; now: number; signal: number; onSnoozed: () => void; onError: (m: string | null) => void }) {
-  const [option, setOption] = useState<SnoozeOption>(DEFAULT_SNOOZE);
+/**
+ * Hides the entry. "Until something changes" (`E`) is for any queue entry; the times (`Z`) are for
+ * a ticket. `Z` presses the button with the picked option.
+ */
+function SnoozeControl({ ticket, until, marked, canMark, now, signal, onMark, onUnmark, onSnoozed, onError }: {
+  ticket: string | undefined;
+  until: string | undefined;
+  marked: boolean;
+  canMark: boolean;
+  now: number;
+  signal: number;
+  onMark: () => void;
+  onUnmark: () => void;
+  onSnoozed: () => void;
+  onError: (m: string | null) => void;
+}) {
+  const [choice, setChoice] = useState<SnoozeChoice>(ticket ? DEFAULT_SNOOZE : "change");
   const [date, setDate] = useState("");
   const [busy, setBusy] = useState(false);
   const snoozed = isSnoozed(until, now);
-  const at = snoozeUntil(option, new Date(now), date);
+  const action = snoozeAction(choice, new Date(now), date);
   const save = async (next: Date | null) => {
+    if (!ticket) return;
     setBusy(true);
     const err = await api.snooze(ticket, next?.toISOString() ?? null);
     setBusy(false);
     onError(err);
     if (!err && next) onSnoozed();
   };
+  const press = () => {
+    if (action?.kind === "change") {
+      if (canMark && !marked) onMark();
+    } else if (action && !busy) save(action.at);
+  };
   // The control mounts again for each entry, so only a press after the mount counts.
   const seen = useRef(signal);
   useEffect(() => {
     if (signal === seen.current) return;
     seen.current = signal;
-    if (!snoozed && at && !busy) save(at);
+    if (!snoozed) press();
   }, [signal]);
 
   if (snoozed) {
@@ -1085,19 +1115,34 @@ function SnoozeControl({ ticket, until, now, signal, onSnoozed, onError }: { tic
       </span>
     );
   }
+  if (marked && canMark) {
+    return (
+      <span className="verb">
+        <span className="meta">Snoozed until a change</span>
+        <button className="btn ghost" onClick={onUnmark}>
+          Back to the queue
+        </button>
+      </span>
+    );
+  }
+  if (!ticket && !canMark) return null;
+  const options = [...(canMark ? [{ id: "change" as const, label: UNTIL_CHANGE_LABEL }] : []), ...(ticket ? SNOOZE_OPTIONS : [])];
+  const title = action?.kind === "change" ? "Hide until something about it changes" : action ? `Hide from the board until ${action.at.toLocaleString()}` : "Pick a date in the future";
   return (
     <span className="verb">
-      <button className="btn" onClick={() => at && save(at)} disabled={!at || busy} title={at ? `Hide from the board until ${at.toLocaleString()}` : "Pick a date in the future"}>
-        Snooze <Kbd>Z</Kbd>
+      <button className="btn" onClick={press} disabled={!action || busy} title={title}>
+        Snooze <Kbd>{choice === "change" ? "E" : "Z"}</Kbd>
       </button>
-      <select value={option} onChange={(e) => setOption(e.target.value as SnoozeOption)} aria-label="Snooze for">
-        {SNOOZE_OPTIONS.map((o) => (
-          <option key={o.id} value={o.id}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-      {option === "date" && <input type="date" value={date} onChange={(e) => setDate(e.target.value)} aria-label="Snooze until" />}
+      {options.length > 1 && (
+        <select value={choice} onChange={(e) => setChoice(e.target.value as SnoozeChoice)} aria-label="Snooze for">
+          {options.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      )}
+      {choice === "date" && <input type="date" value={date} onChange={(e) => setDate(e.target.value)} aria-label="Snooze until" />}
     </span>
   );
 }
@@ -1267,7 +1312,7 @@ function WhyList({ s, parked, data, now, cwd, lastLook, onError }: { s: Subject;
   );
 }
 
-function Workspace({ s, parked, data, now, position, doneForNow, onDoneForNow, onWake, onSnoozed, focusSignal, noteSignal, agentSignal, snoozeSignal, anchor, lastLook }: {
+function Workspace({ s, parked, data, now, position, marked, onMark, onUnmark, onSnoozed, focusSignal, noteSignal, agentSignal, snoozeSignal, anchor, lastLook }: {
   s: Subject;
   /** The ticket's parked asks that could need you. */
   parked: ParkedRun[];
@@ -1276,9 +1321,10 @@ function Workspace({ s, parked, data, now, position, doneForNow, onDoneForNow, o
   data: Dashboard;
   now: number;
   position: string | null;
-  doneForNow: boolean;
-  onDoneForNow: () => void;
-  onWake: () => void;
+  /** Snoozed until something changes. */
+  marked: boolean;
+  onMark: () => void;
+  onUnmark: () => void;
   /** After a snooze saves, so the board can move on. */
   onSnoozed: () => void;
   snoozeSignal: number;
@@ -1354,17 +1400,7 @@ function Workspace({ s, parked, data, now, position, doneForNow, onDoneForNow, o
           <span className="grow" />
           {t && !documents.some((d) => d.type === "ticket-summary") && <WriteTicketSummary key={`summary-${t.key}`} ticket={t.key} cwd={cwd} onError={setError} />}
           {t && <StarButton key={`star-${t.key}`} ticket={t.key} starred={data.starred.includes(t.key)} onError={setError} />}
-          {t && <SnoozeControl key={t.key} ticket={t.key} until={data.snoozedUntil[t.key]} now={now} signal={snoozeSignal} onSnoozed={onSnoozed} onError={setError} />}
-          {actionable(s) &&
-            (doneForNow ? (
-              <button className="btn ghost" onClick={onWake}>
-                Back to the queue
-              </button>
-            ) : (
-              <button className="btn" onClick={onDoneForNow} title="Hide until something about it changes">
-                Done for now <Kbd>E</Kbd>
-              </button>
-            ))}
+          <SnoozeControl key={s.id} ticket={t?.key} until={t && data.snoozedUntil[t.key]} marked={marked} canMark={actionable(s)} now={now} signal={snoozeSignal} onMark={onMark} onUnmark={onUnmark} onSnoozed={onSnoozed} onError={setError} />
           <ViewToolsSlot />
         </div>
         {s.ticket && <SdlcBar group={s.ticket} events={data.sdlcEvents[s.ticket.ticket.key] ?? []} cwd={cwd} onError={setError} />}
@@ -1769,8 +1805,8 @@ const KEYS: [string, string][] = [
   ["K / ↑", "Previous item (on PRs and History, K: previous row)"],
   ["↵", "On PRs and History: open the selected row"],
   ["T", "Show or hide the ticket's description and comments"],
-  ["E", "Done for now (comes back when something changes)"],
-  ["Z", "Snooze the ticket (comes back at the time you pick)"],
+  ["E", "Snooze until something changes"],
+  ["Z", "Snooze with the picked option (a ticket comes back at the time you pick)"],
   ["R", "Reply to the agent"],
   ["O", "Open the agent's iTerm tab, or its page if it has no tab"],
   ["S", "Draft next steps"],
@@ -1905,7 +1941,7 @@ export function App() {
   const { data, error, loading, refresh } = useDashboard();
   const focused = usePageFocus();
   const now = useNow(1_000);
-  const doneForNow = useDoneForNow();
+  const untilChange = useUntilChange(data?.untilChange);
   const [route, setRoute] = useState<Route>(() => parseHash(location.hash));
   const view = route.view;
   // The other views keep the board's ref, so going back lands on the same entry.
@@ -1934,8 +1970,8 @@ export function App() {
   const isStarred = (s: Subject) => !!s.ticket && starredKeys.has(s.ticket.ticket.key);
   const ranked = all.filter(actionable).sort((a, b) => lead(b)!.score - lead(a)!.score);
   // Starred entries lead the queue, so their ranks are the first ones.
-  const queue = starredFirst(ranked.filter((s) => !doneForNow.isDone(s)), isStarred);
-  const done = ranked.filter((s) => doneForNow.isDone(s));
+  const queue = starredFirst(ranked.filter((s) => !untilChange.isMarked(s)), isStarred);
+  const done = ranked.filter((s) => untilChange.isMarked(s));
   // Only context left, such as a PR out for review: the ball is with someone else.
   const othersTurn = all.filter((s) => s.items.length && !actionable(s) && !isDone(s) && !onlyFinished(s)).sort((a, b) => lead(b)!.score - lead(a)!.score);
   const finishedList = all.filter((s) => !actionable(s) && !isDone(s) && onlyFinished(s)).sort((a, b) => lead(b)!.score - lead(a)!.score);
@@ -1947,7 +1983,8 @@ export function App() {
   const unsnoozed = [...queue, ...othersTurn, ...working, ...finishedList, ...done, ...doneTickets, ...quiet];
   const starredList = unsnoozed.filter(isStarred);
   const unstarred = (list: Subject[]) => list.filter((s) => !isStarred(s));
-  const order = [...starredList, ...unstarred(unsnoozed), ...snoozedList];
+  // The rail's Snoozed section shows the entries snoozed until something changes, then the ones snoozed to a time.
+  const order = [...starredList, ...unstarred(unsnoozed.filter((s) => !done.includes(s))), ...unstarred(done), ...snoozedList];
   // The search keeps only the matching cards, best match first, and J/K walk them in that order.
   const kanbanOrder = boardMode === "kanban" && data ? searchCards(order, kanbanQuery, (s) => searchFields(s, data)) : order;
 
@@ -2003,9 +2040,9 @@ export function App() {
     if (!selected || !actionable(selected)) return;
     const i = queue.findIndex((s) => s.id === selected.id);
     const next = queue[i + 1] ?? queue[i - 1];
-    doneForNow.markDone(selected);
+    untilChange.mark(selected);
     if (next) select(next.id);
-  }, [selected, queue, doneForNow, select]);
+  }, [selected, queue, untilChange, select]);
 
   // The snoozed entry is still in `order` until the next load, so step past it.
   const advanceFrom = useCallback(
@@ -2084,6 +2121,7 @@ export function App() {
           )}
         </p>
       )}
+      {untilChange.error && <p className="banner">Could not save the snooze: {untilChange.error}</p>}
       {boardRef && !target && askSel === undefined && (
         <p className="banner">
           <code>{boardRef}</code> is not on the board. It may be older than 14 days, or closed: look for it in <a href="#/history">History</a>.
@@ -2098,9 +2136,9 @@ export function App() {
           data={data}
           now={now}
           position={position}
-          doneForNow={doneForNow.isDone(selected)}
-          onDoneForNow={doneAndAdvance}
-          onWake={() => doneForNow.wake(selected)}
+          marked={untilChange.isMarked(selected)}
+          onMark={doneAndAdvance}
+          onUnmark={() => untilChange.unmark(selected)}
           onSnoozed={() => advanceFrom(selected.id)}
           snoozeSignal={snoozeSignal}
           focusSignal={focusSignal}
@@ -2329,12 +2367,10 @@ export function App() {
                 <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
               ))}
             </RailSection>
-            <RailSection title="Done for now" count={unstarred(done).length} defaultOpen={false} hint="Back in the queue when something changes">
+            <RailSection title="Snoozed" count={unstarred(done).length + snoozedList.length} defaultOpen={false} hint="Back on the board when something changes, or at the time you picked">
               {unstarred(done).map((s) => (
-                <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
+                <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} untilChange notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
               ))}
-            </RailSection>
-            <RailSection title="Snoozed" count={snoozedList.length} defaultOpen={false} hint="Back on the board at the time you picked">
               {snoozedList.map((s) => (
                 <QueueItem key={s.id} s={s} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} snoozedUntil={until(s)} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
               ))}
@@ -2350,7 +2386,7 @@ export function App() {
               ))}
             </RailSection>
             <footer className="rail-foot">
-              <Kbd>J</Kbd> <Kbd>K</Kbd> move · <Kbd>E</Kbd> done · <Kbd>R</Kbd> reply · <Kbd>N</Kbd> note · <Kbd>?</Kbd> more
+              <Kbd>J</Kbd> <Kbd>K</Kbd> move · <Kbd>E</Kbd> snooze · <Kbd>R</Kbd> reply · <Kbd>N</Kbd> note · <Kbd>?</Kbd> more
             </footer>
           </nav>
 
