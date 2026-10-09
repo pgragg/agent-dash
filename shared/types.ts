@@ -18,8 +18,10 @@ export interface Run {
   firstPrompt: string;
   /** Last non-empty line of the latest assistant reply. */
   lastReply: string;
-  /** The whole latest reply (markdown), cut from the start when very long. */
+  /** The whole latest reply (markdown), cut from the start when very long. Empty when `lastMessageCut`. */
   lastMessage: string;
+  /** A finished run's message stays out of `/api/dashboard`; the page reads it from `/api/last-message` when it opens. */
+  lastMessageCut?: boolean;
   startedAt: string;
   lastActivityAt: string;
   model: string | null;
@@ -97,9 +99,12 @@ export interface ParkedRun {
   needs: string | null;
   /** What its last message said, from its summary. */
   latest: string | null;
-  /** The end of its last message, for when the summary is missing. */
+  /** The end of its last message, for when the summary is missing. `/api/dashboard` sends only the last `PARKED_ASK_CHARS`. */
   lastMessage: string;
 }
+
+/** The part of a parked run's last message that the page and a new agent's context show. */
+export const PARKED_ASK_CHARS = 300;
 
 /** A run in the History view. The whole last message stays out, so the list of every chat stays small. */
 export type HistoryRun = Omit<Run, "lastMessage">;

@@ -1,5 +1,5 @@
 import { progressLines, sdlcProgress } from "../shared/sdlc.ts";
-import type { Note, ParkedRun, PullRequest, Run, SdlcEvent, TicketGroup, TicketSummaryState } from "../shared/types.ts";
+import { type Note, PARKED_ASK_CHARS, type ParkedRun, type PullRequest, type Run, type SdlcEvent, type TicketGroup, type TicketSummaryState } from "../shared/types.ts";
 import { User, user } from "../shared/team.ts";
 
 /**
@@ -100,7 +100,7 @@ export function buildHandoff({ group, notes, summary, events = [], parked = [], 
 
   if (parked.length) {
     out.push("", `## Parked agents (stopped while they waited for ${user()}; each ask can still be open)`);
-    for (const p of parked) out.push(`- ${p.name ?? p.sessionId} · parked ${p.parkedAt} · needs: ${p.needs ?? p.lastMessage.slice(-300).replace(/\s+/g, " ")}`);
+    for (const p of parked) out.push(`- ${p.name ?? p.sessionId} · parked ${p.parkedAt} · needs: ${p.needs ?? p.lastMessage.slice(-PARKED_ASK_CHARS).replace(/\s+/g, " ")}`);
   }
 
   out.push("", "## Agent conversation history (oldest first)");

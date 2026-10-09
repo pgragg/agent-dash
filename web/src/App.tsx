@@ -6,7 +6,7 @@ import { awaitsOwner, ownerWaitText } from "../../shared/ownerApproval.ts";
 import { prRef } from "../../shared/refs.ts";
 import { hideUrls } from "../../shared/runTitle.ts";
 import { READ_FEEDBACK, REVIEW_AND_MERGE } from "../../shared/prVerbs.ts";
-import type { AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, NextStep, Note, ParkedRun, PullRequest, Run, LaneMode, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState } from "../../shared/types.ts";
+import { type AttentionItem, type AttentionKind, type ConversationSummary, type Dashboard, type HistoryRun, type NextStep, type Note, PARKED_ASK_CHARS, type ParkedRun, type PullRequest, type Run, type LaneMode, type ThreadStatusChange, type TicketGroup, type TicketSummary, type TicketSummaryState } from "../../shared/types.ts";
 import { conversationHash, launchAgent, ResumeHere, resuming } from "./agents.tsx";
 import { ParkedAskList, ParkedAsksPane, ParkedView } from "./parked.tsx";
 import { askKey, askRef, type AskGroup, needsYouCount, parkedAsks, splitParked } from "./parkedRows.ts";
@@ -17,7 +17,7 @@ import { filterHistory, groupByDay } from "./history.ts";
 import { PrPanel, PrVerbButton } from "./prPanel.tsx";
 import { ciTag } from "./prView.ts";
 import { countPrs, groupOpenPrs } from "./prs.ts";
-import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, lastSeen, resumeCommand, runTitle, shortDate, stamp, useDashboard, useFlash, useLook, useNow, usePageFocus, useWaitNotifications } from "./lib.tsx";
+import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, lastSeen, resumeCommand, runTitle, shortDate, stamp, useDashboard, useFlash, useLastMessage, useLook, useNow, usePageFocus, useWaitNotifications } from "./lib.tsx";
 import { Composer, LivePanel } from "./liveControl.tsx";
 import { needStep } from "./needs.ts";
 import { agentFinished, agentState, agentWaitsOnReview, asksNothing, isNewSince, readySummary, runsOf, summaryText, waitingOnYou } from "./notify.ts";
@@ -428,7 +428,7 @@ function AskItem({ g, title, selected, onSelect, now }: { g: AskGroup; title: st
     if (selected) ref.current?.scrollIntoView({ block: "nearest" });
   }, [selected]);
   const newest = g.rows.reduce((m, p) => (p.parkedAt > m.parkedAt ? p : m));
-  const ask = newest.needs ?? newest.lastMessage.slice(-300);
+  const ask = newest.needs ?? newest.lastMessage.slice(-PARKED_ASK_CHARS);
   return (
     <button ref={ref} className={`q-item ${selected ? "selected" : ""}`} onClick={onSelect} aria-current={selected}>
       <span className="q-rank" />
@@ -853,7 +853,8 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket, summary }:
   // The card opens on its summary; a click shows the last message and the chat under it.
   const [detailsChoice, setDetails] = useState<boolean | null>(null);
   const details = detailsChoice ?? !summary?.about;
-  const long = run.lastMessage.length > 900;
+  const lastMessage = useLastMessage(run, details && !chat);
+  const long = lastMessage.length > 900;
   return (
     <section className={`card agent tone-border-${runTone(run, summary)}`} id={`r:${run.sessionId}`}>
       <header className="card-head">
@@ -873,10 +874,10 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket, summary }:
       {/* The whole chat ends with the last message, so it replaces it. */}
       {/* A working agent writes its log on every tool call; reload on a new prompt or when it stops, not on each write. */}
       {details && chat && <Chat sessionId={run.sessionId} refreshKey={run.status === "working" ? run.userMessageCount : run.lastActivityAt + run.status} />}
-      {details && !chat && run.lastMessage && (
+      {details && !chat && lastMessage && (
         <div className={`agent-message ${long && !expanded ? "clamped" : ""}`}>
           <SessionScope sessionId={run.sessionId}>
-            <Markdown text={run.lastMessage} />
+            <Markdown text={lastMessage} />
           </SessionScope>
           {long && (
             <button className="btn ghost small expand" onClick={() => setExpanded(!expanded)}>
@@ -934,6 +935,19 @@ function PrRow({ pr, now }: { pr: PullRequest; now: number }) {
   );
 }
 
+/** An opened row's last message. */
+function HistoryMessage({ run }: { run: Run }) {
+  const text = useLastMessage(run, true);
+  if (!text) return null;
+  return (
+    <div className="h-message">
+      <SessionScope sessionId={run.sessionId}>
+        <Markdown text={text} />
+      </SessionScope>
+    </div>
+  );
+}
+
 function History({ runs: allRuns, suggested = [], summaries = {}, now, onError, ticket, threads = {}, focus = null }: { runs: Run[]; suggested?: Run[]; summaries?: Record<string, ConversationSummary>; now: number; onError: (m: string | null) => void; ticket?: string; threads?: Record<string, ThreadStatusChange>; focus?: string | null }) {
   const [open, setOpen] = useState<string | null>(null);
   const [all, setAll] = useState(false);
@@ -978,13 +992,7 @@ function History({ runs: allRuns, suggested = [], summaries = {}, now, onError, 
             </span>
           </div>
           {open !== r.sessionId && r.lastReply && <p className="h-last">{r.lastReply}</p>}
-          {open === r.sessionId && r.lastMessage && (
-            <div className="h-message">
-              <SessionScope sessionId={r.sessionId}>
-                <Markdown text={r.lastMessage} />
-              </SessionScope>
-            </div>
-          )}
+          {open === r.sessionId && <HistoryMessage run={r} />}
         </li>
       ))}
       {ticket &&

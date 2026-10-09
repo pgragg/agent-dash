@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Dashboard, ParkedRun, ParkReason, Ticket } from "../../shared/types.ts";
+import { type Dashboard, PARKED_ASK_CHARS, type ParkedRun, type ParkReason, type Ticket } from "../../shared/types.ts";
 import { conversationHash } from "./agents.tsx";
 import { age, inline, plural, post, stamp } from "./lib.tsx";
 import { splitParked } from "./parkedRows.ts";
@@ -40,7 +40,7 @@ export function parkedGroups(data: Pick<Dashboard, "parked" | "myTickets" | "oth
 function ParkedRow({ p, now, onError }: { p: ParkedRun; now: number; onError: (m: string | null) => void }) {
   const [reply, setReply] = useState("");
   const [busy, setBusy] = useState(false);
-  const ask = p.needs ?? p.lastMessage.slice(-300);
+  const ask = p.needs ?? p.lastMessage.slice(-PARKED_ASK_CHARS);
   const resume = async (message?: string) => {
     setBusy(true);
     const err = await post(`/api/conversations/resume?session=${encodeURIComponent(p.sessionId)}`, message ? { message } : undefined);

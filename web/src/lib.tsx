@@ -1,6 +1,6 @@
 import { Fragment, type MouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { runTitle } from "../../shared/runTitle.ts";
-import type { Dashboard, HistoryRun, TicketDocumentWithBody, PrDetail, ThreadStatus, Transcript } from "../../shared/types.ts";
+import type { Dashboard, HistoryRun, Run, TicketDocumentWithBody, PrDetail, ThreadStatus, Transcript } from "../../shared/types.ts";
 import { setTeam } from "../../shared/team.ts";
 import { IMAGE_EXT, wikiLinkParts } from "../../shared/wiki.ts";
 import { href } from "./routes.ts";
@@ -162,6 +162,31 @@ export function useDashboard() {
   }, [load]);
 
   return { data, error, loading, refresh: () => load(true) };
+}
+
+/** The run has a last message, also when `/api/dashboard` left it out. */
+export const hasLastMessage = (run: Run): boolean => !!run.lastMessage || !!run.lastMessageCut;
+
+/**
+ * A run's whole last message. A finished run's is not in the dashboard, so it is read when `open`
+ * first turns true, and again when the run changes. Empty while it loads.
+ */
+export function useLastMessage(run: Run, open: boolean): string {
+  const [loaded, setLoaded] = useState<{ key: string; text: string } | null>(null);
+  const key = `${run.sessionId} ${run.lastActivityAt}`;
+  useEffect(() => {
+    if (!open || !run.lastMessageCut || loaded?.key === key) return;
+    let live = true;
+    api.lastMessage(run.sessionId).then(
+      (text) => live && setLoaded({ key, text }),
+      (err: Error) => live && setLoaded({ key, text: `_${err.message}_` }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [open, key, run.lastMessageCut]);
+  if (!run.lastMessageCut) return run.lastMessage;
+  return loaded?.key === key ? loaded.text : "";
 }
 
 // ---- notifications ------------------------------------------------------------------
@@ -419,6 +444,11 @@ export const api = {
     const res = await fetch(`/api/transcript?session=${encodeURIComponent(sessionId)}`);
     if (!res.ok) throw new Error(`could not load the chat (${res.status})`);
     return res.json();
+  },
+  lastMessage: async (sessionId: string): Promise<string> => {
+    const res = await fetch(`/api/last-message?session=${encodeURIComponent(sessionId)}`);
+    if (!res.ok) throw new Error(`could not load the last message (${res.status})`);
+    return ((await res.json()) as { lastMessage: string }).lastMessage;
   },
   setThread: (ticket: string, sessionId: string, status: ThreadStatus) =>
     post(`/api/threads?ticket=${encodeURIComponent(ticket)}&session=${encodeURIComponent(sessionId)}`, { status }),
