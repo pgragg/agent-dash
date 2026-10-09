@@ -3,7 +3,9 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { writeFile, mkdir } from "node:fs/promises";
+import type { SourceHealth } from "../../shared/types.ts";
 import { config } from "../config.ts";
+import { slackFixSteps } from "../sources/slack.ts";
 
 /** Path to pi-auth binary. Empty or "none" turns pi-auth off. */
 const PI_AUTH = config.piAuth;
@@ -14,8 +16,8 @@ const GH_CLI = process.env.AGENT_DASH_GH_CLI ?? "gh";
 /** Where to save the GitHub token for apps that don't use `gh`. */
 const GH_TOKEN_FILE = process.env.AGENT_DASH_GH_TOKEN_FILE ?? join(homedir(), ".agent-dash/github-token");
 
-/** Dash source → handler type. Fixed, so the page can never choose what runs. */
-export const LOGIN_TARGETS: Record<string, "gh" | "pi-auth"> = { github: "gh", jira: "pi-auth", slack: "pi-auth" };
+/** Dash source → handler type. Fixed, so the page can never choose what runs. pi-auth has no slack target. */
+export const LOGIN_TARGETS: Record<string, "gh" | "pi-auth" | "slack"> = { github: "gh", jira: "pi-auth", slack: "slack" };
 
 /** What to do by hand when automated login fails. */
 const jira = config.ticketProviders.find((p) => p.id === "jira");
@@ -23,10 +25,6 @@ const jiraTokenFile = jira?.type === "jira" ? jira.tokenFile : "";
 const MANUAL: Record<string, string> = {
   jira: `Make a new API token at https://id.atlassian.com/manage-profile/security/api-tokens and put it in ${jiraTokenFile ? `${jiraTokenFile} as JIRA_API_TOKEN=…` : "the JIRA_API_TOKEN env var, or in a token file that you set on the Settings page"}.`,
   github: "Run `gh auth login` in a terminal, then retry.",
-  slack: [
-    config.slack.reloginCommand ? `For Post to Slack, run \`${config.slack.reloginCommand}\` in a terminal and allow the grant.` : "For Post to Slack, sign in to the slack server of pi-mcp-adapter again, or set the Slack sign-in command on the Settings page.",
-    config.slack.stateFile ? `For Slack search, save a new Slack login to ${config.slack.stateFile} with \`agent-browser state save\`.` : "",
-  ].filter(Boolean).join(" "),
 };
 
 function run(cmd: string, args: string[], timeout: number): Promise<{ code: number; output: string }> {
@@ -44,6 +42,18 @@ const running = new Set<string>();
 /** Callback to refresh a source after a successful login. Set by index.ts to avoid circular imports. */
 let onLogin: ((source: string) => void) | null = null;
 export function setOnLogin(cb: (source: string) => void) { onLogin = cb; }
+
+/** Checks both Slack logins again. Set by index.ts, which holds the draft gaps that it needs. */
+let slackCheck: (() => Promise<SourceHealth>) | null = null;
+export function setSlackCheck(cb: () => Promise<SourceHealth>) { slackCheck = cb; }
+
+/** Neither Slack login can be refreshed from here, so check again and give the steps for the half that failed. */
+async function handleSlack(): Promise<{ code: number; error?: string; output?: string }> {
+  if (!slackCheck) return { code: 503, error: "The Slack check is not ready yet." };
+  const health = await slackCheck();
+  if (health.ok) return { code: 200, output: "Both Slack logins work." };
+  return { code: 401, error: `${health.error}. ${slackFixSteps(health, config.slack)}` };
+}
 
 /**
  * Handle GitHub auth via `gh` CLI.
@@ -117,12 +127,12 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
 
   running.add(source);
   try {
-    const result = handler === "gh" ? await handleGitHub() : await handlePiAuth(source);
+    const result = handler === "gh" ? await handleGitHub() : handler === "slack" ? await handleSlack() : await handlePiAuth(source);
     if (result.code === 200) {
       onLogin?.(source);
       return json(200, { ok: true, output: result.output });
     }
-    return json(result.code, { error: `${result.error} ${MANUAL[source]}`, output: result.output });
+    return json(result.code, { error: MANUAL[source] ? `${result.error} ${MANUAL[source]}` : result.error, output: result.output });
   } finally {
     running.delete(source);
   }

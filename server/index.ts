@@ -165,6 +165,10 @@ loginRoute.setOnLogin((source) => {
     void slackPost.get(true);
   }
 });
+loginRoute.setSlackCheck(async () => {
+  const post = await slackPost.get(true);
+  return slackHealth(searchLogin(config.slack.stateFile), post, slackGap(Object.fromEntries(summaryDb.summariesByTicket())), slackFixedAt);
+});
 
 /** The newest finished next-steps draft, when its Gaps line says that the Slack login failed. */
 function slackGap(summaries: Dashboard["summaries"]): { at: string; ticket: string } | null {

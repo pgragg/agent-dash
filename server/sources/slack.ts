@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { SourceHealth } from "../../shared/types.ts";
 
 const POST_SCRIPT = new URL("../../scripts/slack-post.ts", import.meta.url).pathname;
@@ -69,4 +70,26 @@ export function slackHealth(search: Half & { savedAt?: string }, post: Half, gap
   }
   if (!("off" in post) && !post.ok) errors.push(`Post to Slack: ${post.error}`);
   return errors.length ? { ok: false, label: "Slack", error: errors.join(" · ") } : { ok: true, label: "Slack" };
+}
+
+/**
+ * The manual steps for only the Slack halves that `slackHealth` says failed. No login tool can
+ * refresh the search login: it must come from the user's own Chrome, because Slack revokes a
+ * session whose cookies a headless browser copied.
+ */
+export function slackFixSteps(health: SourceHealth, slack: { stateFile: string; reloginCommand: string }): string {
+  const failed = (health.error ?? "").split(" · ");
+  const steps: string[] = [];
+  if (failed.some((e) => e.startsWith("Slack search:"))) {
+    const readme = join(dirname(slack.stateFile), "README.md");
+    steps.push(
+      "For Slack search, sign in to Slack in Chrome and turn on chrome://inspect/#remote-debugging. Then save that login, with only its *.slack.com cookies: " +
+        `\`umask 077; tmp=$(mktemp); agent-browser --session probe --auto-connect state save "$tmp" && jq '{cookies: [.cookies[] | select(.domain|test("slack\\\\.com$"))], origins: []}' "$tmp" > "${slack.stateFile}"; rm -f "$tmp"\`.` +
+        (existsSync(readme) ? ` More in ${readme}.` : ""),
+    );
+  }
+  if (failed.some((e) => e.startsWith("Post to Slack:"))) {
+    steps.push(slack.reloginCommand ? `For Post to Slack, run \`${slack.reloginCommand}\` in a terminal and allow the grant.` : "For Post to Slack, sign in to the slack server of pi-mcp-adapter again, or set the Slack sign-in command on the Settings page.");
+  }
+  return steps.join(" ");
 }
