@@ -4,23 +4,24 @@ import { type MoveTarget, moveStepTarget, moveTargets } from "../../shared/jiraV
 import { splitSummary } from "../../shared/nextSteps.ts";
 import { awaitsOwner, ownerWaitText } from "../../shared/ownerApproval.ts";
 import { prRef } from "../../shared/refs.ts";
+import { hideUrls } from "../../shared/runTitle.ts";
 import { READ_FEEDBACK, REVIEW_AND_MERGE } from "../../shared/prVerbs.ts";
-import type { AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, LaneMode, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState } from "../../shared/types.ts";
+import { type AttentionItem, type AttentionKind, type ConversationSummary, type Dashboard, type HistoryRun, type NextStep, type Note, PARKED_ASK_CHARS, type ParkedRun, type PullRequest, type Run, type ThreadStatusChange, type TicketGroup, type TicketSummary, type TicketSummaryState } from "../../shared/types.ts";
 import { conversationHash, launchAgent, ResumeHere, resuming } from "./agents.tsx";
-import { ParkedView } from "./parked.tsx";
+import { ParkedAskList, ParkedAsksPane, ParkedView } from "./parked.tsx";
+import { askKey, askRef, type AskGroup, needsYouCount, parkedAsks, splitParked } from "./parkedRows.ts";
 import { CADDY_HTTP, CADDY_HTTPS, caddyCommands, cleanHost, cleanPort, rootScript, undoCommands } from "./localUrl.ts";
 import { SettingsView, SetupBanner } from "./settings.tsx";
-import { FIRST_LANES, type LaneDraft, LanesCard, LanesEditor, type LaneRun, WorktreesView } from "./lanes.tsx";
 import { filterHistory, groupByDay } from "./history.ts";
 import { PrPanel, PrVerbButton } from "./prPanel.tsx";
 import { ciTag } from "./prView.ts";
 import { countPrs, groupOpenPrs } from "./prs.ts";
-import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, lastSeen, resumeCommand, runTitle, shortDate, stamp, useDashboard, useFlash, useLook, useNow, usePageFocus, useWaitNotifications } from "./lib.tsx";
+import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, lastSeen, resumeCommand, runTitle, shortDate, stamp, useDashboard, useFlash, useLastMessage, useLook, useNow, usePageFocus, useWaitNotifications } from "./lib.tsx";
 import { Composer, LivePanel } from "./liveControl.tsx";
 import { needStep } from "./needs.ts";
-import { agentFinished, agentWaitsOnReview, isNewSince, readySummary, runsOf, summaryText } from "./notify.ts";
+import { agentFinished, agentState, agentWaitsOnReview, asksNothing, isNewSince, readySummary, runsOf, summaryText, waitingOnYou } from "./notify.ts";
 import { needsNothing } from "../../shared/conversationSummary.ts";
-import { href, humanAge, parseHash, resolveBoardRef, type Route } from "./routes.ts";
+import { href, humanAge, parseHash, redirectHash, resolveBoardRef, type Route } from "./routes.ts";
 import { FixLogin } from "./fixLogin.tsx";
 import { rowKey } from "./rowNav.ts";
 import { ReviewRequest, useReviewDrafts } from "./reviewRequest.tsx";
@@ -33,12 +34,15 @@ import { ConversationGist } from "./gist.tsx";
 import { SlackQuotes } from "./slackQuotes.tsx";
 import { DueDateVerb, MoveButton, TicketPanel, useTicketDetail } from "./ticketPanel.tsx";
 import { Documentation, DocumentsView, DocumentView, TicketSummaryDoc, WriteTicketSummary } from "./documents.tsx";
+import { WikiListView, WikiNoteView } from "./wiki.tsx";
 import { SessionScope } from "./mermaid.tsx";
+import { CardStep } from "./cardStep.tsx";
 import { type BoardMode, kanbanColumns, type Searchable, searchCards, stageOf, useBoardMode } from "./kanban.ts";
 import { starredFirst } from "./star.ts";
-import { FullScreenButton, ResizeHandle, useViewWidth } from "./resizeView.tsx";
+import { FullScreenButton, ResizeHandle, useViewWidth, ViewTools, ViewToolsSlot } from "./resizeView.tsx";
 import { rowName, rowType } from "./whyRow.ts";
 import { DEFAULT_SNOOZE, isSnoozed, SNOOZE_OPTIONS, type SnoozeOption, snoozeUntil, untilLabel } from "./snooze.ts";
+import { tabTitle } from "./tabTitle.ts";
 
 /**
  * agent-dash answers one question: "what do I work on next?".
@@ -130,13 +134,15 @@ function buildSubjects(d: Dashboard): Map<string, Subject> {
     const finished = a.kind === "awaiting_input" && agentFinished(run, summary);
     // The reviewer has the next move, so the stop waits on others, as a PR out for review does.
     const review = a.kind === "awaiting_input" && agentWaitsOnReview(run, summary);
-    const name = run && `“${run.name ?? run.firstPrompt.slice(0, 60)}”`;
+    const name = run && `“${runTitle(run).slice(0, 60)}”`;
     // The server's reason says "is waiting for you", which a finished agent is not.
     const reason = review && name ? `${name} waits on a PR review` : finished && name ? `${name} finished ${age(run.statusSince, Date.parse(d.generatedAt))} ago` : a.reason;
     const status = review ? "waits on review" : finished ? "finished" : a.status;
     // A finished agent needs nothing, so it is not on your queue, unless its smoketest still needs you (a plan to Confirm, a failed run).
     const idle = finished && !smoketestRow(a.sessionId, a.ticketKey ? (d.sdlcEvents[a.ticketKey] ?? []) : [], { asked: false, finished: true })?.needsYou;
-    s.items.push({ ...a, info: a.info || review || idle, reason, status, gist: summaryText(summary), finished, waitsOnReview: review });
+    // A stalled ticket whose newest agent asks nothing of you is quiet, not a task.
+    const settled = a.kind === "stalled" && asksNothing(d.conversationSummaries[a.sessionId ?? ""]);
+    s.items.push({ ...a, info: a.info || review || idle || settled, reason, status, gist: summaryText(summary), finished, waitsOnReview: review });
   }
   for (const s of out.values()) s.fingerprint = s.items.map((a) => `${a.kind}${a.finished ? ":finished" : ""}${a.waitsOnReview ? ":review" : ""}@${a.updatedAt}`).join("|");
   return out;
@@ -299,29 +305,27 @@ function OpenTab({ run, onError, className = "btn ghost", label = "Open in iTerm
   );
 }
 
-function statusText(run: HistoryRun, now: number): string {
+/** With the run's conversation summary, an agent that only waits on a PR review says so: see `agentState`. */
+function statusText(run: HistoryRun, now: number, summary?: ConversationSummary): string {
   const guess = run.statusSource === "heuristic" ? " (guess)" : "";
+  if (agentState(run, summary) === "waits_on_review") return `waits on review ${age(run.statusSince, now)}`;
   if (run.status === "awaiting_input") return `waiting ${age(run.statusSince, now)}${guess}`;
   if (run.status === "working") return `working ${age(run.statusSince, now)}${guess}`;
   return `finished ${age(run.lastActivityAt, now)} ago`;
 }
 
-function runTone(run: HistoryRun): string {
-  return run.endedInError ? "bad" : run.status === "awaiting_input" ? "waiting" : run.status === "working" ? "working" : "muted";
-}
-
-/** A lane's agent state, from the ticket's runs. Null until pi saves the first message. */
-function laneRun(s: Subject, sessionId: string, now: number): LaneRun | null {
-  const run = s.ticket?.runs.find((r) => r.sessionId === sessionId);
-  return run ? { tone: runTone(run), text: statusText(run, now), working: run.status === "working" } : null;
+/** An agent that waits on review is blue, as a PR out for review is: the next move is the reviewer's. */
+function runTone(run: HistoryRun, summary?: ConversationSummary): string {
+  const state = agentState(run, summary);
+  return run.endedInError ? "bad" : state === "awaiting_input" ? "waiting" : state === "working" || state === "waits_on_review" ? "working" : "muted";
 }
 
 // ---- queue (left rail) --------------------------------------------------------------
 
-function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snoozedUntil, card = false, dim = false, starred = false }: { s: Subject; selected: boolean; onSelect: () => void; now: number; summary?: TicketSummaryState; rank?: number; notes?: number; snoozedUntil?: string; card?: boolean; dim?: boolean; starred?: boolean }) {
+function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snoozedUntil, card = false, dim = false, starred = false, need = null, footer }: { s: Subject; selected: boolean; onSelect: () => void; now: number; summary?: TicketSummaryState; rank?: number; notes?: number; snoozedUntil?: string; card?: boolean; dim?: boolean; starred?: boolean; need?: string | null; footer?: React.ReactNode }) {
   const top = lead(s);
   const run = primaryRun(s);
-  const ref = useRef<HTMLButtonElement>(null);
+  const ref = useRef<HTMLButtonElement & HTMLDivElement>(null);
   useEffect(() => {
     if (selected) ref.current?.scrollIntoView({ block: "nearest" });
   }, [selected]);
@@ -330,8 +334,9 @@ function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snooz
   // On a Done ticket nothing is urgent, so the headline goes quiet and the green tag says why.
   const tone = done ? "muted" : top ? look(top).tone : run ? runTone(run) : "muted";
   const when = top?.kind === "awaiting_input" && run ? age(run.statusSince, now) : age(top?.updatedAt ?? run?.lastActivityAt ?? s.ticket?.ticket.updatedAt, now);
-  return (
-    <button ref={ref} className={`q-item ${card ? "k-card" : ""} ${dim ? "dim" : ""} ${starred ? "starred" : ""} ${selected ? "selected" : ""}`} onClick={onSelect} aria-current={selected}>
+  const className = `q-item ${card ? "k-card" : ""} ${dim ? "dim" : ""} ${starred ? "starred" : ""} ${selected ? "selected" : ""}`;
+  const body = (
+    <>
       {starred && (
         <span className="q-star" title="Starred" aria-label="Starred">
           ★
@@ -345,6 +350,11 @@ function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snooz
           <span className="q-when">{when}</span>
         </span>
         <span className="q-title">{subjectTitle(s)}</span>
+        {need && (
+          <span className="q-need" title={need}>
+            Needs from you: {need}
+          </span>
+        )}
         <span className="q-tags">
           {s.ticket && <span className="q-key">{s.ticket.ticket.key}</span>}
           {done && <span className="tag tone-good">done</span>}
@@ -353,8 +363,39 @@ function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snooz
           {notes > 0 && <span className="tag tone-muted" title={`${plural(notes, "note")}`}>✎ {notes}</span>}
           {snoozedUntil && <span className="tag tone-muted" title={new Date(snoozedUntil).toLocaleString()}>until {untilLabel(snoozedUntil, now)}</span>}
         </span>
+        {footer && (
+          // A click on the footer's own button does not also open the card.
+          <span className="q-foot" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+            {footer}
+          </span>
+        )}
       </span>
-    </button>
+    </>
+  );
+  if (!footer) {
+    return (
+      <button ref={ref} className={className} onClick={onSelect} aria-current={selected}>
+        {body}
+      </button>
+    );
+  }
+  // A button cannot hold a button, so a card with a footer button is a div that acts as one.
+  return (
+    <div
+      ref={ref}
+      role="button"
+      tabIndex={0}
+      className={className}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+        e.preventDefault();
+        onSelect();
+      }}
+      aria-current={selected}
+    >
+      {body}
+    </div>
   );
 }
 
@@ -370,6 +411,37 @@ function RailSection({ title, count, children, defaultOpen = true, hint }: { tit
       </button>
       {open && <div className="rail-list">{children}</div>}
     </section>
+  );
+}
+
+/** One ticket's parked asks in the rail, or the asks with no ticket. The pane it opens has Send, Resume and Dismiss. */
+function AskItem({ g, title, selected, onSelect, now }: { g: AskGroup; title: string; selected: boolean; onSelect: () => void; now: number }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (selected) ref.current?.scrollIntoView({ block: "nearest" });
+  }, [selected]);
+  const newest = g.rows.reduce((m, p) => (p.parkedAt > m.parkedAt ? p : m));
+  const ask = newest.needs ?? newest.lastMessage.slice(-PARKED_ASK_CHARS);
+  return (
+    <button ref={ref} className={`q-item ${selected ? "selected" : ""}`} onClick={onSelect} aria-current={selected}>
+      <span className="q-rank" />
+      <span className="q-body">
+        <span className="q-head">
+          <Dot tone="waiting" />
+          <span className="q-headline tone-text-waiting">{g.rows.length === 1 ? "A parked agent asks" : `${g.rows.length} parked agents ask`}</span>
+          <span className="q-when">{age(newest.parkedAt, now)}</span>
+        </span>
+        <span className="q-title">{title}</span>
+        <span className="q-need" title={ask}>
+          Needs from you: {ask}
+        </span>
+        {g.key && (
+          <span className="q-tags">
+            <span className="q-key">{g.key}</span>
+          </span>
+        )}
+      </span>
+    </button>
   );
 }
 
@@ -393,7 +465,7 @@ function searchFields(s: Subject, data: Dashboard): Searchable {
   const prs = s.ticket ? s.ticket.prs : data.prs.filter((p) => p.url === s.prUrl);
   return {
     keys: s.ticket ? [s.ticket.ticket.key] : [...runs.flatMap((r) => r.tickets), ...prs.flatMap((p) => p.tickets)],
-    text: [s.ticket?.ticket.summary ?? "", ...runs.flatMap((r) => [r.name ?? "", r.firstPrompt, r.lastReply]), ...prs.flatMap((p) => [p.title, p.headRef, p.url])],
+    text: [s.ticket?.ticket.summary ?? "", ...runs.flatMap((r) => [r.name ?? "", r.title ?? "", r.firstPrompt, r.lastReply]), ...prs.flatMap((p) => [p.title, p.headRef, p.url])],
   };
 }
 
@@ -414,22 +486,27 @@ function KanbanBoard({ order, dim, ranks, selected, onSelect, data, now, until, 
             <span className="count">{c.items.length}</span>
           </h2>
           <div className="k-col-list">
-            {c.items.map((s) => (
-              <QueueItem
-                key={s.id}
-                s={s}
-                card
-                dim={dim.has(s)}
-                rank={ranks.get(s)}
-                selected={s.id === selected?.id}
-                onSelect={() => onSelect(s)}
-                now={now}
-                summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined}
-                notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0}
-                snoozedUntil={isSnoozed(until(s), now) ? until(s) : undefined}
-                starred={isStarred(s)}
-              />
-            ))}
+            {c.items.map((s) => {
+              // The ticket's top next step, as a button, so you start it without opening the ticket. It shows once the server has decided what a click does.
+              const step = s.ticket && !isDone(s) ? firstStep(data, s) : null;
+              return (
+                <QueueItem
+                  key={s.id}
+                  s={s}
+                  card
+                  dim={dim.has(s)}
+                  rank={ranks.get(s)}
+                  selected={s.id === selected?.id}
+                  onSelect={() => onSelect(s)}
+                  now={now}
+                  summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined}
+                  notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0}
+                  snoozedUntil={isSnoozed(until(s), now) ? until(s) : undefined}
+                  starred={isStarred(s)}
+                  footer={step?.action && <CardStep key={step.id} ticket={s.ticket!.ticket.key} status={s.ticket!.ticket.status} step={step} action={step.action} cwd={workFolders(s)[0]} />}
+                />
+              );
+            })}
           </div>
         </section>
       ))}
@@ -649,29 +726,22 @@ function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd:
   const folders = workFolders(s);
   const [message, setMessage] = useState("");
   const [starting, setStarting] = useState(false);
-  const [started, setStarted] = useState<{ at: number; sessionId: string | null; lanes?: boolean } | null>(null);
+  const [started, setStarted] = useState<{ at: number; sessionId: string | null } | null>(null);
   const [terminal, setTerminal] = useState(false);
   const [context, setContext] = useState<string | null>(null);
-  const [parallel, setParallel] = useState(false);
-  const [lanes, setLanes] = useState<LaneDraft[]>(FIRST_LANES);
-  const [laneMode, setLaneMode] = useState<LaneMode>("land");
-  const [base, setBase] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     if (focusSignal) ref.current?.focus();
   }, [focusSignal]);
-  const ready = parallel ? lanes.every((l) => l.name.trim() && l.message.trim()) : !!message.trim();
+  const ready = !!message.trim();
   const start = async () => {
     if (!ready) return;
     setStarting(true);
     try {
-      // Lanes are always headless; their sessions show on the Parallel lanes card.
-      const body = parallel ? { message, cwd, lanes, laneMode, base: base.trim() || undefined } : { message, cwd, terminal };
-      const sessionId = await launchAgent(key, body);
+      const sessionId = await launchAgent(key, { message, cwd, terminal });
       onError(null);
       setMessage("");
-      if (parallel) setLanes(FIRST_LANES);
-      setStarted({ at: Date.now(), sessionId, lanes: parallel });
+      setStarted({ at: Date.now(), sessionId });
     } catch (err) {
       onError((err as Error).message);
     }
@@ -688,7 +758,7 @@ function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd:
           ref={ref}
           rows={3}
           value={message}
-          placeholder={parallel ? `Brief that every lane on ${key} gets (optional)…` : `First message for the new agent on ${key}…`}
+          placeholder={`First message for the new agent on ${key}…`}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -708,23 +778,17 @@ function StartAgent({ s, cwd, setCwd, onError, focusSignal }: { s: Subject; cwd:
               ))}
             </datalist>
           </label>
-          <label className="meta" title="Start one agent per lane, each in its own git worktree of this folder's repo">
-            <input type="checkbox" checked={parallel} onChange={(e) => setParallel(e.target.checked)} /> parallel lanes
+          <label className="meta" title={`Open ${agentLabel()} in a new iTerm tab instead of on this page`}>
+            <input type="checkbox" checked={terminal} onChange={(e) => setTerminal(e.target.checked)} /> in iTerm
           </label>
-          {!parallel && (
-            <label className="meta" title={`Open ${agentLabel()} in a new iTerm tab instead of on this page`}>
-              <input type="checkbox" checked={terminal} onChange={(e) => setTerminal(e.target.checked)} /> in iTerm
-            </label>
-          )}
           <button className="btn primary" onClick={start} disabled={starting || !ready || !cwd.trim()}>
-            {starting ? "Starting…" : parallel ? `Start ${lanes.length} lanes` : "Start agent"} <Kbd>⌘↵</Kbd>
+            {starting ? "Starting…" : "Start agent"} <Kbd>⌘↵</Kbd>
           </button>
         </div>
-        {parallel && <LanesEditor ticket={key} lanes={lanes} setLanes={setLanes} mode={laneMode} setMode={setLaneMode} base={base} setBase={setBase} />}
       </div>
       {started && Date.now() - started.at < 30_000 && (
         <p className="meta started">
-          {started.lanes ? "Started. Each lane shows under Parallel lanes, with its own worktree and agent." : started.sessionId ? <>Started. It shows under Agents once {agentLabel()} saves the first message, or <a href={conversationHash(started.sessionId)}>open its page</a>.</> : "Started in a new iTerm tab. It shows under Agents once it is running."}
+          {started.sessionId ? <>Started. It shows under Agents once {agentLabel()} saves the first message, or <a href={conversationHash(started.sessionId)}>open its page</a>.</> : "Started in a new iTerm tab. It shows under Agents once it is running."}
         </p>
       )}
       <details
@@ -769,15 +833,16 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket, summary }:
   // The card opens on its summary; a click shows the last message and the chat under it.
   const [detailsChoice, setDetails] = useState<boolean | null>(null);
   const details = detailsChoice ?? !summary?.about;
-  const long = run.lastMessage.length > 900;
+  const lastMessage = useLastMessage(run, details && !chat);
+  const long = lastMessage.length > 900;
   return (
-    <section className={`card agent tone-border-${runTone(run)}`} id={`r:${run.sessionId}`}>
+    <section className={`card agent tone-border-${runTone(run, summary)}`} id={`r:${run.sessionId}`}>
       <header className="card-head">
-        <Dot tone={runTone(run)} pulse={run.status === "working"} />
+        <Dot tone={runTone(run, summary)} pulse={run.status === "working"} />
         <div className="agent-title">
-          <h3 title={run.firstPrompt}>{runTitle(run)}</h3>
+          <h3 title={hideUrls(run.firstPrompt)}>{runTitle(run)}</h3>
           <span className="meta">
-            {statusText(run, now)} · {dirLabel(run.cwd)} · {plural(run.userMessageCount, "prompt")}
+            {statusText(run, now, summary)} · {dirLabel(run.cwd)} · {plural(run.userMessageCount, "prompt")}
           </span>
         </div>
         <span className="grow" />
@@ -789,10 +854,10 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket, summary }:
       {/* The whole chat ends with the last message, so it replaces it. */}
       {/* A working agent writes its log on every tool call; reload on a new prompt or when it stops, not on each write. */}
       {details && chat && <Chat sessionId={run.sessionId} refreshKey={run.status === "working" ? run.userMessageCount : run.lastActivityAt + run.status} />}
-      {details && !chat && run.lastMessage && (
+      {details && !chat && lastMessage && (
         <div className={`agent-message ${long && !expanded ? "clamped" : ""}`}>
           <SessionScope sessionId={run.sessionId}>
-            <Markdown text={run.lastMessage} />
+            <Markdown text={lastMessage} />
           </SessionScope>
           {long && (
             <button className="btn ghost small expand" onClick={() => setExpanded(!expanded)}>
@@ -806,8 +871,25 @@ function AgentCard({ run, now, onError, focusSignal, primary, ticket, summary }:
           {chat ? "Show only the last message" : "Show the conversation"}
         </button>
       )}
-      {run.status !== "finished" && <Composer run={run} onError={onError} focusSignal={primary ? focusSignal : 0} />}
+      {run.status !== "finished" && (agentState(run, summary) === "waits_on_review" ? <FoldedComposer run={run} onError={onError} focusSignal={primary ? focusSignal : 0} /> : <Composer run={run} onError={onError} focusSignal={primary ? focusSignal : 0} />)}
     </section>
+  );
+}
+
+/** The reply box of an agent that waits on review: it asks nothing of you, so the box starts closed. `r` opens it. */
+function FoldedComposer({ run, onError, focusSignal }: { run: Run; onError: (m: string | null) => void; focusSignal: number }) {
+  const [open, setOpen] = useState(false);
+  const seen = useRef(focusSignal);
+  useEffect(() => {
+    if (focusSignal === seen.current) return;
+    seen.current = focusSignal;
+    setOpen(true);
+  }, [focusSignal]);
+  if (open) return <Composer run={run} onError={onError} focusSignal={focusSignal} />;
+  return (
+    <button className="btn ghost small composer-open" onClick={() => setOpen(true)}>
+      Reply to the agent
+    </button>
   );
 }
 
@@ -833,7 +915,20 @@ function PrRow({ pr, now }: { pr: PullRequest; now: number }) {
   );
 }
 
-function History({ runs: allRuns, now, onError, ticket, threads = {}, focus = null }: { runs: Run[]; now: number; onError: (m: string | null) => void; ticket?: string; threads?: Record<string, ThreadStatusChange>; focus?: string | null }) {
+/** An opened row's last message. */
+function HistoryMessage({ run }: { run: Run }) {
+  const text = useLastMessage(run, true);
+  if (!text) return null;
+  return (
+    <div className="h-message">
+      <SessionScope sessionId={run.sessionId}>
+        <Markdown text={text} />
+      </SessionScope>
+    </div>
+  );
+}
+
+function History({ runs: allRuns, suggested = [], summaries = {}, now, onError, ticket, threads = {}, focus = null }: { runs: Run[]; suggested?: Run[]; summaries?: Record<string, ConversationSummary>; now: number; onError: (m: string | null) => void; ticket?: string; threads?: Record<string, ThreadStatusChange>; focus?: string | null }) {
   const [open, setOpen] = useState<string | null>(null);
   const [all, setAll] = useState(false);
   const [showResolved, setShowResolved] = useState(false);
@@ -860,28 +955,51 @@ function History({ runs: allRuns, now, onError, ticket, threads = {}, focus = nu
       {shown.map((r) => (
         <li key={r.sessionId} id={`h:r:${r.sessionId}`} className={open === r.sessionId ? "open" : ""}>
           <div className="h-row">
-            <Dot tone={runTone(r)} pulse={r.status === "working"} />
-            <button className="h-title" onClick={() => setOpen(open === r.sessionId ? null : r.sessionId)} title={r.firstPrompt}>
-              {runTitle(r)}
-            </button>
-            <span className="meta">
-              {shortDate(r.startedAt)} · {dirLabel(r.cwd)} · {plural(r.userMessageCount, "prompt")}
-              {r.createdPrs.length > 0 && ` · opened ${plural(r.createdPrs.length, "PR")}`}
+            <span className="h-main">
+              <Dot tone={runTone(r, summaries[r.sessionId])} pulse={r.status === "working"} />
+              <button className="h-title" onClick={() => setOpen(open === r.sessionId ? null : r.sessionId)} title={hideUrls(r.firstPrompt)}>
+                {runTitle(r)}
+              </button>
+              <span className="meta">
+                {shortDate(r.startedAt)} · {dirLabel(r.cwd)} · {plural(r.userMessageCount, "prompt")}
+                {r.createdPrs.length > 0 && ` · opened ${plural(r.createdPrs.length, "PR")}`}
+              </span>
             </span>
-            <span className="grow" />
-            <span className="meta">{statusText(r, now)}</span>
-            {ticket && <ThreadButtons ticket={ticket} run={r} onError={onError} className="btn ghost small" />}
-            <OpenTab run={r} onError={onError} className="btn ghost small" label="Open" />
+            <span className="meta h-status">{statusText(r, now, summaries[r.sessionId])}</span>
+            <span className="h-actions">
+              {ticket && <ThreadButtons ticket={ticket} run={r} onError={onError} className="btn ghost small" />}
+              <OpenTab run={r} onError={onError} className="btn ghost small" label="Open" />
+            </span>
           </div>
-          {open === r.sessionId && r.lastMessage && (
-            <div className="h-message">
-              <SessionScope sessionId={r.sessionId}>
-                <Markdown text={r.lastMessage} />
-              </SessionScope>
-            </div>
-          )}
+          {open !== r.sessionId && r.lastReply && <p className="h-last">{r.lastReply}</p>}
+          {open === r.sessionId && <HistoryMessage run={r} />}
         </li>
       ))}
+      {ticket &&
+        suggested.map((r) => (
+          <li key={r.sessionId} id={`h:r:${r.sessionId}`} className="suggested">
+            <div className="h-row">
+              <span className="h-main">
+                <Dot tone="muted" />
+                <span className="h-title" title={hideUrls(r.firstPrompt)}>
+                  {runTitle(r)}
+                </span>
+                <span className="meta" title="The thread names the ticket only in its text: no name, branch or PR has the key. It gives no signal until you link it.">
+                  {shortDate(r.startedAt)} · mentions {ticket}
+                </span>
+              </span>
+              <span className="h-actions">
+                <button className="btn ghost small" onClick={async () => onError(await api.setThread(ticket, r.sessionId, "relevant"))} title={`This thread is about ${ticket}: link it`}>
+                  Link
+                </button>
+                <button className="btn ghost small" onClick={async () => onError(await api.setThread(ticket, r.sessionId, "unlinked"))} title="Hide this suggestion">
+                  Hide
+                </button>
+                <OpenTab run={r} onError={onError} className="btn ghost small" label="Open" />
+              </span>
+            </div>
+          </li>
+        ))}
       {ticket && resolved.length > 0 && (
         <li className="resolved-group">
           <button className="btn ghost small" onClick={() => setShowResolved(!showResolved)}>
@@ -896,19 +1014,22 @@ function History({ runs: allRuns, now, onError, ticket, threads = {}, focus = nu
           return (
             <li key={r.sessionId} id={`h:r:${r.sessionId}`} className="resolved">
               <div className="h-row">
-                <span className="resolved-mark" aria-hidden>
-                  ✓
+                <span className="h-main">
+                  <span className="resolved-mark" aria-hidden>
+                    ✓
+                  </span>
+                  <span className="h-title" title={hideUrls(r.firstPrompt)}>
+                    {runTitle(r)}
+                  </span>
+                  <span className="meta" title={t.createdAt}>
+                    resolved {age(t.createdAt, now)} ago{t.reason ? ` · ${t.reason}` : ""}
+                  </span>
                 </span>
-                <span className="h-title" title={r.firstPrompt}>
-                  {runTitle(r)}
+                <span className="h-actions">
+                  <button className="btn ghost small" onClick={async () => onError(await api.setThread(ticket, r.sessionId, "relevant"))} title={`Count this thread for ${ticket} again`}>
+                    Mark relevant
+                  </button>
                 </span>
-                <span className="meta" title={t.createdAt}>
-                  resolved {age(t.createdAt, now)} ago{t.reason ? ` · ${t.reason}` : ""}
-                </span>
-                <span className="grow" />
-                <button className="btn ghost small" onClick={async () => onError(await api.setThread(ticket, r.sessionId, "relevant"))} title={`Count this thread for ${ticket} again`}>
-                  Mark relevant
-                </button>
               </div>
             </li>
           );
@@ -1039,7 +1160,7 @@ function whyLine(r: WhyRow, needs: boolean): string | null {
  * The ticket header: what needs you, then news, newest first in each, one line a row. A click on
  * a row opens its full summary under it.
  */
-function WhyList({ s, data, now, cwd, lastLook, onError }: { s: Subject; data: Dashboard; now: number; cwd: string; lastLook: string | null; onError: (m: string | null) => void }) {
+function WhyList({ s, parked, data, now, cwd, lastLook, onError }: { s: Subject; parked: ParkedRun[]; data: Dashboard; now: number; cwd: string; lastLook: string | null; onError: (m: string | null) => void }) {
   const t = s.ticket?.ticket;
   const [open, setOpen] = useState<string | null>(null);
   const [all, setAll] = useState(false);
@@ -1122,6 +1243,12 @@ function WhyList({ s, data, now, cwd, lastLook, onError }: { s: Subject; data: D
           <ul className="why-rows">{needs.map((r) => row(r, true))}</ul>
         </>
       )}
+      {parked.length > 0 && (
+        <>
+          <div className="why-group">Parked asks · {parked.length}</div>
+          <ParkedAskList rows={parked} now={now} onError={onError} />
+        </>
+      )}
       {updates.length > 0 && (
         <>
           <div className="why-group">
@@ -1140,8 +1267,10 @@ function WhyList({ s, data, now, cwd, lastLook, onError }: { s: Subject; data: D
   );
 }
 
-function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, onSnoozed, focusSignal, noteSignal, agentSignal, snoozeSignal, anchor, lastLook }: {
+function Workspace({ s, parked, data, now, position, doneForNow, onDoneForNow, onWake, onSnoozed, focusSignal, noteSignal, agentSignal, snoozeSignal, anchor, lastLook }: {
   s: Subject;
+  /** The ticket's parked asks that could need you. */
+  parked: ParkedRun[];
   /** Your look at this entry before this one: what came after it is marked new. */
   lastLook: string | null;
   data: Dashboard;
@@ -1174,6 +1303,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
   const featured = live.length ? live : primary && !isResolved(s, primary) ? [primary] : relevant.length ? [relevant.at(-1)!] : [];
   const prs = s.ticket?.prs ?? [];
   const runs = s.ticket?.runs ?? (s.run ? [s.run] : []);
+  const suggested = s.ticket?.suggested ?? [];
   // A ticket's documents, or a run's when the entry is a run with no ticket.
   const documents = data.documents.filter((d) => (s.ticket ? d.ticket === s.ticket.ticket.key : d.sessionId === s.run?.sessionId));
   const top = lead(s);
@@ -1235,14 +1365,11 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
                 Done for now <Kbd>E</Kbd>
               </button>
             ))}
+          <ViewToolsSlot />
         </div>
         {s.ticket && <SdlcBar group={s.ticket} events={data.sdlcEvents[s.ticket.ticket.key] ?? []} cwd={cwd} onError={setError} />}
-        {s.items.length > 0 && <WhyList s={s} data={data} now={now} cwd={cwd} lastLook={lastLook} onError={setError} />}
+        {s.items.length + parked.length > 0 && <WhyList s={s} parked={parked} data={data} now={now} cwd={cwd} lastLook={lastLook} onError={setError} />}
       </header>
-
-      {t && <TicketPanel key={t.key} ticket={t} onError={setError} />}
-
-      {s.ticket && <TicketSummaryDoc key={`summary-${s.id}`} documents={documents} runs={runs} cwd={cwd} now={now} onError={setError} />}
 
       {error && (
         <div className="toast" role="alert">
@@ -1254,16 +1381,6 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
       )}
 
       {s.ticket && <NextSteps s={s} state={data.summaries[s.ticket.ticket.key]} notes={data.notes[s.ticket.ticket.key] ?? []} now={now} cwd={cwd} onError={setError} />}
-
-      {s.ticket && <Smoketests group={s.ticket} events={data.sdlcEvents[s.ticket.ticket.key] ?? []} now={now} cwd={cwd} onError={setError} />}
-
-      {s.ticket && (data.lanes[s.ticket.ticket.key]?.length ?? 0) > 0 && <LanesCard ticket={s.ticket.ticket.key} title={s.ticket.ticket.summary} lanes={data.lanes[s.ticket.ticket.key]} prs={prs} runFor={(id) => laneRun(s, id, now)} onError={setError} />}
-
-      {s.ticket && <StartAgent key={s.id} s={s} cwd={cwd} setCwd={setCwd} onError={setError} focusSignal={agentSignal} />}
-
-      {s.ticket && <Notes ticket={s.ticket.ticket.key} notes={data.notes[s.ticket.ticket.key] ?? []} now={now} onError={setError} focusSignal={noteSignal} />}
-
-      {(s.ticket || documents.length > 0) && <Documentation key={`docs-${s.id}`} documents={documents} runs={runs} cwd={cwd} now={now} onError={setError} />}
 
       {featured.length > 0 && (
         <div className="stack">
@@ -1287,12 +1404,26 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
         </div>
       )}
 
+      {s.ticket && <Smoketests group={s.ticket} events={data.sdlcEvents[s.ticket.ticket.key] ?? []} now={now} cwd={cwd} onError={setError} />}
 
-      {runs.length > 0 && (
+      {s.ticket && <TicketSummaryDoc key={`summary-${s.id}`} ticket={s.ticket.ticket.key} documents={documents} runs={runs} cwd={cwd} now={now} onError={setError} />}
+
+      {t && <TicketPanel key={t.key} ticket={t} onError={setError} />}
+
+      {s.ticket && <StartAgent key={s.id} s={s} cwd={cwd} setCwd={setCwd} onError={setError} focusSignal={agentSignal} />}
+
+      {s.ticket && <Notes ticket={s.ticket.ticket.key} notes={data.notes[s.ticket.ticket.key] ?? []} now={now} onError={setError} focusSignal={noteSignal} />}
+
+      {(s.ticket || documents.length > 0) && <Documentation key={`docs-${s.id}`} documents={documents} runs={runs} cwd={cwd} now={now} onError={setError} />}
+
+      {runs.length + suggested.length > 0 && (
         <div className="stack">
-          <h2 className="section-title">History · {plural(runs.length, "run")}</h2>
+          <h2 className="section-title">
+            History · {plural(runs.length, "run")}
+            {suggested.length > 0 && ` · ${plural(suggested.length, "mention")}`}
+          </h2>
           <div className="card flush">
-            <History runs={runs} now={now} onError={setError} ticket={s.ticket?.ticket.key} threads={s.ticket?.threads} focus={anchor} />
+            <History runs={runs} suggested={suggested} summaries={data.conversationSummaries} now={now} onError={setError} ticket={s.ticket?.ticket.key} threads={s.ticket?.threads} focus={anchor} />
           </div>
         </div>
       )}
@@ -1377,7 +1508,7 @@ function PrsView({ data, now }: { data: Dashboard; now: number }) {
   );
 }
 
-// ---- Needs you view ---------------------------------------------------------------
+// ---- queue entry: the next step ------------------------------------------------------
 
 /** The first step of the ticket's newest finished next-steps draft. */
 function firstStep(data: Dashboard, s: Subject): NextStep | null {
@@ -1386,90 +1517,23 @@ function firstStep(data: Dashboard, s: Subject): NextStep | null {
   return shown?.steps[0] ?? null;
 }
 
-/** The entries behind "N notifications", in queue order, each with where to act. */
-function NeedsView({
-  queue,
-  hidden,
-  data,
-  now,
-  onDismiss,
-}: {
-  queue: Subject[];
-  hidden: number;
-  data: Dashboard;
-  now: number;
-  onDismiss: (s: Subject) => void;
-}) {
+/** What the lead agent needs from you, from its summary: the "Needs from you" line of a queue entry. */
+function needLine(s: Subject, data: Dashboard): string | null {
+  const a = lead(s);
+  if (!a || a.info || !a.sessionId || (a.kind !== "awaiting_input" && a.kind !== "run_error")) return null;
+  const ready = readySummary(data.conversationSummaries[a.sessionId]);
+  return ready && !needsNothing(ready.needs) ? ready.needs : null;
+}
+
+/** The queue entry's one next step: the place in agent-dash where you act on its lead signal. */
+function NextStepLink({ s, data }: { s: Subject; data: Dashboard }) {
+  const a = lead(s);
+  if (!a) return null;
+  const next = needStep(a, firstStep(data, s), s.id);
   return (
-    <article className="workspace">
-      <header className="ws-head">
-        <h1>{queue.length ? plural(queue.length, "notification") : "No notifications"}</h1>
-        <div className="ws-meta">
-          <span className="meta">
-            Most urgent first, as in the queue{hidden > 0 && ` · ${hidden} done for now, not shown`}
-          </span>
-        </div>
-      </header>
-      {queue.length === 0 ? (
-        <div className="zero big">No notifications. The agents at work and the PRs out for review are on the board.</div>
-      ) : (
-        <div className="card flush">
-          <ol className="actions">
-            {queue.map((s, i) => {
-              const item = lead(s)!;
-              const step = firstStep(data, s);
-              const next = needStep(item, step, s.id);
-              const tone = look(item).tone;
-              return (
-                <li key={s.id} className="action need" id={`need:${s.id}`}>
-                  <span className="q-rank">{i + 1}</span>
-                  <Dot tone={tone} />
-                  <div className="action-body">
-                    <div className="action-summary">
-                      <TypeChip kind={item.kind} /> <b className={`tone-text-${tone}`}>{look(item).title}</b> · {inline(item.reason)}
-                    </div>
-                    {item.gist && <div className="need-gist">{item.gist}</div>}
-                    <div className="action-meta">
-                      {s.ticket ? (
-                        <a className="key-link" href={href(`t:${s.ticket.ticket.key}`)} title="Open the ticket on the board">
-                          {s.ticket.ticket.key}
-                        </a>
-                      ) : (
-                        <span className="meta">no ticket</span>
-                      )}
-                      <span className="meta action-ticket">{subjectTitle(s)}</span>
-                      <OtherTags s={s} />
-                    </div>
-                    {step && next.ref !== `step:${step.id}` && (
-                      <div className="action-meta need-step">
-                        <span className="meta">Drafted next step:</span>
-                        <a href={href(`step:${step.id}`)} className="need-step-body">
-                          {inline(step.body)}
-                        </a>
-                      </div>
-                    )}
-                  </div>
-                  <span className="meta action-age" title={stamp(item.updatedAt)}>
-                    {age(item.updatedAt, now)} ago
-                  </span>
-                  <PrVerbButton item={item} data={data} />
-                  <a className="btn small primary" href={href(next.ref)}>
-                    {next.label} →
-                  </a>
-                  <button
-                    className="btn small ghost"
-                    onClick={() => onDismiss(s)}
-                    title="Done for now. It comes back when something about it changes."
-                  >
-                    Dismiss
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
-        </div>
-      )}
-    </article>
+    <a className="btn small" href={href(next.ref)}>
+      {next.label} →
+    </a>
   );
 }
 
@@ -1520,31 +1584,34 @@ function HistoryView({ data, now }: { data: Dashboard; now: number }) {
         <div className="stack" key={g.label}>
           <h2 className="section-title">{g.label}</h2>
           <div className="card flush">
-            <ol className="history">
+            <ol className="history chats">
               {g.runs.map((r) => (
                 <li key={r.sessionId} className={open === r.sessionId ? "open" : ""}>
-                  <div className="h-row one-line">
-                    <Dot tone={runTone(r)} pulse={r.status === "working"} />
-                    <button className="h-title" onClick={() => setOpen(open === r.sessionId ? null : r.sessionId)} title={r.firstPrompt}>
-                      {runTitle(r)}
-                    </button>
-                    {r.tickets.map((k) =>
-                      tickets.has(k) ? (
-                        <a key={k} className="key-link" href={href(`t:${k}`)} title={`${tickets.get(k)!.summary} · open on the board`}>
-                          {k}
-                        </a>
-                      ) : (
-                        <span key={k} className="key-link">
-                          {k}
-                        </span>
-                      ),
-                    )}
-                    <span className="meta shrink">
-                      {dirLabel(r.cwd)} · {plural(r.userMessageCount, "prompt")} · started {stamp(r.startedAt)}
+                  <div className="h-row">
+                    <span className="h-main">
+                      <Dot tone={runTone(r, data.conversationSummaries[r.sessionId])} pulse={r.status === "working"} />
+                      <button className="h-title" onClick={() => setOpen(open === r.sessionId ? null : r.sessionId)} title={hideUrls(r.firstPrompt)}>
+                        {runTitle(r)}
+                      </button>
+                      {r.tickets.map((k) =>
+                        tickets.has(k) ? (
+                          <a key={k} className="key-link" href={href(`t:${k}`)} title={`${tickets.get(k)!.summary} · open on the board`}>
+                            {k}
+                          </a>
+                        ) : (
+                          <span key={k} className="key-link">
+                            {k}
+                          </span>
+                        ),
+                      )}
+                      <span className="meta">
+                        {dirLabel(r.cwd)} · {plural(r.userMessageCount, "prompt")} · started {stamp(r.startedAt)}
+                      </span>
                     </span>
-                    <span className="grow" />
-                    <span className="meta">{statusText(r, now)}</span>
-                    <OpenTab run={r} onError={setActionError} className="btn ghost small" label="Open" />
+                    <span className="meta h-status">{statusText(r, now, data.conversationSummaries[r.sessionId])}</span>
+                    <span className="h-actions">
+                      <OpenTab run={r} onError={setActionError} className="btn ghost small" label="Open" />
+                    </span>
                   </div>
                   {open !== r.sessionId && r.lastReply && <p className="h-last">{r.lastReply}</p>}
                   {/* A live chat reloads with the dashboard, so new turns show up; a finished one never changes. */}
@@ -1662,9 +1729,9 @@ function ConversationView({ sessionId, data, now }: { sessionId: string; data: D
         <div className="ws-meta">
           {run ? (
             <>
-              <Dot tone={runTone(run)} pulse={run.status === "working"} />
+              <Dot tone={runTone(run, data.conversationSummaries[sessionId])} pulse={run.status === "working"} />
               <span className="meta">
-                {statusText(run, now)} · {dirLabel(run.cwd)} · {plural(run.userMessageCount, "prompt")}
+                {statusText(run, now, data.conversationSummaries[sessionId])} · {dirLabel(run.cwd)} · {plural(run.userMessageCount, "prompt")}
               </span>
               {run.headless ? (
                 <button className="btn ghost small" title={`Stop this ${agentLabel()} process. Resume here continues it later.`} onClick={async () => setError(await api.endConversation(sessionId))}>
@@ -1884,8 +1951,19 @@ export function App() {
   // The search keeps only the matching cards, best match first, and J/K walk them in that order.
   const kanbanOrder = boardMode === "kanban" && data ? searchCards(order, kanbanQuery, (s) => searchFields(s, data)) : order;
 
-  const target = data && boardRef ? resolveBoardRef(boardRef, data, new Set(subjects.keys())) : null;
-  const selected = (target && subjects.get(target.subjectId)) || queue[0] || order[0] || null;
+  // The parked asks that could need you: each one shows in its ticket's "why" list when the ticket is in Up next, else under Parked asks.
+  const parkedNeeds = useMemo(() => (data ? splitParked(data).needsYou : []), [data]);
+  const queueTickets = new Set(queue.flatMap((s) => (s.ticket ? [s.ticket.ticket.key] : [])));
+  const snoozedTickets = new Set(Object.entries(data?.snoozedUntil ?? {}).flatMap(([k, u]) => (isSnoozed(u, now) ? [k] : [])));
+  const asks = parkedAsks(parkedNeeds, queueTickets, snoozedTickets);
+  // The one count of work: the top bar, the tab title, and the board agree on it.
+  const needsYou = needsYouCount(queue.length, asks);
+  const askSel = askKey(boardRef);
+  const asksOf = (key: string) => parkedNeeds.filter((p) => p.ticket === key);
+
+  const target = data && boardRef && askSel === undefined ? resolveBoardRef(boardRef, data, new Set(subjects.keys())) : null;
+  // A Parked asks group shows its own pane, so no entry is selected.
+  const selected = askSel !== undefined ? null : (target && subjects.get(target.subjectId)) || queue[0] || order[0] || null;
   // You look at an entry while its workspace shows in a focused tab. On the kanban, that is the drawer.
   const looking = focused && view === "board" && (boardMode === "queue" || drawer) && selected ? selected.id : null;
   const look = useLook(looking);
@@ -1893,6 +1971,8 @@ export function App() {
 
   useEffect(() => {
     const onHash = () => {
+      const to = redirectHash(location.hash);
+      if (to) history.replaceState(null, "", to);
       const next = parseHash(location.hash);
       setRoute(next);
       if (next.view === "board") {
@@ -1900,6 +1980,7 @@ export function App() {
         if (next.ref) setDrawer(true);
       }
     };
+    onHash();
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -1941,7 +2022,7 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
       if (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || el.tagName === "SELECT" || e.metaKey || e.ctrlKey || e.altKey) return;
-      if ((view === "prs" || view === "history") && rowKey(e.key)) return void e.preventDefault();
+      if ((view === "prs" || view === "history" || view === "wiki") && rowKey(e.key)) return void e.preventDefault();
       if (view !== "board" && e.key !== "?" && e.key !== "Escape") return;
       if (e.key === "j" || e.key === "ArrowDown") move(1);
       else if (e.key === "k" || e.key === "ArrowUp") move(-1);
@@ -1974,14 +2055,14 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [move, doneAndAdvance, selected, data, view, help, boardMode, setBoardMode, drawer, viewWidth]);
 
+  const openTitle = view === "board" && (boardMode === "queue" || drawer) && selected ? subjectTitle(selected) : null;
   useEffect(() => {
-    const waiting = data?.counts.awaiting_input ?? 0;
-    document.title = queue.length ? `(${queue.length}) agent-dash` : waiting ? `(${waiting}) agent-dash` : "agent-dash";
-  }, [data, queue.length]);
+    document.title = tabTitle({ route, data, needsYou, open: openTitle });
+  }, [route, data, needsYou, openTitle]);
 
   if (!data) return <main className="loading">{error ? <pre className="error">{error}</pre> : <span className="shimmer wide" />}</main>;
 
-  const waitingRuns = data.counts.awaiting_input;
+  const waitingRuns = waitingOnYou(data.counts.awaiting_input, runsOf(data), data.conversationSummaries);
   const workingRuns = data.counts.working;
   const position = selected && queue.includes(selected) ? `${queue.indexOf(selected) + 1} of ${queue.length} in the queue` : null;
   const sources = Object.entries(data.sources);
@@ -2003,13 +2084,16 @@ export function App() {
           )}
         </p>
       )}
-      {boardRef && !target && (
+      {boardRef && !target && askSel === undefined && (
         <p className="banner">
           <code>{boardRef}</code> is not on the board. It may be older than 14 days, or closed: look for it in <a href="#/history">History</a>.
         </p>
       )}
-      {selected ? (
+      {askSel !== undefined ? (
+        <ParkedAsksPane ticketKey={askSel} rows={askSel ? asksOf(askSel) : asks.groups.find((g) => !g.key)?.rows ?? []} data={data} onBoard={!!askSel && subjects.has(`t:${askSel}`)} now={now} />
+      ) : selected ? (
         <Workspace
+          parked={selected.ticket ? asksOf(selected.ticket.ticket.key) : []}
           s={selected}
           data={data}
           now={now}
@@ -2043,7 +2127,7 @@ export function App() {
           agent-dash
           <nav className="views" aria-label="Views">
             <a href={selected ? href(selected.id) : "#/"} className={view === "board" ? "active" : ""} aria-current={view === "board" ? "page" : undefined}>
-              Board {queue.length > 0 && <span className="count">{queue.length}</span>}
+              Board
             </a>
             <a href="#/prs" className={view === "prs" ? "active" : ""} aria-current={view === "prs" ? "page" : undefined}>
               PRs {openPrs > 0 && <span className="count">{openPrs}</span>}
@@ -2054,8 +2138,8 @@ export function App() {
             <a href="#/documents" className={view === "documents" || view === "document" || view === "diagram" ? "active" : ""} aria-current={view === "documents" ? "page" : undefined}>
               Documents {data.documents.length > 0 && <span className="count">{data.documents.length}</span>}
             </a>
-            <a href="#/worktrees" className={view === "worktrees" ? "active" : ""} aria-current={view === "worktrees" ? "page" : undefined}>
-              Worktrees
+            <a href="#/wiki" className={view === "wiki" ? "active" : ""} aria-current={view === "wiki" ? "page" : undefined}>
+              Wiki
             </a>
             <a href="#/settings" className={view === "settings" ? "active" : ""} aria-current={view === "settings" ? "page" : undefined}>
               Settings
@@ -2063,21 +2147,18 @@ export function App() {
           </nav>
         </div>
         <div className="headline">
-          <a href="#/needs" className={`needs-link ${view === "needs" ? "active" : ""}`} title="See your notifications, and where to act on each">
-            <b>{queue.length ? plural(queue.length, "notification") : "No notifications"}</b>
+          <a href="#/" className="needs-link" onClick={() => setBoardMode("queue")} title={`${queue.length} in Up next, and ${asks.entries} under Parked asks. A ticket counts one time.`}>
+            <b>{needsYou ? `Needs you ${needsYou}` : "Nothing needs you"}</b>
           </a>
           <span className="sep">·</span>
-          <span>
-            <Dot tone="waiting" /> {waitingRuns} waiting
+          <span className="live-status" title="Live agents now: a status, not a count of work">
+            <span>
+              <Dot tone="waiting" /> {waitingRuns} waiting
+            </span>
+            <span>
+              <Dot tone="working" pulse={workingRuns > 0} /> {workingRuns} working
+            </span>
           </span>
-          <span>
-            <Dot tone="working" pulse={workingRuns > 0} /> {workingRuns} working
-          </span>
-          {data.parked.length > 0 && (
-            <a href="#/parked" className={view === "parked" ? "active" : ""} title="Waiting agents that agent-dash stopped, with what each one needed">
-              <Dot tone="muted" /> {data.parked.length} parked
-            </a>
-          )}
         </div>
         <span className="grow" />
         <span className={`sources ${down.length ? "bad" : ""}`} title={sources.map(([n, h]) => `${h.label ?? n}: ${h.off ? "off (not set up)" : h.ok ? "ok" : h.error}`).join("\n")}>
@@ -2096,11 +2177,7 @@ export function App() {
       </header>
       {route.view !== "settings" && <SetupBanner setup={data.setup ?? []} />}
 
-      {route.view === "needs" ? (
-        <main className="main">
-          <NeedsView queue={queue} hidden={done.length} data={data} now={now} onDismiss={doneForNow.markDone} />
-        </main>
-      ) : route.view === "parked" ? (
+      {route.view === "parked" ? (
         <main className="main">
           <ParkedView data={data} now={now} />
         </main>
@@ -2116,9 +2193,9 @@ export function App() {
         <main className="main">
           <DocumentsView data={data} now={now} />
         </main>
-      ) : route.view === "worktrees" ? (
+      ) : route.view === "wiki" ? (
         <main className="main">
-          <WorktreesView now={now} />
+          {route.ref ? <WikiNoteView key={route.ref} refId={route.ref} /> : <WikiListView />}
         </main>
       ) : route.view === "settings" ? (
         <main className="main">
@@ -2184,13 +2261,18 @@ export function App() {
             <aside className={`kanban-drawer ${viewWidth.full ? "full" : ""}`} aria-label="Workspace" style={viewWidth.full ? undefined : { width: `min(${viewWidth.width}px, 100%)` }}>
               {!viewWidth.full && <ResizeHandle side="left" scale={1} view={viewWidth} max={() => kanbanRef.current?.clientWidth ?? window.innerWidth} />}
               <div className="drawer-scroll">
-                <div className="drawer-tools">
-                  <FullScreenButton view={viewWidth} />
-                  <button className="btn ghost small" onClick={() => setDrawer(false)} title="Close the workspace (Esc)">
-                    Close <Kbd>Esc</Kbd>
-                  </button>
-                </div>
-                {workspace}
+                <ViewTools.Provider
+                  value={
+                    <>
+                      <FullScreenButton view={viewWidth} />
+                      <button className="btn ghost small" onClick={() => setDrawer(false)} title="Close the workspace (Esc)">
+                        Close <Kbd>Esc</Kbd>
+                      </button>
+                    </>
+                  }
+                >
+                  {workspace}
+                </ViewTools.Provider>
               </div>
             </aside>
           )}
@@ -2204,15 +2286,25 @@ export function App() {
             </div>
             <RailSection title="Starred" count={starredList.length} hint="Tickets you starred, pinned to the top">
               {starredList.map((s) => (
-                <QueueItem key={s.id} s={s} starred rank={queue.includes(s) ? queue.indexOf(s) + 1 : undefined} dim={done.includes(s) || finishedList.includes(s) || quiet.includes(s)} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
+                <QueueItem key={s.id} s={s} starred rank={queue.includes(s) ? queue.indexOf(s) + 1 : undefined} need={queue.includes(s) ? needLine(s, data) : null} footer={queue.includes(s) ? <NextStepLink s={s} data={data} /> : undefined} dim={done.includes(s) || finishedList.includes(s) || quiet.includes(s)} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
               ))}
             </RailSection>
             <RailSection title="Up next" count={unstarred(queue).length}>
               {unstarred(queue).map((s) => (
-                <QueueItem key={s.id} s={s} rank={queue.indexOf(s) + 1} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
+                <QueueItem key={s.id} s={s} rank={queue.indexOf(s) + 1} need={needLine(s, data)} footer={<NextStepLink s={s} data={data} />} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
               ))}
             </RailSection>
-            {queue.length === 0 && (
+            <RailSection title="Parked asks" count={asks.entries} hint="Agents that agent-dash parked with an ask of their own, on an open ticket. A ticket in Up next shows its asks in its own why list.">
+              {asks.groups.map((g) => (
+                <AskItem key={askRef(g.key)} g={g} title={g.key ? (subjects.get(`t:${g.key}`)?.ticket?.ticket.summary ?? g.key) : "Conversations with no ticket"} selected={boardRef === askRef(g.key)} onSelect={() => select(askRef(g.key))} now={now} />
+              ))}
+            </RailSection>
+            {data.parked.length > 0 && (
+              <a className="rail-link" href="#/parked" title="Every parked agent, also the ones that need nothing from you">
+                All {plural(data.parked.length, "parked agent")} →
+              </a>
+            )}
+            {needsYou === 0 && (
               <div className="zero">
                 <div className="zero-mark">✓</div>
                 <p>
@@ -2266,10 +2358,7 @@ export function App() {
             <div className="ws-frame" style={viewWidth.full ? undefined : { maxWidth: viewWidth.width }}>
               {!viewWidth.full && <ResizeHandle side="left" scale={2} view={viewWidth} max={() => mainRef.current?.clientWidth ?? window.innerWidth} />}
               {!viewWidth.full && <ResizeHandle side="right" scale={2} view={viewWidth} max={() => mainRef.current?.clientWidth ?? window.innerWidth} />}
-              <div className="ws-tools">
-                <FullScreenButton view={viewWidth} />
-              </div>
-              {workspace}
+              <ViewTools.Provider value={<FullScreenButton view={viewWidth} />}>{workspace}</ViewTools.Provider>
             </div>
           </main>
         </div>

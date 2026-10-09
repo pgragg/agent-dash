@@ -15,7 +15,7 @@ const GH_CLI = process.env.AGENT_DASH_GH_CLI ?? "gh";
 const GH_TOKEN_FILE = process.env.AGENT_DASH_GH_TOKEN_FILE ?? join(homedir(), ".agent-dash/github-token");
 
 /** Dash source → handler type. Fixed, so the page can never choose what runs. */
-export const LOGIN_TARGETS: Record<string, "gh" | "pi-auth"> = { github: "gh", jira: "pi-auth" };
+export const LOGIN_TARGETS: Record<string, "gh" | "pi-auth"> = { github: "gh", jira: "pi-auth", slack: "pi-auth" };
 
 /** What to do by hand when automated login fails. */
 const jira = config.ticketProviders.find((p) => p.id === "jira");
@@ -23,6 +23,10 @@ const jiraTokenFile = jira?.type === "jira" ? jira.tokenFile : "";
 const MANUAL: Record<string, string> = {
   jira: `Make a new API token at https://id.atlassian.com/manage-profile/security/api-tokens and put it in ${jiraTokenFile ? `${jiraTokenFile} as JIRA_API_TOKEN=…` : "the JIRA_API_TOKEN env var, or in a token file that you set on the Settings page"}.`,
   github: "Run `gh auth login` in a terminal, then retry.",
+  slack: [
+    config.slack.reloginCommand ? `For Post to Slack, run \`${config.slack.reloginCommand}\` in a terminal and allow the grant.` : "For Post to Slack, sign in to the slack server of pi-mcp-adapter again, or set the Slack sign-in command on the Settings page.",
+    config.slack.stateFile ? `For Slack search, save a new Slack login to ${config.slack.stateFile} with \`agent-browser state save\`.` : "",
+  ].filter(Boolean).join(" "),
 };
 
 function run(cmd: string, args: string[], timeout: number): Promise<{ code: number; output: string }> {
@@ -37,9 +41,9 @@ function run(cmd: string, args: string[], timeout: number): Promise<{ code: numb
 
 const running = new Set<string>();
 
-/** Callback to refresh GitHub data after successful login. Set by index.ts to avoid circular imports. */
-let onGitHubLogin: (() => void) | null = null;
-export function setOnGitHubLogin(cb: () => void) { onGitHubLogin = cb; }
+/** Callback to refresh a source after a successful login. Set by index.ts to avoid circular imports. */
+let onLogin: ((source: string) => void) | null = null;
+export function setOnLogin(cb: (source: string) => void) { onLogin = cb; }
 
 /**
  * Handle GitHub auth via `gh` CLI.
@@ -87,7 +91,7 @@ async function handlePiAuth(target: string): Promise<{ code: number; error?: str
   if (known.code !== 0) return { code: 500, error: `could not run ${PI_AUTH}: ${known.output || `exit ${known.code}`}` };
   // Tolerate decorated lines such as "  jira (ok)".
   if (!known.output.split("\n").some((l) => l.trim().split(/[\s(]/)[0] === target)) {
-    return { code: 501, error: `pi-auth has no ${target} target` };
+    return { code: 501, error: `pi-auth has no ${target} target.` };
   }
   // pi-auth stops waiting for a login after 300 s.
   const out = await run(PI_AUTH, ["ensure", target], 320_000);
@@ -115,8 +119,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   try {
     const result = handler === "gh" ? await handleGitHub() : await handlePiAuth(source);
     if (result.code === 200) {
-      // Trigger refresh callback if registered
-      if (handler === "gh" && onGitHubLogin) onGitHubLogin();
+      onLogin?.(source);
       return json(200, { ok: true, output: result.output });
     }
     return json(result.code, { error: `${result.error} ${MANUAL[source]}`, output: result.output });

@@ -1,4 +1,4 @@
-import type { AttentionItem, Dashboard, HistoryRun, PullRequest, Run, RunStatus, ThreadStatusChange, Ticket, TicketGroup } from "../shared/types.ts";
+import { type AttentionItem, type Dashboard, type HistoryRun, PARKED_ASK_CHARS, type PullRequest, type Run, type RunStatus, type ThreadStatusChange, type Ticket, type TicketGroup } from "../shared/types.ts";
 import { rankAttention } from "./attention.ts";
 import { heuristicStatus, type ParsedSession } from "./sources/sessions.ts";
 import { resolveReported, type ReportedStatus, takesControls, takesSteer } from "./sources/status.ts";
@@ -42,6 +42,7 @@ export function toRuns(sessions: ParsedSession[], reported: Map<string, Reported
         sessionFile: s.sessionFile,
         cwd: s.cwd,
         name: s.name,
+        title: s.title ?? null,
         firstPrompt: s.firstPrompt,
         lastReply: s.lastReply,
         lastMessage: s.lastMessage,
@@ -55,6 +56,7 @@ export function toRuns(sessions: ParsedSession[], reported: Map<string, Reported
         endedInError: !s.midRun && s.lastStopReason === "error",
         stoppedByUser: !s.midRun && s.lastStopReason === "aborted",
         tickets: [...s.tickets],
+        suggestedTickets: [...s.suggestedTickets],
         createdPrs: s.createdPrs,
         mentionedPrs: s.mentionedPrs,
         userMessageCount: s.userMessageCount,
@@ -80,14 +82,20 @@ const threadMap = (threads: ThreadStatusChange[]): ThreadMap => new Map(threads.
 /**
  * Link runs and PRs, then take each run off the tickets that you unlinked it from. The first pass
  * stops a PR with no key from taking an unlinked ticket; the second removes one that a PR named.
+ * A suggested link that you linked (any status other than unlinked) becomes a normal link.
  */
 function linkRuns(runs: Run[], prs: PullRequest[], threads: ThreadMap): void {
+  const status = (k: string, r: Run) => threads.get(threadKey(k, r.sessionId))?.status;
+  for (const r of runs) {
+    for (const k of r.suggestedTickets) if (status(k, r) && status(k, r) !== "unlinked" && !r.tickets.includes(k)) r.tickets.push(k);
+  }
   const unlink = () => {
-    for (const r of runs) r.tickets = r.tickets.filter((k) => threads.get(threadKey(k, r.sessionId))?.status !== "unlinked");
+    for (const r of runs) r.tickets = r.tickets.filter((k) => status(k, r) !== "unlinked");
   };
   unlink();
   crossLink(runs, prs);
   unlink();
+  for (const r of runs) r.suggestedTickets = r.suggestedTickets.filter((k) => !r.tickets.includes(k) && status(k, r) !== "unlinked");
 }
 
 export function crossLink(runs: Run[], prs: PullRequest[]): void {
@@ -108,6 +116,28 @@ export function buildHistory(sessions: ParsedSession[], reported: Map<string, Re
   const runs = toRuns(sessions, reported, now, isAlive);
   linkRuns(runs, prs.map((p) => ({ ...p, tickets: [...p.tickets] })), threadMap(threads));
   return runs.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt)).map(({ lastMessage: _cut, ...rest }) => rest);
+}
+
+/**
+ * What `/api/dashboard` sends. The page reloads it on every change, so the long texts that only an
+ * opened row shows stay out: a finished run's last message, and all but the end of a parked run's.
+ */
+export function forPage(d: Dashboard): Dashboard {
+  const run = (r: Run): Run => (r.status === "finished" && r.lastMessage ? { ...r, lastMessage: "", lastMessageCut: true } : r);
+  const group = (g: TicketGroup): TicketGroup => ({ ...g, runs: g.runs.map(run), ...(g.suggested && { suggested: g.suggested.map(run) }) });
+  return {
+    ...d,
+    attention: d.attention.map((a) => (a.run ? { ...a, run: run(a.run) } : a)),
+    myTickets: d.myTickets.map(group),
+    otherTickets: d.otherTickets.map(group),
+    unlinkedRuns: d.unlinkedRuns.map(run),
+    parked: d.parked.map((p) => ({ ...p, lastMessage: p.lastMessage.slice(-PARKED_ASK_CHARS) })),
+  };
+}
+
+/** A run on the board, with its whole last message, for `/api/last-message`. */
+export function findRun(d: Dashboard, sessionId: string): Run | undefined {
+  return [...d.myTickets, ...d.otherTickets].flatMap((g) => [...g.runs, ...(g.suggested ?? [])]).concat(d.unlinkedRuns).find((r) => r.sessionId === sessionId);
 }
 
 export function isRecent(iso: string, now: number, days: number): boolean {
@@ -133,6 +163,7 @@ function group(ticket: Ticket, runs: Run[], prs: PullRequest[], threads: ThreadM
   return {
     ticket,
     runs: mine,
+    suggested: runs.filter((r) => r.suggestedTickets.includes(ticket.key)).sort((a, b) => a.startedAt.localeCompare(b.startedAt)),
     prs: prs.filter((p) => p.tickets.includes(ticket.key)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
     threads: states,
   };
@@ -141,7 +172,7 @@ function group(ticket: Ticket, runs: Run[], prs: PullRequest[], threads: ThreadM
 /**
  * The same runs, minus the tickets that you marked them resolved for. Ranking uses these, so a
  * resolved thread no longer puts its ticket in the queue. A thread resolved for all of its
- * tickets still shows as a run of its own while it waits for you.
+ * tickets can still show as a run of its own while it waits for you: see `resolvedAway`.
  */
 export function withoutResolved(runs: Run[], threads: ThreadMap, done: Set<string> = new Set()): Run[] {
   return runs.map((r) => {
@@ -150,6 +181,19 @@ export function withoutResolved(runs: Run[], threads: ThreadMap, done: Set<strin
     tickets.sort((a, b) => Number(done.has(a)) - Number(done.has(b)));
     return tickets.join() === r.tickets.join() ? r : { ...r, tickets };
   });
+}
+
+/** Tickets that have an entry in the queue: a signal on them that needs you. */
+export function ticketsInQueue(attention: AttentionItem[]): Set<string> {
+  return new Set(attention.flatMap((a) => (a.ticketKey && !a.info ? [a.ticketKey] : [])));
+}
+
+/**
+ * A run that you resolved on all its tickets loses its own queue entry, unless it asked a question
+ * that no entry of those tickets shows. Else one ask takes two places in the queue.
+ */
+export function resolvedAway(r: Run, isResolved: (ticket: string) => boolean, shown: Set<string>): boolean {
+  return r.tickets.length > 0 && r.tickets.every(isResolved) && (!r.askedQuestion || r.tickets.some((k) => shown.has(k)));
 }
 
 const byRecent = (a: Run, b: Run) => b.lastActivityAt.localeCompare(a.lastActivityAt);
@@ -186,9 +230,12 @@ export function buildDashboard(input: ModelInput): Dashboard {
   const done = new Set([...input.myTickets, ...input.otherTickets].filter((t) => t.statusCategory === "done").map((t) => t.key));
   const parked = input.parked ?? new Set<string>();
   const signalRuns = recentRuns.filter((r) => !(r.status === "finished" && parked.has(r.sessionId)));
-  const attention = rankAttention(withoutResolved(signalRuns, threads, done), prs, input.myTickets, now, input.ticketUrl);
+  const ranked = rankAttention(withoutResolved(signalRuns, threads, done), prs, input.myTickets, now, input.ticketUrl);
   // The ticket is closed, so nothing on it is a task any more: an open tab there is only worth knowing about.
-  for (const a of attention) if (a.ticketKey && done.has(a.ticketKey)) a.info = true;
+  for (const a of ranked) if (a.ticketKey && done.has(a.ticketKey)) a.info = true;
+  const shown = ticketsInQueue(ranked);
+  const dropped = new Set(signalRuns.filter((r) => resolvedAway(r, (k) => threads.get(threadKey(k, r.sessionId))?.status === "resolved", shown)).map((r) => r.sessionId));
+  const attention = ranked.filter((a) => !(a.kind === "awaiting_input" && !a.ticketKey && dropped.has(a.sessionId ?? "")));
   attachRuns(attention, withoutResolved(runs, threads, done));
 
   // Tickets with the most urgent item come first, so the list reads in the same order as the queue.
@@ -237,7 +284,6 @@ export function buildDashboard(input: ModelInput): Dashboard {
     reviewDrafts: {},
     conversationSummaries: {},
     reviewRequests: {},
-    lanes: {},
     parked: [],
     sources: input.sources,
     extensionInstalled: input.extensionInstalled,

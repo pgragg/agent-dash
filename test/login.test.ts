@@ -110,3 +110,10 @@ test("other paths and methods are not this route", async () => {
   assert.equal(await handle({ method: "GET", headers: {} } as IncomingMessage, res, new URL("http://x/api/login")), false);
   assert.equal(await handle({ method: "POST", headers: {} } as IncomingMessage, res, new URL("http://x/api/other")), false);
 });
+
+test("slack with no pi-auth target answers how to sign in by hand", async () => {
+  const out = await call("slack");
+  assert.equal(out.code, 501);
+  assert.match(out.body.error, /pi-auth has no slack target\. For Post to Slack, .*Slack sign-in command/);
+  assert.doesNotMatch(readFileSync(piAuthCalls, "utf8"), /^ensure slack$/m);
+});

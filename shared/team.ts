@@ -1,8 +1,8 @@
 import type { SdlcEnvironment } from "./types.ts";
 
 /** The coding agent that the dash starts, and whose session logs it reads. */
-export type AgentKind = "pi" | "claude";
-export const AGENT_LABEL: Record<AgentKind, string> = { pi: "pi", claude: "Claude Code" };
+export type AgentKind = "pi" | "claude" | "opencode";
+export const AGENT_LABEL: Record<AgentKind, string> = { pi: "pi", claude: "Claude Code", opencode: "OpenCode" };
 
 /**
  * The settings that shared code reads, in the server and in the page: whose dashboard it is,

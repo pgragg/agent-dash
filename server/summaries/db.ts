@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { splitSummary } from "../../shared/nextSteps.ts";
-import type { ConversationSummary, Diagram, DocumentType, ParkedRun, DiagramKind, NextStep, Note, ReviewDraft, SdlcEnvironment, SdlcEvent, SdlcEventType, SmoketestOutcome, ThreadStatus, ThreadStatusChange, TicketDocument, TicketDocumentWithBody, TicketSummary, WorkLane } from "../../shared/types.ts";
+import type { ConversationSummary, Diagram, DocumentType, ParkedRun, DiagramKind, NextStep, Note, StepAction, ReviewDraft, SdlcEnvironment, SdlcEvent, SdlcEventType, SmoketestOutcome, ThreadStatus, ThreadStatusChange, TicketDocument, TicketDocumentWithBody, TicketSummary } from "../../shared/types.ts";
 
 export const DB_PATH = process.env.AGENT_DASH_DB ?? join(homedir(), ".agent-dash/agent-dash.db");
 
@@ -182,8 +182,8 @@ CREATE TABLE IF NOT EXISTS pr_feedback_addressed (
   PRIMARY KEY (pr_ref, key)
 );
 
--- Parallel lanes: N agents on one ticket, each in its own git worktree. The server writes a row
--- when it makes the worktree, so every worktree has an owner from the start.
+-- Parallel lanes were removed, and nothing reads this table. It stays, so an older database
+-- keeps its rows and opens with the same schema.
 CREATE TABLE IF NOT EXISTS lanes (
   id                   INTEGER PRIMARY KEY AUTOINCREMENT,
   ticket               TEXT NOT NULL,
@@ -225,7 +225,9 @@ CREATE TABLE IF NOT EXISTS conversation_summaries (
   needs        TEXT,
   error        TEXT,
   requested_at TEXT NOT NULL,
-  generated_at TEXT
+  generated_at TEXT,
+  -- A short title for a run with no pi session name. agent-dash only: the session keeps no name.
+  title        TEXT
 );
 
 -- One row per waiting agent that agent-dash parked: it stopped the pi process and kept what the
@@ -322,8 +324,8 @@ export function open(path = DB_PATH): DatabaseSync {
   // CREATE TABLE IF NOT EXISTS does not add a column to a table that is already there.
   // The copy below adds the CHECK on confirmed_by and the reference of plan_id.
   for (const c of SDLC_EVENT_COLUMNS) if (!db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = ?").get(c)) db.exec(`ALTER TABLE SDLC_Event ADD COLUMN ${c} ${c === "plan_id" ? "INTEGER" : "TEXT"}`);
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('conversation_summaries') WHERE name = 'title'").get()) db.exec("ALTER TABLE conversation_summaries ADD COLUMN title TEXT");
   if (!db.prepare("SELECT 1 FROM pragma_table_info('tickets') WHERE name = 'starred_at'").get()) db.exec("ALTER TABLE tickets ADD COLUMN starred_at TEXT");
-  for (const c of ["note", "landed_at"]) if (!db.prepare("SELECT 1 FROM pragma_table_info('lanes') WHERE name = ?").get(c)) db.exec(`ALTER TABLE lanes ADD COLUMN ${c} TEXT`);
   // Before the trigger below: copying the table drops the triggers on it.
   upgradeSdlcEventChecks(db);
   // SQLite cannot change a CHECK, so an older table is copied into one that allows 'unlinked'.
@@ -347,6 +349,12 @@ export function open(path = DB_PATH): DatabaseSync {
   db.exec(`CREATE TRIGGER IF NOT EXISTS sdlc_event_changed AFTER UPDATE ON SDLC_Event WHEN NEW.event_type != 'smoketest_plan' BEGIN
     UPDATE SDLC_Event_Ticket SET summary_requested_at = NULL, changed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE sdlc_event_id = NEW.id;
   END`);
+  // A step's kanban button label. A step row never changes, so its label is drafted once.
+  if (!(db.prepare("SELECT 1 FROM pragma_table_info('next_steps') WHERE name = 'label'").get())) {
+    db.exec("ALTER TABLE next_steps ADD COLUMN label TEXT; ALTER TABLE next_steps ADD COLUMN label_status TEXT; ALTER TABLE next_steps ADD COLUMN label_requested_at TEXT");
+  }
+  if (!(db.prepare("SELECT 1 FROM pragma_table_info('next_steps') WHERE name = 'label_version'").get())) db.exec("ALTER TABLE next_steps ADD COLUMN label_version INTEGER");
+  if (!(db.prepare("SELECT 1 FROM pragma_table_info('next_steps') WHERE name = 'label_action'").get())) db.exec("ALTER TABLE next_steps ADD COLUMN label_action TEXT");
   documentsFromDiagrams(db);
   // Summaries saved before steps were stored get their rows once.
   for (const r of db.prepare("SELECT id, ticket, summary FROM summaries WHERE status = 'done' AND id NOT IN (SELECT summary_id FROM next_steps)").all() as unknown as Row[]) {
@@ -355,20 +363,47 @@ export function open(path = DB_PATH): DatabaseSync {
   return db;
 }
 
-const STEP_COLUMNS = "id, summary_id AS summaryId, ticket, position, body";
+const STEP_COLUMNS = "id, summary_id AS summaryId, ticket, position, body, label, label_action AS action";
 
 function insertSteps(id: number, ticket: string, summary: string): void {
   const insert = open().prepare("INSERT INTO next_steps (summary_id, ticket, position, body) VALUES (?, ?, ?, ?)");
   splitSummary(summary).steps.forEach((body, i) => insert.run(id, ticket, i + 1, body));
 }
 
+type StepRow = Omit<NextStep, "action"> & { action: string | null };
+const toStep = (r: StepRow): NextStep => ({ ...r, action: r.action ? (JSON.parse(r.action) as StepAction) : null });
+
 export function stepsFor(summaryId: number): NextStep[] {
-  return (open().prepare(`SELECT ${STEP_COLUMNS} FROM next_steps WHERE summary_id = ? ORDER BY position`).all(summaryId) as unknown as NextStep[]).map((s) => ({ ...s }));
+  return (open().prepare(`SELECT ${STEP_COLUMNS} FROM next_steps WHERE summary_id = ? ORDER BY position`).all(summaryId) as unknown as StepRow[]).map(toStep);
 }
 
 export function getStep(id: number): NextStep | null {
-  const row = open().prepare(`SELECT ${STEP_COLUMNS} FROM next_steps WHERE id = ?`).get(id) as unknown as NextStep | undefined;
-  return row ? { ...row } : null;
+  const row = open().prepare(`SELECT ${STEP_COLUMNS} FROM next_steps WHERE id = ?`).get(id) as unknown as StepRow | undefined;
+  return row ? toStep(row) : null;
+}
+
+/**
+ * Takes each step whose label is not drafted, is from an older prompt `version` (never a newer one:
+ * a test server on older code shares the database), or whose draft failed or stuck before
+ * `retryBefore`. Writes only for a real claim. The old label shows meanwhile.
+ */
+export function claimStepLabels(ids: number[], version: number, retryBefore: string, now = new Date()): number[] {
+  const claim = open().prepare(
+    `UPDATE next_steps SET label_status = 'in_progress', label_requested_at = ?, label_version = ?
+     WHERE id = ? AND (label_status IS NULL OR (label_status != 'in_progress' AND (label_version IS NULL OR label_version < ?)) OR (label_status != 'done' AND label_requested_at < ? AND (label_version IS NULL OR label_version <= ?))) RETURNING id`,
+  );
+  return ids.filter((id) => claim.get(now.toISOString(), version, id, version, retryBefore, version));
+}
+
+/** Only an in-progress draft changes, so a late answer cannot overwrite a newer one. */
+export function finishStepLabel(id: number, action: StepAction | null, label: string | null): boolean {
+  const db = open();
+  // With no action, the old pair stays. A new action replaces the label too: a label from an older
+  // action must not stay on a new one, so the page shows the fallback label until a retry.
+  const r = action
+    ? db.prepare("UPDATE next_steps SET label_status = ?, label = ?, label_action = ? WHERE id = ? AND label_status = 'in_progress'").run(label ? "done" : "failed", label, JSON.stringify(action), id)
+    : db.prepare("UPDATE next_steps SET label_status = 'failed' WHERE id = ? AND label_status = 'in_progress'").run(id);
+  return r.changes > 0;
 }
 
 export function createRequest(ticket: string, now = new Date()): SummaryRecord {
@@ -474,42 +509,6 @@ export function setStarred(ticket: string, starred: boolean): void {
 /** Starred ticket keys, first starred first. */
 export function starredTickets(): string[] {
   return (open().prepare("SELECT key FROM tickets WHERE starred_at IS NOT NULL ORDER BY starred_at").all() as { key: string }[]).map((r) => r.key);
-}
-
-// ---- Parallel lanes ----------------------------------------------------------------------
-
-const LANE_COLUMNS = `id, ticket, repo, lane, mode, base, branch, worktree, integration_branch AS integrationBranch,
-  integration_worktree AS integrationWorktree, session_id AS sessionId, goal, state, note, created_at AS createdAt, landed_at AS landedAt`;
-
-export type LaneRecord = Omit<WorkLane, "git" | "integrationAhead">;
-
-export function addLane(l: Omit<LaneRecord, "id" | "state" | "note" | "createdAt" | "landedAt">): LaneRecord {
-  const createdAt = new Date().toISOString();
-  const { lastInsertRowid } = open()
-    .prepare("INSERT INTO lanes (ticket, repo, lane, mode, base, branch, worktree, integration_branch, integration_worktree, session_id, goal, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .run(l.ticket, l.repo, l.lane, l.mode, l.base, l.branch, l.worktree, l.integrationBranch, l.integrationWorktree, l.sessionId, l.goal, createdAt);
-  return { ...l, id: Number(lastInsertRowid), state: "working", note: null, createdAt, landedAt: null };
-}
-
-/** Lanes that are not removed, by ticket key, oldest first. */
-export function activeLanes(): LaneRecord[] {
-  return open().prepare(`SELECT ${LANE_COLUMNS} FROM lanes WHERE state != 'removed' ORDER BY id`).all() as unknown as LaneRecord[];
-}
-
-/** Every repo that ever had a lane, so the Worktrees view also finds what a removed lane left. */
-export function laneRepos(): string[] {
-  return (open().prepare("SELECT DISTINCT repo FROM lanes").all() as { repo: string }[]).map((r) => r.repo);
-}
-
-export function getLane(id: number): LaneRecord | null {
-  return (open().prepare(`SELECT ${LANE_COLUMNS} FROM lanes WHERE id = ?`).get(id) as unknown as LaneRecord | undefined) ?? null;
-}
-
-/** A land that goes in also stamps landed_at. */
-export function setLaneState(id: number, state: LaneRecord["state"], note: string | null = null): void {
-  open()
-    .prepare("UPDATE lanes SET state = ?, note = ?, landed_at = CASE WHEN ? = 'landed' THEN ? ELSE landed_at END WHERE id = ?")
-    .run(state, note, state, new Date().toISOString(), id);
 }
 
 // ---- PR feedback: what Piper marked addressed on the PR panel -------------------------
@@ -985,6 +984,7 @@ export interface ConversationSummaryRow {
   about: string | null;
   latest: string | null;
   needs: string | null;
+  title: string | null;
   error: string | null;
   requestedAt: string;
   generatedAt: string | null;
@@ -992,7 +992,7 @@ export interface ConversationSummaryRow {
 
 export function conversationSummaries(): Map<string, ConversationSummaryRow> {
   const rows = open()
-    .prepare("SELECT session_id AS sessionId, status, basis, about, latest, needs, error, requested_at AS requestedAt, generated_at AS generatedAt FROM conversation_summaries")
+    .prepare("SELECT session_id AS sessionId, status, basis, about, latest, needs, title, error, requested_at AS requestedAt, generated_at AS generatedAt FROM conversation_summaries")
     .all() as unknown as ConversationSummaryRow[];
   return new Map(rows.map((r) => [r.sessionId, { ...r }]));
 }
@@ -1015,13 +1015,13 @@ export function claimConversationSummary(sessionId: string, basis: string, retry
 }
 
 /** Saves a finished draft. A failed one keeps the old texts. False when another draft took the row since. */
-export function finishConversationSummary(sessionId: string, basis: string, result: { about: string; latest: string; needs: string } | { error: string }, now = new Date()): boolean {
+export function finishConversationSummary(sessionId: string, basis: string, result: { about: string; latest: string; needs: string; title?: string | null } | { error: string }, now = new Date()): boolean {
   const d = open();
   if ("error" in result) return d.prepare("UPDATE conversation_summaries SET status = 'failed', error = ? WHERE session_id = ? AND basis = ? AND status = 'in_progress'").run(result.error, sessionId, basis).changes > 0;
   return (
     d
-      .prepare("UPDATE conversation_summaries SET status = 'done', about = ?, latest = ?, needs = ?, error = NULL, generated_at = ? WHERE session_id = ? AND basis = ? AND status = 'in_progress'")
-      .run(result.about, result.latest, result.needs, now.toISOString(), sessionId, basis).changes > 0
+      .prepare("UPDATE conversation_summaries SET status = 'done', about = ?, latest = ?, needs = ?, title = COALESCE(?, title), error = NULL, generated_at = ? WHERE session_id = ? AND basis = ? AND status = 'in_progress'")
+      .run(result.about, result.latest, result.needs, result.title ?? null, now.toISOString(), sessionId, basis).changes > 0
   );
 }
 

@@ -45,7 +45,7 @@ export function SetupAgent({ onCancel }: { onCancel: () => void }) {
       </div>
       <p className="meta">
         2. agent-dash saves {AGENT_LABEL[agent]} as your agent, {agent === "pi" ? "links its status extension into pi, " : ""}and starts {AGENT_LABEL[agent]} on this page. It looks for each setting on this machine with read-only commands (git config, gh, ls, grep), saves what it finds with the same checks as the Settings page, and asks you for the rest. It never prints your Jira token.
-        {agent === "claude" ? " Claude Code asks you on the page before each command." : ""} Then restart agent-dash.
+        {agent === "pi" ? "" : ` ${AGENT_LABEL[agent]} asks you on the page before each command.`} Then restart agent-dash.
       </p>
       {error && <p className="setting-error">{error}</p>}
       <div className="setup-agent-row">

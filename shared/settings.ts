@@ -36,6 +36,7 @@ export interface Settings extends Team {
   claudeProjectsDir: string;
   /** The `--permission-mode` of the Claude Code runs that the dash starts. */
   claudePermissionMode: "auto" | "acceptEdits" | "default";
+  opencodeDb: string;
   recentDays: number;
   jiraServer: string;
   jiraLogin: string;
@@ -50,6 +51,8 @@ export interface Settings extends Team {
   slackWorkspaceUrl: string;
   slackReloginCommand: string;
   smoketestGuide: string;
+  /** The local Obsidian vault that the Wiki view reads. Empty turns the view off. */
+  wikiDir: string;
   /**
    * The ticket trackers, in order. Empty: the flat Jira fields and the local tickets folder make
    * them. The Settings page does not edit this list yet; the file does.
@@ -61,7 +64,7 @@ export type SettingKey = keyof Settings;
 
 export interface SettingField {
   key: SettingKey;
-  group: "Agent" | "You" | "Server" | "Jira" | "Tickets" | "Reviews" | "Deploys" | "Logins" | "Slack" | "Smoketests";
+  group: "Agent" | "You" | "Server" | "Jira" | "Tickets" | "Reviews" | "Deploys" | "Logins" | "Slack" | "Smoketests" | "Wiki";
   label: string;
   kind: "number" | "text" | "path" | "url" | "list" | "choice";
   /** The values of a choice, with their labels. */
@@ -88,6 +91,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sessionsDir: "~/.pi/agent/sessions",
   claudeProjectsDir: "~/.claude/projects",
   claudePermissionMode: "auto",
+  opencodeDb: "~/.local/share/opencode/opencode.db",
   recentDays: 14,
   jiraServer: "https://postmanlabs.atlassian.net",
   jiraLogin: "",
@@ -102,6 +106,7 @@ export const DEFAULT_SETTINGS: Settings = {
   slackWorkspaceUrl: "https://postman.enterprise.slack.com",
   slackReloginCommand: "",
   smoketestGuide: "",
+  wikiDir: "",
   ticketProviders: [],
 };
 
@@ -113,7 +118,7 @@ export const SETTING_FIELDS: SettingField[] = [
     key: "agent", group: "Agent", label: "Agent", kind: "choice", options: Object.entries(AGENT_LABEL).map(([value, label]) => ({ value, label })), env: "AGENT_DASH_AGENT",
     help: "The coding agent that agent-dash starts for runs, summaries and drafts, and whose session logs the board shows.",
     example: "pi",
-    find: "The agent you use for your coding sessions. `pi --version` and `claude --version` show which ones are installed.",
+    find: "The agent you use for your coding sessions. `pi --version`, `claude --version` and `opencode --version` show which ones are installed.",
   },
   {
     key: "claudePermissionMode", group: "Agent", label: "Claude Code permissions", kind: "choice", env: "AGENT_DASH_CLAUDE_PERMISSION_MODE",
@@ -149,6 +154,12 @@ export const SETTING_FIELDS: SettingField[] = [
     help: "Where Claude Code writes its session logs. Used when the agent is Claude Code.",
     example: "~/.claude/projects",
     find: "Keep the default, unless `CLAUDE_CONFIG_DIR` is set: then it is `$CLAUDE_CONFIG_DIR/projects`. `ls ~/.claude/projects` shows one folder per project.",
+  },
+  {
+    key: "opencodeDb", group: "Server", label: "OpenCode database", kind: "path", env: "AGENT_DASH_OPENCODE_DB",
+    help: "The SQLite file where OpenCode 2 keeps its sessions. Used when the agent is OpenCode.",
+    example: "~/.local/share/opencode/opencode.db",
+    find: "Keep the default, unless `XDG_DATA_HOME` is set: then it is `$XDG_DATA_HOME/opencode/opencode.db`. `ls ~/.local/share/opencode` shows it when OpenCode is installed.",
   },
   {
     key: "recentDays", group: "Server", label: "Recent days", kind: "number", env: "AGENT_DASH_RECENT_DAYS",
@@ -269,6 +280,12 @@ export const SETTING_FIELDS: SettingField[] = [
     help: "A file that a local smoketest plan reads first.",
     example: "~/notes/local-smoketesting.md",
     find: "Usually empty. A markdown file that tells how to run your services locally, if the user keeps one.",
+  },
+  {
+    key: "wikiDir", group: "Wiki", label: "Wiki folder", kind: "path", env: "AGENT_DASH_WIKI_DIR",
+    help: "A local Obsidian vault (a folder of markdown notes). The Wiki view lists, searches and shows its notes, read-only. Empty hides the view.",
+    example: "~/pi/wiki",
+    find: "Ask the user if they keep an Obsidian vault. The vault is the folder that holds a `.obsidian` folder: `mdfind -onlyin ~ 'kMDItemFSName == \".obsidian\"' | head -5`, then take the parent folder.",
   },
 ];
 

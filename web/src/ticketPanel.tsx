@@ -125,26 +125,34 @@ function MoveVerb({ ticket, detail, onError, onMoved }: { ticket: Ticket; detail
   );
 }
 
-/** The "Ticket" section under the workspace header. `T` opens and closes it. */
+/** The "Ticket" section, under the ticket brief. `T` opens and closes it. */
 export function TicketPanel({ ticket, onError }: { ticket: Ticket; onError: (m: string | null) => void }) {
   const [open, setOpen] = useState(false);
   const [whole, setWhole] = useState(false);
   const { detail, error, reload } = useTicketDetail(ticket.key, open);
+  const ref = useRef<HTMLElement>(null);
+  const byKey = useRef(false);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
       if (e.key !== "t" || e.metaKey || e.ctrlKey || e.altKey || ["TEXTAREA", "INPUT", "SELECT"].includes(el.tagName)) return;
       e.preventDefault();
+      byKey.current = true;
       setOpen((o) => !o);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+  // The section sits low in the workspace, so T brings it into view when it opens it.
+  useEffect(() => {
+    if (open && byKey.current) ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    byKey.current = false;
+  }, [open]);
   const long = (detail?.description.length ?? 0) > 1200;
   const earlier = detail ? detail.commentTotal - detail.comments.length : 0;
 
   return (
-    <section className={`card ticket-panel ${open ? "open" : ""}`}>
+    <section ref={ref} className={`card ticket-panel ${open ? "open" : ""}`}>
       <header className="card-head">
         <button className="ticket-toggle" onClick={() => setOpen(!open)} aria-expanded={open}>
           <span className={`chev ${open ? "open" : ""}`}>›</span>

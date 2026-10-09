@@ -1,17 +1,19 @@
 import { existsSync, mkdirSync, statSync, watch, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, normalize } from "node:path";
 import type { Dashboard, PullRequest, SourceHealth, Ticket } from "../shared/types.ts";
-import { config, setupNeeded } from "./config.ts";
+import { config, opencodeLogDir, setupNeeded } from "./config.ts";
 import { team } from "../shared/team.ts";
-import { startConversation } from "./conversations.ts";
+import { endHeadless, newSessionId, startConversation } from "./conversations.ts";
+import { startOpencodeStatus, syncOpencodeLogs } from "./opencode.ts";
 import { recordExit, wroteRecently } from "./exits.ts";
 import { focusItermSession, runInNewItermTab } from "./iterm.ts";
 import { claudeHooksInstalled, piExtensionFile, terminalCommand } from "./agent.ts";
-import { buildDashboard, buildHistory, otherTicketKeys } from "./model.ts";
+import { buildDashboard, buildHistory, findRun, forPage, otherTicketKeys, ticketsInQueue } from "./model.ts";
+import { readDiskCache, writeDiskCache } from "./diskCache.ts";
+import { compress } from "./compress.ts";
 import * as exitRoutes from "./routes/exits.ts";
 import { agentMessage, agentName, buildHandoff, stepMessage } from "./handoff.ts";
 import * as resumeRoute from "./routes/resume.ts";
@@ -25,12 +27,11 @@ import * as documentRoute from "./routes/documents.ts";
 import * as sdlcRoute from "./routes/sdlc.ts";
 import * as smoketestPlanRoute from "./routes/smoketestPlan.ts";
 import * as reviewRoute from "./routes/reviewRequests.ts";
-import * as lanesRoute from "./routes/lanes.ts";
-import * as worktreesRoute from "./routes/worktrees.ts";
 import * as settingsRoute from "./routes/settings.ts";
+import * as wikiRoute from "./routes/wiki.ts";
 import * as setupRoute from "./routes/setup.ts";
 import { confirmDeployMessage, deployStageOf, parseEnvironment, planMessage } from "../shared/sdlc.ts";
-import { requestConversationSummaries, summariesFor } from "./conversationSummaries.ts";
+import { requestConversationSummaries, summariesFor, withTitles } from "./conversationSummaries.ts";
 import { syncDiagrams } from "./diagramSync.ts";
 import { sweep as sweepParks } from "./park.ts";
 import { fetchMyPrs, ghLogin, type PullWithFeedback } from "./sources/github.ts";
@@ -39,7 +40,9 @@ import { approvalCount } from "../shared/ownerApproval.ts";
 import type { TicketProvider } from "./tickets/provider.ts";
 import { ticketProviders } from "./tickets/registry.ts";
 import { SessionIndex, transcriptTurns } from "./sources/sessions.ts";
+import { type Half, postLogin, searchLogin, slackHealth, slackLoginGap } from "./sources/slack.ts";
 import { isAlive, readReportedStatuses } from "./sources/status.ts";
+import { requestStepLabels, topSteps } from "./stepButtons.ts";
 import * as summaryDb from "./summaries/db.ts";
 import { reconcile, redraftAfterNewEvents, requestSummary } from "./summaries/runner.ts";
 
@@ -58,10 +61,19 @@ class Cached<T> {
   private at = 0;
   private inflight: Promise<void> | null = null;
   private readonly load: () => Promise<T>;
+  private readonly file: string | null;
 
-  constructor(initial: T, load: () => Promise<T>) {
+  /** With a file, the last good answer outlives a restart, and the first build shows it at once. */
+  constructor(initial: T, load: () => Promise<T>, file: string | null = null) {
     this.value = initial;
     this.load = load;
+    this.file = file;
+    const saved = file ? readDiskCache<T>(file) : null;
+    if (saved) {
+      this.value = saved.value;
+      this.at = Date.parse(saved.fetchedAt);
+      this.health = { ok: true, fetchedAt: saved.fetchedAt };
+    }
   }
 
   async get(force = false): Promise<T> {
@@ -69,8 +81,10 @@ class Cached<T> {
       const first = this.at === 0;
       this.inflight ??= this.load()
         .then((v) => {
+          const fetchedAt = new Date().toISOString();
           this.value = v;
-          this.health = { ok: true, fetchedAt: new Date().toISOString() };
+          this.health = { ok: true, fetchedAt };
+          if (this.file) void writeDiskCache(this.file, v, fetchedAt);
         })
         .catch((err: Error) => {
           this.health = { ok: false, error: err.message, fetchedAt: this.health.fetchedAt };
@@ -86,7 +100,10 @@ class Cached<T> {
   }
 }
 
-const sessions = new SessionIndex(config.sessionsDir, config.ticketPattern);
+// OpenCode's sessions are in its database; the index reads the dash's pi-log copies of them.
+const sessions = new SessionIndex(config.sessionsDir, config.ticketPattern, (dir) => {
+  if (dir === opencodeLogDir()) syncOpencodeLogs(config.opencodeDb, dir);
+});
 /**
  * Each ticket provider's tickets. A remote one keeps its open list in a cache and the tickets that
  * runs name in `others`; an exhaustive one (local files) is read again on every build.
@@ -95,23 +112,37 @@ interface ProviderState {
   provider: TicketProvider;
   mine: Cached<Ticket[]> | null;
   others: Map<string, Ticket>;
+  /** Where `others` outlives a restart. Tickets read from it are looked up again once, in the background. */
+  othersFile: string;
+  othersFromDisk: boolean;
   othersHealth: SourceHealth;
   /** Exhaustive providers: the last build's tickets, and its health. */
   all: Map<string, Ticket>;
   readHealth: SourceHealth;
 }
-const providerStates: ProviderState[] = ticketProviders.list.map((provider) => ({
-  provider,
-  mine: provider.enabled && !provider.exhaustive ? new Cached<Ticket[]>([], () => provider.listMine()) : null,
-  others: new Map(),
-  othersHealth: { ok: true },
-  all: new Map(),
-  readHealth: { ok: true },
-}));
+const providerStates: ProviderState[] = ticketProviders.list.map((provider) => {
+  const othersFile = join(config.cacheDir, `others-${provider.source.id}.json`);
+  const saved = provider.exhaustive ? null : readDiskCache<Ticket[]>(othersFile);
+  return {
+    provider,
+    mine: provider.enabled && !provider.exhaustive ? new Cached<Ticket[]>([], () => provider.listMine(), join(config.cacheDir, `mine-${provider.source.id}.json`)) : null,
+    others: new Map((saved?.value ?? []).map((t) => [t.key, t])),
+    othersFile,
+    othersFromDisk: !!saved,
+    othersHealth: { ok: true },
+    all: new Map(),
+    readHealth: { ok: true },
+  };
+});
 const stateFor = (key: string) => {
   const p = ticketProviders.providerFor(key);
   return providerStates.find((s) => s.provider === p);
 };
+
+/** Only the tickets that this build shows, so the file does not grow with every key ever named. */
+function saveOthers(s: ProviderState, keys: string[]): void {
+  void writeDiskCache(s.othersFile, keys.flatMap((k) => s.others.get(k) ?? []), new Date().toISOString());
+}
 
 /** One health per provider: off when it is not set up, else the worst of its reads. */
 function providerHealth(s: ProviderState): SourceHealth {
@@ -120,14 +151,32 @@ function providerHealth(s: ProviderState): SourceHealth {
   if (!s.mine) return { ...s.readHealth, label };
   return { ...(!s.mine.health.ok || s.othersHealth.ok ? s.mine.health : s.othersHealth), label };
 }
-const prs = new Cached<PullWithFeedback[]>([], () => fetchMyPrs(config.recentDays, config.ticketPattern));
+const prs = new Cached<PullWithFeedback[]>([], () => fetchMyPrs(config.recentDays, config.ticketPattern), join(config.cacheDir, "prs.json"));
 /** Force a refresh of GitHub data after login. */
 export const refreshGitHub = () => prs.get(true);
-loginRoute.setOnGitHubLogin(refreshGitHub);
+/** Can the slack MCP grant post? Its own child process, so a slow Slack never holds up a build. */
+const slackPost = new Cached<Half>({ off: "not checked yet" }, postLogin);
+/** When a Fix Slack login last worked: a draft's login gap from before it no longer counts. */
+let slackFixedAt: string | null = null;
+loginRoute.setOnLogin((source) => {
+  if (source === "github") void refreshGitHub();
+  if (source === "slack") {
+    slackFixedAt = new Date().toISOString();
+    void slackPost.get(true);
+  }
+});
+
+/** The newest finished next-steps draft, when its Gaps line says that the Slack login failed. */
+function slackGap(summaries: Dashboard["summaries"]): { at: string; ticket: string } | null {
+  const newest = Object.values(summaries)
+    .flatMap((s) => (s.lastDone?.generatedAt ? [s.lastDone] : []))
+    .sort((a, b) => b.generatedAt!.localeCompare(a.generatedAt!))[0];
+  return newest?.summary && slackLoginGap(newest.summary) ? { at: newest.generatedAt!, ticket: newest.ticket } : null;
+}
 
 /** Every key with the provider's prefix that a session or PR names, at any time. */
-function allKeys(sessions: { tickets: string[] }[], pulls: { tickets: string[] }[], p: TicketProvider): string[] {
-  const keys = new Set([...sessions, ...pulls].flatMap((x) => x.tickets));
+function allKeys(sessions: { tickets: string[]; suggestedTickets: string[] }[], pulls: { tickets: string[] }[], p: TicketProvider): string[] {
+  const keys = new Set([...sessions.flatMap((s) => s.suggestedTickets), ...[...sessions, ...pulls].flatMap((x) => x.tickets)]);
   return [...keys].filter((k) => ticketProviders.providerFor(k) === p);
 }
 
@@ -141,7 +190,7 @@ function withToAddress({ feedback, ...pr }: PullWithFeedback): PullRequest {
 async function dashboard(force: boolean) {
   const now = Date.now();
   let sessionsHealth: SourceHealth = { ok: true, fetchedAt: new Date(now).toISOString() };
-  const [scanned, reported, remoteMine, rawPulls] = await Promise.all([
+  const [scanned, reported, remoteMine, rawPulls, slackPostLogin] = await Promise.all([
     sessions.scan().catch((err: Error) => {
       sessionsHealth = { ok: false, error: err.message };
       return [];
@@ -149,6 +198,7 @@ async function dashboard(force: boolean) {
     readReportedStatuses(config.statusDir),
     Promise.all(providerStates.map((s) => s.mine?.get(force) ?? [])),
     prs.get(force),
+    slackPost.get(force),
   ]);
 
   // Exhaustive providers are cheap, so they are read again on each build and never cached.
@@ -167,7 +217,7 @@ async function dashboard(force: boolean) {
     const s = stateFor(k);
     return !s?.provider.exhaustive || s.all.has(k);
   };
-  const parsed = scanned.map((s) => (s.tickets.every(real) ? s : { ...s, tickets: s.tickets.filter(real) }));
+  const parsed = withTitles(scanned.map((s) => (s.tickets.every(real) && s.suggestedTickets.every(real) ? s : { ...s, tickets: s.tickets.filter(real), suggestedTickets: s.suggestedTickets.filter(real) })));
   const pulls = rawPulls.map(withToAddress).map((p) => (p.tickets.every(real) ? p : { ...p, tickets: p.tickets.filter(real) }));
   const exhaustiveMine = await Promise.all(providerStates.map((s) => (s.provider.exhaustive && s.provider.enabled ? s.provider.listMine().catch(() => []) : [])));
   const mine = [...remoteMine.flat(), ...exhaustiveMine.flat()];
@@ -186,9 +236,24 @@ async function dashboard(force: boolean) {
       try {
         for (const t of await s.provider.lookup(missing)) s.others.set(t.key, t);
         s.othersHealth = { ok: true };
+        saveOthers(s, keys);
       } catch (err) {
         s.othersHealth = { ok: false, error: (err as Error).message };
       }
+    }
+    // The copies from before a restart show now, and the fresh answer follows.
+    if (s.othersFromDisk) {
+      s.othersFromDisk = false;
+      const old = keys.filter((k) => !missing.includes(k));
+      if (old.length)
+        void s.provider
+          .lookup(old)
+          .then((found) => {
+            for (const t of found) s.others.set(t.key, t);
+            saveOthers(s, keys);
+            broadcast();
+          })
+          .catch(() => {});
     }
     otherTickets.push(...s.others.values());
   }
@@ -209,8 +274,9 @@ async function dashboard(force: boolean) {
     prs: pulls,
     now,
     recentDays: config.recentDays,
-    sources: { ...Object.fromEntries(providerStates.map((s) => [s.provider.source.id, providerHealth(s)])), github: { ...prs.health, label: "GitHub" }, sessions: sessionsHealth },
-    extensionInstalled: config.agent === "claude" ? claudeHooksInstalled() : existsSync(piExtensionFile()),
+    sources: { ...Object.fromEntries(providerStates.map((s) => [s.provider.source.id, providerHealth(s)])), github: { ...prs.health, label: "GitHub" }, slack: slackHealth(searchLogin(config.slack.stateFile, now), slackPostLogin, slackGap(summaries), slackFixedAt), sessions: sessionsHealth },
+    // OpenCode needs no install: its service reports every session.
+    extensionInstalled: config.agent === "opencode" || (config.agent === "claude" ? claudeHooksInstalled() : existsSync(piExtensionFile())),
     summaries,
     notes: summaryDb.notesByTicket(),
     snoozedUntil: summaryDb.snoozedUntilByTicket(),
@@ -231,16 +297,16 @@ async function dashboard(force: boolean) {
   d.sdlcEvents = summaryDb.sdlcEventsByTicket();
   d.reviewDrafts = summaryDb.reviewDrafts();
   d.reviewRequests = summaryDb.reviewRequestsByPr();
-  d.lanes = await lanesRoute.lanesByTicket();
   redraftAfterNewEvents([...d.myTickets, ...d.otherTickets], broadcast);
+  // Each kanban card shows its ticket's top next step as a button with a short label.
+  requestStepLabels(topSteps([...d.myTickets, ...d.otherTickets], summaries), broadcast);
   // Each live agent card opens on its summary, so draft it before Piper looks.
   const boardRuns = [...d.myTickets, ...d.otherTickets].flatMap((g) => g.runs).concat(d.unlinkedRuns);
   requestConversationSummaries(boardRuns.filter((r) => r.status !== "finished"), (id) => sessions.fileFor(id), broadcast);
   d.conversationSummaries = summariesFor(boardRuns);
   const done = new Set([...d.myTickets, ...d.otherTickets].filter((g) => g.ticket.statusCategory === "done").map((g) => g.ticket.key));
-  const laneSessions = new Set(Object.values(d.lanes).flatMap((ls) => ls.flatMap((l) => (l.sessionId && l.state !== "landed" ? [l.sessionId] : []))));
   const runs = [...new Map(boardRuns.map((r) => [r.sessionId, r])).values()];
-  if (sweepParks({ runs, summaries: d.conversationSummaries, done, threads: summaryDb.currentThreadStatuses(), laneSessions, now }, reported)) broadcast();
+  if (sweepParks({ runs, summaries: d.conversationSummaries, done, threads: summaryDb.currentThreadStatuses(), shown: ticketsInQueue(d.attention), now }, reported)) broadcast();
   const keepFrom = new Date(now - config.recentDays * 86_400_000).toISOString();
   d.parked = summaryDb.activeParked().filter((p) => p.parkedAt >= keepFrom);
   d.setup = setupNeeded();
@@ -276,6 +342,7 @@ function broadcast(): void {
 }
 
 mkdirSync(config.statusDir, { recursive: true });
+mkdirSync(config.sessionsDir, { recursive: true });
 watch(config.sessionsDir, { recursive: true }, broadcast);
 watch(config.statusDir, broadcast);
 const watchedDirs = new Set([config.sessionsDir]);
@@ -299,6 +366,15 @@ watch(dirname(summaryDb.DB_PATH), (_e, file) => {
   // An agent records an SDLC event from its own process; draft its next steps without waiting for the page.
   if (!redraftLoad && summaryDb.hasNewEventTickets()) redraftLoad = dashboard(false).catch(() => {}).finally(() => (redraftLoad = null));
 });
+if (config.agent === "opencode") {
+  startOpencodeStatus(config.statusDir, config.opencodeDb);
+  // Each OpenCode message is a write to its database: refresh the page, whose scan copies the session.
+  if (existsSync(dirname(config.opencodeDb))) {
+    watch(dirname(config.opencodeDb), (_e, file) => {
+      if (file?.startsWith(basename(config.opencodeDb))) broadcast();
+    });
+  }
+}
 // Time alone changes a status: a pid dies, or a wait crosses a threshold.
 setInterval(broadcast, 30_000).unref();
 
@@ -320,6 +396,12 @@ function readBody(req: IncomingMessage, max: number): Promise<string> {
 }
 
 const TYPES: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json" };
+
+/** The entry script of the built page, for example `/assets/index-cclrfrkh.js`. A rebuild changes its hash. */
+async function currentBuild(): Promise<string> {
+  const index = await readFile(join(WEB_DIST, "index.html"), "utf8").catch(() => "");
+  return /\/assets\/index-[\w-]+\.js/.exec(index)?.[0] ?? "";
+}
 
 async function serveStatic(path: string, res: ServerResponse): Promise<void> {
   const rel = normalize(path === "/" ? "/index.html" : path).replace(/^(\.\.[/\\])+/, "");
@@ -347,15 +429,22 @@ const server = createServer(async (req, res) => {
     if (await sdlcRoute.handle(req, res, url, broadcast)) return;
     // The dashboard's PRs carry the tickets that cross-linking gave them.
     if (await reviewRoute.handle(req, res, url, { prs: async () => (await dashboard(false)).prs, onChange: broadcast })) return;
-    if (await lanesRoute.handle(req, res, url, { context: ticketContext, onChange: broadcast })) return;
-    if (await worktreesRoute.handle(req, res, url, broadcast)) return;
     if (await settingsRoute.handle(req, res, url)) return;
+    if (wikiRoute.handle(req, res, url, config.wikiDir)) return;
     if (await setupRoute.handle(req, res, url, { follow: followSession })) return;
     if (await loginRoute.handle(req, res, url)) return;
     if (await slackRoute.handle(req, res, url)) return;
     if (url.pathname === "/api/dashboard") {
-      const body = JSON.stringify(await dashboard(url.searchParams.has("refresh")));
-      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(body);
+      const body = JSON.stringify(forPage(await dashboard(url.searchParams.has("refresh"))));
+      // A tab from before a rebuild runs old code; the header tells it to reload.
+      const headers = { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Agent-Dash-Build": await currentBuild() };
+      const { encoding, data } = await compress(body, String(req.headers["accept-encoding"] ?? ""));
+      res.writeHead(200, encoding ? { ...headers, "Content-Encoding": encoding, Vary: "Accept-Encoding" } : headers).end(data);
+    } else if (url.pathname === "/api/last-message") {
+      // A finished run's last message, which `/api/dashboard` leaves out.
+      const r = findRun(await dashboard(false), url.searchParams.get("session") ?? "");
+      if (!r) return void res.writeHead(404, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "no such run on the board" }));
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify({ lastMessage: r.lastMessage }));
     } else if (url.pathname === "/api/conversation-summaries" && req.method === "POST") {
       // A finished run's summary, drafted when its page opens. It starts a paid model run, so the guard.
       if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
@@ -422,7 +511,7 @@ const server = createServer(async (req, res) => {
       const context = buildHandoff({ group, notes: d.notes[key] ?? [], summary: d.summaries[key], events: d.sdlcEvents[key] ?? [], parked: d.parked.filter((p) => p.ticket === key), now: new Date() });
       if (url.pathname === "/api/agents/context") return void res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8" }).end(context);
 
-      const body = JSON.parse((await readBody(req, 64_000)) || "{}") as { message?: string; step?: number; cwd?: string; terminal?: boolean; sdlc?: { kind?: string; env?: string; stage?: string }; lanes?: unknown; laneMode?: unknown; base?: unknown };
+      const body = JSON.parse((await readBody(req, 64_000)) || "{}") as { message?: string; step?: number; cwd?: string; terminal?: boolean; sdlc?: { kind?: string; env?: string; stage?: string } };
       const cwd = body.cwd ?? homedir();
       // A step is read from the database, so the button starts the step that the page shows.
       const step = body.step === undefined ? null : summaryDb.getStep(Number(body.step));
@@ -433,19 +522,16 @@ const server = createServer(async (req, res) => {
       if (body.sdlc && !env && !stage) return json(400, { error: "unknown SDLC verb" });
       const dir = cwd.replace(/^~(?=\/|$)/, homedir());
       if (!dir.startsWith("/") || !existsSync(dir) || !statSync(dir).isDirectory()) return json(400, { error: `not a folder: ${cwd}` });
-      if (body.lanes !== undefined) {
-        // Lanes are headless: each one is a row on the ticket page, and iTerm would open N tabs.
-        const out = await lanesRoute.startLanes({ key, context, cwd: dir, lanes: body.lanes, mode: body.laneMode, base: body.base, brief: body.message });
-        if (out.status === 201) broadcast();
-        return json(out.status, out.body);
-      }
       if (!step && !body.sdlc && !body.message?.trim()) return json(400, { error: "write the first message" });
       // Picked here, so a smoketest plan's event can link to its agent before pi starts.
-      const sessionId = randomUUID();
+      const sessionId = newSessionId();
       // Saved before pi starts, so the stage is yellow from the click.
       const running = env && !step ? summaryDb.addSdlcEvent({ eventType: "smoketest_plan", startedAt: new Date().toISOString(), environments: [env], tickets: [key], sessionId }) : null;
+      // The kanban button's label was written from its stored message, so the agent gets that one.
       const message = step
-        ? stepMessage(key, step.body)
+        ? step.action?.kind === "agent"
+          ? step.action.message
+          : stepMessage(key, step.body)
         : env && running
           ? planMessage(key, env, SDLC_SCRIPT, running.id, config.smoketestGuide)
           : stage
@@ -495,7 +581,7 @@ const server = createServer(async (req, res) => {
       const status = (await readReportedStatuses(config.statusDir)).get(url.searchParams.get("session") ?? "");
       // Only a headless run: a terminal pi is closed from its own tab.
       if (status?.mode !== "rpc" || !isAlive(status.pid)) return void res.writeHead(404, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "no live conversation to end" }));
-      process.kill(status.pid, "SIGTERM");
+      await endHeadless(status);
       res.writeHead(202, { "Content-Type": "application/json" }).end(JSON.stringify({ ok: true }));
     } else if (url.pathname === "/api/parked/dismiss" && req.method === "POST") {
       if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
@@ -528,7 +614,7 @@ const server = createServer(async (req, res) => {
       res.writeHead(code, { "Content-Type": "application/json" }).end(JSON.stringify(out));
     } else if (url.pathname === "/api/history") {
       const [parsed, reported, pulls] = await Promise.all([sessions.scan(), readReportedStatuses(config.statusDir), prs.get(false)]);
-      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify(buildHistory(parsed, reported, pulls, Date.now(), undefined, summaryDb.currentThreadStatuses())));
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify(buildHistory(withTitles(parsed), reported, pulls, Date.now(), undefined, summaryDb.currentThreadStatuses())));
     } else if (url.pathname === "/api/transcript") {
       const sessionId = url.searchParams.get("session") ?? "";
       const file = sessions.fileFor(sessionId) ?? ((await sessions.scan()) && sessions.fileFor(sessionId));

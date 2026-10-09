@@ -5,7 +5,9 @@ import { join } from "node:path";
 import type { AgentKind } from "../shared/team.ts";
 import { agentEnv, claudeUserLine, headlessCommand } from "./agent.ts";
 import { config } from "./config.ts";
+import { ASK_BEFORE_CHANGES, closeOpencodeStatus, markOpencodeWorking, newOpencodeSessionId, opencodeCreate, opencodeInterrupt, opencodeSend, startOpencodeStatus } from "./opencode.ts";
 import { writeFifoSoon } from "./rpc.ts";
+import type { ReportedStatus } from "./sources/status.ts";
 
 export interface ConversationOptions {
   cwd: string;
@@ -23,7 +25,12 @@ export interface ConversationOptions {
   agent?: AgentKind;
   /** Claude Code tools that run without a permission dialog. */
   allowedTools?: string[];
+  /** OpenCode asks on the page before a shell command or a file change. */
+  askBeforeChanges?: boolean;
 }
+
+/** A new session's id, picked by the dash so the page can open it at once. OpenCode wants a "ses" prefix. */
+export const newSessionId = (agent = config.agent): string => (agent === "opencode" ? newOpencodeSessionId() : randomUUID());
 
 /** The stdin FIFO of a headless run. */
 export const fifoOf = (sessionId: string): string => join(config.conversationsDir, `${sessionId}.in`);
@@ -44,7 +51,8 @@ export function isRunning(sessionId: string): boolean {
  */
 export function startConversation(opts: ConversationOptions): string {
   const agent = opts.agent ?? config.agent;
-  const sessionId = opts.resume?.sessionId ?? opts.sessionId ?? randomUUID();
+  const sessionId = opts.resume?.sessionId ?? opts.sessionId ?? newSessionId(agent);
+  if (agent === "opencode") return startOpencode(sessionId, opts);
   if (opts.message && agent === "pi") {
     const inbox = join(config.inboxDir, sessionId);
     mkdirSync(inbox, { recursive: true });
@@ -93,4 +101,35 @@ export function startConversation(opts: ConversationOptions): string {
     writeFifoSoon(fifo, claudeUserLine(opts.message)).catch((err: Error) => console.error(`agent-dash: could not send the first message to ${sessionId}: ${err.message}`));
   }
   return sessionId;
+}
+
+/**
+ * OpenCode runs the session in its background service, so there is no process, FIFO or log here:
+ * one API call makes the session, one sends the message, and the status poller follows it.
+ */
+function startOpencode(sessionId: string, opts: ConversationOptions): string {
+  startOpencodeStatus(config.statusDir, config.opencodeDb);
+  running.add(sessionId);
+  (async () => {
+    if (!opts.resume) await opencodeCreate({ sessionId, cwd: opts.cwd, title: opts.name, permissions: opts.askBeforeChanges ? ASK_BEFORE_CHANGES : undefined });
+    if (opts.message) {
+      await opencodeSend(sessionId, opts.message);
+      markOpencodeWorking(config.statusDir, sessionId, opts.cwd);
+    }
+  })()
+    .catch((err: Error) => {
+      console.error(`agent-dash: could not start OpenCode session ${sessionId}: ${err.message}`);
+      opts.onSpawnError?.();
+    })
+    .finally(() => running.delete(sessionId));
+  return sessionId;
+}
+
+/** End a headless run. A pi or Claude Code process exits; an OpenCode session stops and closes, and can resume. */
+export function endHeadless(s: ReportedStatus): Promise<void> {
+  // Throws at once when the process is gone, as process.kill does.
+  if (s.agent !== "opencode") return Promise.resolve(void process.kill(s.pid, "SIGTERM"));
+  // Never kill the pid: it is the service's, which runs every OpenCode session. A running turn
+  // stops first, or the next poll would open the session again.
+  return (s.state === "working" ? opencodeInterrupt(s.sessionId).catch(() => {}) : Promise.resolve()).then(() => closeOpencodeStatus(config.statusDir, s.sessionId));
 }

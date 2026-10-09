@@ -28,7 +28,7 @@ test("each kind of hash opens its view", () => {
 
 test("a run, step, or note opens its ticket on the board and points at itself", () => {
   const g: TicketGroup = { ticket: ticket(), runs: [run({ sessionId: "s9", tickets: ["FSDK-1"] })], prs: [], threads: {} };
-  const step = { id: 5, summaryId: 1, ticket: "FSDK-1", position: 1, body: "do" };
+  const step = { id: 5, summaryId: 1, ticket: "FSDK-1", position: 1, body: "do", label: null, action: null };
   const summary = { id: 1, ticket: "FSDK-1", status: "done" as const, requestedAt: "", generatedAt: "", summary: "", error: null, steps: [step] };
   const d = { myTickets: [g], otherTickets: [], summaries: { "FSDK-1": { latest: summary, lastDone: summary } }, notes: { "FSDK-1": [{ id: 3, ticket: "FSDK-1", createdAt: "", body: "n" }] } };
   const subjects = new Set(["t:FSDK-1", "r:lonely"]);

@@ -1,6 +1,9 @@
 import { Fragment, type MouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import type { Dashboard, HistoryRun, TicketDocumentWithBody, PrDetail, ThreadStatus, Transcript } from "../../shared/types.ts";
+import { runTitle } from "../../shared/runTitle.ts";
+import type { Dashboard, HistoryRun, Run, TicketDocumentWithBody, PrDetail, ThreadStatus, Transcript } from "../../shared/types.ts";
 import { setTeam } from "../../shared/team.ts";
+import { IMAGE_EXT, wikiLinkParts } from "../../shared/wiki.ts";
+import { href } from "./routes.ts";
 import { dashClick, internalHref, JIRA_BROWSE, splitTrailing } from "./links.ts";
 import { EmbeddedImage, MermaidFence, setKnownDiagrams } from "./mermaid.tsx";
 import { addUpdate, entryOf, entryOfSignal, type Group, groupNotification, needSignals, newlyWaiting, newSignals, type Pending, pruneSeen, releasePending, runsOf, runUpdate, type Seen, type SeenAt, signalUpdate, snapshot, type Update } from "./notify.ts";
@@ -85,12 +88,11 @@ export function dirLabel(cwd: string): string {
   return cwd.split("/").filter(Boolean).pop() ?? cwd;
 }
 
-export function runTitle(run: HistoryRun): string {
-  return run.name ?? run.firstPrompt;
-}
+export { runTitle } from "../../shared/runTitle.ts";
 
 export function resumeCommand(run: HistoryRun): string {
   const cd = `cd '${run.cwd.replace(/'/g, "'\\''")}' && `;
+  if (run.agent === "opencode") return `${cd}opencode --session ${run.sessionId}`;
   return run.agent === "claude" ? `${cd}claude --resume ${run.sessionId}` : `${cd}pi --session ${run.sessionId}`;
 }
 
@@ -102,6 +104,23 @@ export function plural(n: number, word: string): string {
 
 /** Ticket keys on the board, so a Jira link in a message can open the ticket here. */
 let knownTickets: ReadonlySet<string> = new Set();
+
+/**
+ * Reloads the page to get the newest build, but not over typed text, and at most once a minute.
+ * A tab from before a rebuild runs old code: it cannot lazy-load the deleted chunks, and it shows
+ * new kinds of data (a ticket brief's JSON spec) the old way.
+ */
+export function reloadForNewBuild(): boolean {
+  const typed = [...document.querySelectorAll("textarea")].some((t) => t.value.trim());
+  const last = Number(sessionStorage.getItem("agent-dash:chunk-reload") ?? 0);
+  if (typed || Date.now() - last < 60_000) return false;
+  sessionStorage.setItem("agent-dash:chunk-reload", String(Date.now()));
+  location.reload();
+  return true;
+}
+
+/** The entry script of the build that this tab runs; empty under `pnpm dev`. */
+const ownBuild = document.querySelector<HTMLScriptElement>('script[type="module"][src*="/assets/index-"]')?.getAttribute("src") ?? "";
 
 export function useDashboard() {
   const [data, setData] = useState<Dashboard | null>(null);
@@ -117,6 +136,8 @@ export function useDashboard() {
     try {
       const res = await fetch(`/api/dashboard${refresh ? "?refresh" : ""}`);
       if (!res.ok) throw new Error(await res.text());
+      const build = res.headers.get("x-agent-dash-build");
+      if (ownBuild && build && build !== ownBuild && reloadForNewBuild()) return;
       const body: Dashboard = await res.json();
       if (seq < applied.current) return;
       applied.current = seq;
@@ -141,6 +162,31 @@ export function useDashboard() {
   }, [load]);
 
   return { data, error, loading, refresh: () => load(true) };
+}
+
+/** The run has a last message, also when `/api/dashboard` left it out. */
+export const hasLastMessage = (run: Run): boolean => !!run.lastMessage || !!run.lastMessageCut;
+
+/**
+ * A run's whole last message. A finished run's is not in the dashboard, so it is read when `open`
+ * first turns true, and again when the run changes. Empty while it loads.
+ */
+export function useLastMessage(run: Run, open: boolean): string {
+  const [loaded, setLoaded] = useState<{ key: string; text: string } | null>(null);
+  const key = `${run.sessionId} ${run.lastActivityAt}`;
+  useEffect(() => {
+    if (!open || !run.lastMessageCut || loaded?.key === key) return;
+    let live = true;
+    api.lastMessage(run.sessionId).then(
+      (text) => live && setLoaded({ key, text }),
+      (err: Error) => live && setLoaded({ key, text: `_${err.message}_` }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [open, key, run.lastMessageCut]);
+  if (!run.lastMessageCut) return run.lastMessage;
+  return loaded?.key === key ? loaded.text : "";
 }
 
 // ---- notifications ------------------------------------------------------------------
@@ -220,7 +266,7 @@ function entryLabel(d: Dashboard, id: string): string {
   }
   if (id.startsWith("r:")) {
     const r = runsOf(d).find((x) => x.sessionId === id.slice(2));
-    return r ? (r.name ?? r.firstPrompt) : "Agent";
+    return r ? runTitle(r) : "Agent";
   }
   return prName(id.slice(2));
 }
@@ -399,6 +445,11 @@ export const api = {
     if (!res.ok) throw new Error(`could not load the chat (${res.status})`);
     return res.json();
   },
+  lastMessage: async (sessionId: string): Promise<string> => {
+    const res = await fetch(`/api/last-message?session=${encodeURIComponent(sessionId)}`);
+    if (!res.ok) throw new Error(`could not load the last message (${res.status})`);
+    return ((await res.json()) as { lastMessage: string }).lastMessage;
+  },
   setThread: (ticket: string, sessionId: string, status: ThreadStatus) =>
     post(`/api/threads?ticket=${encodeURIComponent(ticket)}&session=${encodeURIComponent(sessionId)}`, { status }),
 };
@@ -406,8 +457,8 @@ export const api = {
 // ---- markdown -----------------------------------------------------------------------
 
 // Group 5 is a local image, `![alt](path)`, and group 6 a document's stored image; a web image stays a link.
-// Group 7 is *italic* or _italic_; a snake_case name is not.
-const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\(https?:\/\/[^)\s]+\))|(https?:\/\/[^\s)<>\]]+)|(!\[[^\]\n]*\]\((?![a-z]+:)<?[^)\s>]+\.(?:png|svg|jpe?g|gif|webp)>?\))|(!\[[^\]\n]*\]\(image:\d+\))|(\*(?![\s*])[^*\n]+?(?<!\s)\*|(?<!\w)_(?![\s_])[^_\n]+?(?<!\s)_(?!\w))/gi;
+// Group 7 is *italic* or _italic_; a snake_case name is not. Group 8 is an Obsidian `[[link]]` or `![[embed]]`.
+const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\(https?:\/\/[^)\s]+\))|(https?:\/\/[^\s)<>\]]+)|(!\[[^\]\n]*\]\((?![a-z]+:)<?[^)\s>]+\.(?:png|svg|jpe?g|gif|webp)>?\))|(!\[[^\]\n]*\]\(image:\d+\))|(\*(?![\s*])[^*\n]+?(?<!\s)\*|(?<!\w)_(?![\s_])[^_\n]+?(?<!\s)_(?!\w))|(!?\[\[[^\]\n]+\]\])/gi;
 
 function linkLabel(url: string): string {
   if (/github\.com\/.+\/pull\/\d+/.test(url)) return prName(url);
@@ -444,6 +495,34 @@ function Link({ url, label }: { url: string; label: ReactNode }) {
   );
 }
 
+// ---- wiki links ----------------------------------------------------------------------
+
+/** Every name a `[[link]]` can use for a wiki note, lower case. Null until the Wiki view loads the list. */
+let wikiNames: Set<string> | null = null;
+export function setWikiNames(names: Set<string>): void {
+  wikiNames = names;
+}
+
+/** `[[Note]]` opens the note in the Wiki view; `![[x.png]]` shows the image from the wiki; a broken link says so. */
+function WikiLink({ token }: { token: string }) {
+  const { embed, target, heading, label } = wikiLinkParts(token);
+  if (embed && IMAGE_EXT.test(target)) {
+    const src = `/api/wiki/file?ref=${encodeURIComponent(target)}`;
+    return (
+      <a className="md-image" href={src} target="_blank" rel="noreferrer" title={target}>
+        <img src={src} alt={label ?? target} loading="lazy" />
+      </a>
+    );
+  }
+  const missing = wikiNames !== null && !wikiNames.has(target.toLowerCase().replace(/\.md$/i, ""));
+  const text = label ?? (heading ? `${target} › ${heading}` : target);
+  return (
+    <a className={`wikilink ${missing ? "missing" : ""}`} href={href(`wiki:${target}`)} title={missing ? `No wiki note is named “${target}”` : `Open “${target}” in the wiki`}>
+      {embed ? `↪ ${text}` : text}
+    </a>
+  );
+}
+
 export function inline(text: string): ReactNode[] {
   const out: ReactNode[] = [];
   let last = 0;
@@ -453,6 +532,7 @@ export function inline(text: string): ReactNode[] {
     if (m[1]) out.push(<code key={m.index}>{tok.slice(1, -1)}</code>);
     else if (m[2]) out.push(<strong key={m.index}>{inline(tok.slice(2, -2))}</strong>);
     else if (m[7]) out.push(<em key={m.index}>{inline(tok.slice(1, -1))}</em>);
+    else if (m[8]) out.push(<WikiLink key={m.index} token={tok} />);
     else if (m[5]) {
       const [, alt, path] = tok.match(/^!\[([^\]]*)\]\(<?([^)\s>]+)>?\)$/)!;
       out.push(<EmbeddedImage key={m.index} alt={alt} path={path} />);

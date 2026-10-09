@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { claudeInterruptLine, claudeUserLine } from "../agent.ts";
 import { config } from "../config.ts";
 import { fifoOf } from "../conversations.ts";
+import { type OpencodeDialog, opencodeAnswerPermission, opencodeInterrupt, opencodeSend } from "../opencode.ts";
 import { claudeResponse, newestOpenClaudeRequest, newestOpenDialog, readLogTail, sameDialog, type UiAnswer, uiResponse, writeFifoLine } from "../rpc.ts";
 import type { RunDialog } from "../../shared/types.ts";
 import { isAlive, patchReportedStatus, readReportedStatus, readReportedStatuses, type ReportedStatus, takesControls, takesSteer } from "../sources/status.ts";
@@ -35,10 +36,11 @@ function readBody(req: IncomingMessage, max: number): Promise<string> {
 
 /**
  * Send a reply, a steer or a Stop to a live session. pi's extension reads them from the session's
- * inbox; a headless Claude Code reads them on its stdin.
+ * inbox; a headless Claude Code reads them on its stdin; OpenCode's service takes them over HTTP.
  */
-export function deliver(sessionId: string, suffix: "txt" | "steer" | "abort", text: string, status: ReportedStatus | undefined = readReportedStatus(config.statusDir, sessionId)): void {
+export function deliver(sessionId: string, suffix: "txt" | "steer" | "abort", text: string, status: ReportedStatus | undefined = readReportedStatus(config.statusDir, sessionId)): void | Promise<void> {
   if (!SESSION_ID.test(sessionId)) throw new Error("not a session id");
+  if (status?.agent === "opencode") return suffix === "abort" ? opencodeInterrupt(sessionId) : opencodeSend(sessionId, text, suffix === "steer");
   if (status?.agent !== "claude") return writeInbox(sessionId, suffix, text);
   if (suffix !== "abort") return writeFifoLine(fifoOf(sessionId), claudeUserLine(text));
   writeFifoLine(fifoOf(sessionId), claudeInterruptLine());
@@ -82,9 +84,9 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
     // An older extension reads *.txt only, and would never see a *.steer file.
     if (reply.steer && !takesSteer(status)) return done(409, { error: status.agent === "claude" ? "Claude Code cannot take a steer: queue the message, or stop the agent first" : "type /reload in the session to steer from here" });
     try {
-      deliver(sessionId, reply.steer ? "steer" : "txt", reply.text.trim(), status);
-    } catch {
-      return done(409, { error: "the session no longer reads its input" });
+      await deliver(sessionId, reply.steer ? "steer" : "txt", reply.text.trim(), status);
+    } catch (err) {
+      return done(409, { error: status.agent === "opencode" ? (err as Error).message : "the session no longer reads its input" });
     }
     return done(202, { ok: true });
   }
@@ -92,9 +94,9 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   if (url.pathname === "/api/stop") {
     if (!takesControls(status)) return done(409, { error: "type /reload in the session to stop it from here" });
     try {
-      deliver(sessionId, "abort", "", status);
-    } catch {
-      return done(409, { error: "the session no longer reads its input" });
+      await deliver(sessionId, "abort", "", status);
+    } catch (err) {
+      return done(409, { error: status.agent === "opencode" ? (err as Error).message : "the session no longer reads its input" });
     }
     // An editor dialog takes no abort signal, so Stop cannot close it from the extension.
     if (status.dialog?.method !== "editor") return done(202, { ok: true });
@@ -108,8 +110,28 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   // The cap keeps an answer far below the pipe buffer, so the FIFO write never waits.
   const answer = await body<UiAnswer>(32_000);
   if (!answer) return done(400, { error: "the answer is not JSON" });
+  if (status.agent === "opencode") {
+    const err = await answerOpencode(sessionId, status.dialog as OpencodeDialog, answer);
+    return err ? done(err.code, { error: err.error }) : done(202, { ok: true });
+  }
   const err = await answerOpenDialog(sessionId, status.dialog, answer, status.agent === "claude");
   return err ? done(err.code, { error: err.error }) : done(202, { ok: true });
+}
+
+/**
+ * Answer an OpenCode permission request by the id that the status file holds; a subagent's request
+ * goes to the subagent's session. The service says when the request is gone.
+ */
+async function answerOpencode(sessionId: string, open: OpencodeDialog, answer: UiAnswer): Promise<{ code: number; error: string } | null> {
+  const allow = "confirmed" in answer ? answer.confirmed : "cancelled" in answer ? false : null;
+  if (typeof allow !== "boolean") return { code: 400, error: "a confirm dialog takes yes or no" };
+  try {
+    await opencodeAnswerPermission(open.sessionID ?? sessionId, open.id, allow);
+  } catch (err) {
+    return { code: 409, error: `the dialog is gone: ${(err as Error).message}` };
+  }
+  patchReportedStatus(config.statusDir, sessionId, { dialog: null });
+  return null;
 }
 
 /** Write the answer to the dialog that the status file names. Returns null on success. */

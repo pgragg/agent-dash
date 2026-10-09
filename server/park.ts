@@ -1,8 +1,11 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { needsNothing, waitsOnReview } from "../shared/conversationSummary.ts";
+import { runTitle } from "../shared/runTitle.ts";
 import type { ConversationSummary, ParkReason, ParkedRun, Run, ThreadStatusChange } from "../shared/types.ts";
 import { config } from "./config.ts";
+import { endHeadless } from "./conversations.ts";
+import { resolvedAway } from "./model.ts";
 import { isAlive, type ReportedStatus } from "./sources/status.ts";
 import * as db from "./summaries/db.ts";
 
@@ -29,8 +32,8 @@ export interface ParkInput {
   threads: ThreadStatusChange[];
   /** Runs the sweep must not park, such as one that Piper resumed after a park. */
   exempt: Set<string>;
-  /** Agents of parallel lanes: they work side by side, so a newer lane does not replace an older one. */
-  laneSessions?: Set<string>;
+  /** Tickets with an entry in the queue: there, a resolved agent's ask is already shown. */
+  shown?: Set<string>;
   now: number;
   cap?: number;
 }
@@ -63,16 +66,18 @@ export function choosePark(input: ParkInput): ParkChoice[] {
   const candidates = waiting.filter(parkable);
 
   for (const r of candidates) {
-    const open = r.tickets.filter((k) => !done.has(k) && !resolved.has(`${k} ${r.sessionId}`));
+    const isResolved = (k: string) => resolved.has(`${k} ${r.sessionId}`);
     const s = summaries[r.sessionId];
-    if (r.tickets.length && !open.length) park(r, "ticket_done");
-    else if (s?.status === "done" && (needsNothing(s.needs) || waitsOnReview(s.needs))) park(r, "needs_nothing");
+    const nothing = s?.status === "done" && (needsNothing(s.needs) || waitsOnReview(s.needs));
+    if (r.tickets.length && r.tickets.every((k) => done.has(k))) park(r, "ticket_done");
+    else if (r.tickets.length && r.tickets.every((k) => done.has(k) || isResolved(k)) && (nothing || resolvedAway(r, (k) => done.has(k) || isResolved(k), input.shown ?? new Set()))) park(r, "resolved");
+    else if (nothing) park(r, "needs_nothing");
   }
   // A newer live agent on the same ticket carries the work on; the older one's ask goes to the Parked list.
   const live = runs.filter((r) => r.status !== "finished" && !chosen.has(r.sessionId));
   for (const r of candidates) {
     if (chosen.has(r.sessionId)) continue;
-    if (r.tickets[0] && !input.laneSessions?.has(r.sessionId) && live.some((o) => o.sessionId !== r.sessionId && o.tickets[0] === r.tickets[0] && o.startedAt > r.startedAt)) park(r, "superseded");
+    if (r.tickets[0] && live.some((o) => o.sessionId !== r.sessionId && o.tickets[0] === r.tickets[0] && o.startedAt > r.startedAt)) park(r, "superseded");
     else if (waited(r) > STALE_MS && !r.askedQuestion) park(r, "stale");
   }
 
@@ -107,7 +112,7 @@ export function parkedRow(c: ParkChoice, now: Date): ParkedRun {
   return {
     sessionId: c.run.sessionId,
     ticket: c.run.tickets[0] ?? null,
-    name: c.run.name ?? c.run.firstPrompt.slice(0, 80),
+    name: runTitle(c.run).slice(0, 80),
     cwd: c.run.cwd,
     reason: c.reason,
     parkedAt: now.toISOString(),
@@ -135,7 +140,7 @@ export function sweep(input: Omit<ParkInput, "exempt">, reported: Map<string, Re
     if (!stillWaiting(c.run, s) || inboxHasMail(c.run.sessionId)) continue;
     db.addParked(parkedRow(c, now));
     try {
-      process.kill(s.pid, "SIGTERM");
+      void endHeadless(s);
       changes++;
     } catch {
       // The process exited on its own: the row still keeps the ask.

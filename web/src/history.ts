@@ -7,7 +7,7 @@ export function filterHistory(runs: HistoryRun[], query: string): HistoryRun[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return runs;
   return runs.filter((r) => {
-    const hay = [r.name ?? "", r.firstPrompt, r.lastReply, r.cwd, r.sessionId, ...r.tickets, ...r.createdPrs].join(" ").toLowerCase();
+    const hay = [r.name ?? "", r.title ?? "", r.firstPrompt, r.lastReply, r.cwd, r.sessionId, ...r.tickets, ...r.createdPrs].join(" ").toLowerCase();
     return words.every((w) => hay.includes(w));
   });
 }

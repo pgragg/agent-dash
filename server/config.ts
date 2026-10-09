@@ -130,8 +130,14 @@ export function ticketProjectsOf(s: Settings, providers: TicketProviderConfig[])
   return [...new Set([...s.ticketProjects, ...own])];
 }
 
+/**
+ * OpenCode keeps its sessions in SQLite, not in log files. The dash copies each one here as a pi
+ * log, so every reader of a session file works the same for it.
+ */
+export const opencodeLogDir = (): string => env.AGENT_DASH_OPENCODE_LOG_DIR ?? join(home, ".agent-dash/opencode-sessions");
+
 /** The folder of an agent's session logs. */
-export const sessionsDirOf = (s: Settings, agent: Settings["agent"]): string => expandPath(agent === "claude" ? s.claudeProjectsDir : s.sessionsDir);
+export const sessionsDirOf = (s: Settings, agent: Settings["agent"]): string => (agent === "opencode" ? opencodeLogDir() : expandPath(agent === "claude" ? s.claudeProjectsDir : s.sessionsDir));
 
 export function buildConfig(s: Settings) {
   const providers = ticketProvidersOf(s);
@@ -141,10 +147,14 @@ export function buildConfig(s: Settings) {
     agent: s.agent,
     /** The session logs of the agent that the board shows. */
     sessionsDir: sessionsDirOf(s, s.agent),
+    /** OpenCode's own database, which the dash reads only. */
+    opencodeDb: expandPath(s.opencodeDb),
     /** The pi extension and the Claude Code hook write one status file per session here. */
     statusDir: env.AGENT_DASH_STATUS_DIR ?? join(home, ".agent-dash/status"),
     /** Replies typed in the dash go here, one folder per session; the extension delivers them. */
     inboxDir: env.AGENT_DASH_INBOX_DIR ?? join(home, ".agent-dash/inbox"),
+    /** The last answers of GitHub and the remote trackers, so the first build after a restart is fast. */
+    cacheDir: env.AGENT_DASH_CACHE_DIR ?? join(home, ".agent-dash/cache"),
     /** Context files for agents started from the dash, kept so you can see what each one got. */
     handoffDir: join(home, ".agent-dash/handoffs"),
     /** stdin FIFO and output log of each headless conversation started from the dash. */
@@ -161,6 +171,8 @@ export function buildConfig(s: Settings) {
       reloginCommand: s.slackReloginCommand,
     },
     smoketestGuide: expandPath(s.smoketestGuide),
+    /** The local Obsidian vault of the Wiki view; empty turns it off. */
+    wikiDir: expandPath(s.wikiDir),
     /** Runs and PRs older than this do not create "other ticket" groups or unlinked rows. */
     recentDays: s.recentDays,
     /** Remote tracker and GitHub answers are cached this long, so a page refresh does not hit the APIs. */

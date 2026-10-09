@@ -287,8 +287,11 @@ function mapHtml(b: Brief, map: SystemMap, uid: string): string {
 
 const MARK: Record<string, [string, string]> = { "+": ["good", "✓"], "~": ["ok", "~"], "-": ["bad", "✕"] };
 
-/** The brief's page, without <html>: the dashboard puts it in a document card, the export in a file. */
-export function briefHtml(b: Brief): string {
+/**
+ * The brief's page, without <html>: the dashboard puts it in a document card, the export in a file.
+ * `glanceOnly` stops after "At a glance": the workspace shows that much until you open the brief.
+ */
+export function briefHtml(b: Brief, { glanceOnly = false }: { glanceOnly?: boolean } = {}): string {
   const uid = uidFor(b);
   const out: string[] = [];
   const minutes = Math.max(1, Math.round(visibleText(b).join(" ").split(/\s+/).length / 220));
@@ -309,6 +312,7 @@ export function briefHtml(b: Brief): string {
       : "";
     out.push(`<section class="tb-sec tb-glance"><h2>At a glance</h2>${shifts}${stats}${heads}</section>`);
   }
+  if (glanceOnly) return `<div class="tb" data-size="${esc(b.size)}">${out.join("")}</div>`;
 
   if (b.system) out.push(section("tb-system", b.system.heading, mapHtml(b, b.system, uid)));
   if (b.flow) out.push(section("tb-flowsec", b.flow.heading, `<div class="tb-canvas">${flowSvg(b.flow, { uid: `${uid}f` })}</div>`));

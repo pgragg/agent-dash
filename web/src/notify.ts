@@ -1,5 +1,6 @@
 import { needsNothing, waitsOnReview } from "../../shared/conversationSummary.ts";
-import type { AttentionItem, AttentionKind, ConversationSummary, Dashboard, Run, RunStatus } from "../../shared/types.ts";
+import { runTitle } from "../../shared/runTitle.ts";
+import type { AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, Run, RunStatus } from "../../shared/types.ts";
 
 /**
  * Which runs to announce with a browser notification. Kept free of React so the tests can import it.
@@ -64,9 +65,31 @@ export function agentFinished(run: Run | undefined, s: ConversationSummary | und
 }
 
 /** The agent's only ask is that a reviewer approves its PR, so the next move is the reviewer's. */
-export function agentWaitsOnReview(run: Run | undefined, s: ConversationSummary | undefined): boolean {
+export function agentWaitsOnReview(run: HistoryRun | undefined, s: ConversationSummary | undefined): boolean {
   const ready = readySummary(s);
   return !!run && !!ready && run.status === "awaiting_input" && !run.dialog && waitsOnReview(ready.needs);
+}
+
+export type AgentState = RunStatus | "waits_on_review";
+
+/**
+ * How an agent shows in every place: the queue entry, the "why" list, its card, the Notifications
+ * row, the tab title and the browser notification. An agent that waits on review is not waiting on you.
+ */
+export function agentState(run: HistoryRun, s: ConversationSummary | undefined): AgentState {
+  return agentWaitsOnReview(run, s) ? "waits_on_review" : run.status;
+}
+
+/** The count of waiting agents (`counts.awaiting_input`), without the ones that only wait on a PR review. */
+export function waitingOnYou(awaiting: number, runs: HistoryRun[], summaries: Record<string, ConversationSummary>): number {
+  const review = new Set(runs.filter((r) => agentState(r, summaries[r.sessionId]) === "waits_on_review").map((r) => r.sessionId));
+  return Math.max(0, awaiting - review.size);
+}
+
+/** The run's current summary asks nothing of you: it needs nothing, or only a reviewer. */
+export function asksNothing(s: ConversationSummary | undefined): boolean {
+  const ready = readySummary(s);
+  return !!ready && (needsNothing(ready.needs) || waitsOnReview(ready.needs));
 }
 
 /** The need goes on its own line, so a notification shows it apart. */
@@ -152,7 +175,7 @@ export function groupNotification(g: Group): { title: string; body: string } {
 
 /** An agent stop as an update. Without a ready summary, the last reply is the best text we have. */
 export function runUpdate(r: Run, s: ConversationSummary | undefined): Update {
-  const name = r.name ?? r.firstPrompt;
+  const name = runTitle(r);
   const what = agentFinished(r, s) ? "Agent finished" : "Agent is waiting on you";
   return { key: `agent:${r.sessionId}`, title: what, line: `${cut(name, 60)}\n${summaryText(s) ?? (r.lastReply || "Waiting for you")}` };
 }

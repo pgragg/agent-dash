@@ -3,7 +3,7 @@
   "key": "FSDK-2073",
   "title": "Move fdr-lambda-docs into FDR on Kubernetes",
   "size": "L",
-  "ask": "Serve AI example enhancement from FDR on Kubernetes, so that it survives the 10-17 registry cutover and the Lambda and its database can be deleted.",
+  "ask": "Move AI example enhancement to FDR on Kubernetes, so that it survives the 10-17 cutover and we can delete the Lambda and its database.",
   "verified_on": "2026-10-07",
   "links": [
     {
@@ -359,7 +359,7 @@
       },
       {
         "text": "The Lambda, its Function URL and `lambda-docs-db` are deleted, and the unused CDK code is removed.",
-        "verify": "After the exit gate, a human checks in the Fern account that the Function URL and the RDS instance are gone; `servers/fdr-lambda-docs-deploy/` is gone from `app`."
+        "verify": "After the exit gate, a human checks that the Function URL and the RDS instance are gone from the Fern account; `servers/fdr-lambda-docs-deploy/` is gone from `app`."
       }
     ],
     "ac_review": [
@@ -427,7 +427,7 @@
     ]
   },
   "decisions": {
-    "heading": "Three calls are open; Piper makes all three",
+    "heading": "Two calls are open; Piper makes both",
     "major": [
       {
         "question": "How do released CLIs reach FDR?",
@@ -502,45 +502,17 @@
           "f6",
           "f7"
         ]
-      },
-      {
-        "question": "Which model does FDR call?",
-        "decider": "Piper with Arie",
-        "criteria": [
-          "Example quality",
-          "p95 against the 15 s CLI timeout",
-          "Same as FSDK-2072"
-        ],
-        "options": [
-          {
-            "name": "Bedrock Sonnet 4.6",
-            "cells": [
-              "+ best",
-              "~ not measured yet",
-              "+ yes"
-            ],
-            "recommended": true
-          },
-          {
-            "name": "Bedrock Haiku",
-            "cells": [
-              "~ good enough",
-              "+ fast",
-              "- only if both move"
-            ]
-          }
-        ],
-        "why": "FDR already calls Sonnet for FSDK-2072. Measure p95 in beta; move both tickets to Haiku if it nears 15 s.",
-        "facts": [
-          "f9",
-          "f7"
-        ]
       }
     ],
     "minor": [
       {
+        "question": "Model?",
+        "call": "Keep `claude-sonnet-4-6`: FDR already calls it, and FSDK-2072 uses it. Not a choice for this ticket.",
+        "decider": "FSDK-2072"
+      },
+      {
         "question": "Auth in FDR?",
-        "call": "`checkUserBelongsToOrg` (cached); local HS256 if Venus load hurts."
+        "call": "`checkUserBelongsToOrg` (cached), as the route does today."
       },
       {
         "question": "`get-db-examples` route?",
@@ -551,10 +523,6 @@
         "question": "PostHog `ai-example-enhanced` event?",
         "call": "Drop it after asking `#proj-fern-aws-migration-devs`.",
         "decider": "Piper"
-      },
-      {
-        "question": "Scaling?",
-        "call": "CPU HPA 3–50 is merged; add a Bedrock concurrency cap if docs p95 rises."
       }
     ]
   },
@@ -644,8 +612,8 @@
         "fact": "f3"
       },
       {
-        "text": "Sonnet p95 above the CLI's 15 s timeout: the CLI drops the result.",
-        "mitigation": "Measure in beta; FDR still caches, so the next run hits.",
+        "text": "An answer slower than the CLI's 15 s timeout: the CLI keeps the original example.",
+        "mitigation": "Soft fail, and FDR caches the answer, so the next run hits. No work in this ticket.",
         "fact": "f7"
       },
       {
@@ -656,10 +624,6 @@
       {
         "text": "The Fern account goes before old CLIs drain: they lose AI examples early (soft fail).",
         "mitigation": "Agree the drain window with Arie before M4."
-      },
-      {
-        "text": "Venus on the auth hot path: a Venus slowdown gives 5xx.",
-        "mitigation": "Fall back to a local HS256 check."
       }
     ],
     "questions": [

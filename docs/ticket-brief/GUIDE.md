@@ -8,7 +8,13 @@ After reading it, the engineer can:
 2. Say what is wrong with it, and what the ticket changes.
 3. Describe the end state, and **how to prove it is done**.
 4. Know where the ticket and reality disagree. This is the most valuable content.
-5. Know which decisions are open, what the tradeoffs are, who decides, and what to do first.
+5. Know which decisions the ticket forces, what the tradeoffs are, who decides, and what to do first.
+6. Know what they do **not** have to do: what is out of scope, and which parts of the ticket can be cut, deferred or done the simple way.
+
+**The scope is the ticket.** The brief helps the engineer finish this ticket with the least work. It does not design a better system. Many tickets are "keep the lights on" work under a date: there, the best brief is short, and every line on it is needed to meet the date. Two rules follow:
+
+- **Do not add work.** Do not raise tuning, optimization, a model or library choice, a refactor, or "consider X if Y" ideas that the ticket does not need. A choice that is already made (by a sibling ticket, the code, or a default) is a fact, not a decision: state it in one line. A good idea that is not this ticket goes in the CUT line, or at most one risk if it can break the ticket.
+- **Make the work smaller.** Look for the parts of the ticket that can be cut, deferred to a follow-up, or done the simple way, and say so with a reason. When an option cuts scope and still meets the ask, recommend it.
 
 **You are an editor, not an archivist.** The research finds much more than a reader needs. The page holds what the reader needs. The rest goes in the evidence ledger, where a reader can check it but does not read it by default. The old ticket summaries put everything on the page: a dozen diagrams, ten decisions, seventeen user stories, "I tested…" stories. Readers could not tell which three things mattered. A five-minute page forces you to rank.
 
@@ -104,6 +110,7 @@ This step is why the brief is worth reading. A ticket is written before the inve
 6. **What already happened?** Merged PRs, half-built infra, drift between the ticket and the code.
 7. **Who else is touched?** Owners, other teams, a sibling ticket that must change the same thing.
 8. **What is the undo?** Rollback for each step; what is one-way (a data migration, a delete, a release).
+9. **Can it be smaller?** Does the ask fail without this AC, step or deliverable? If not, propose to drop it or defer it (`ac_review` verdict `drop`, with the follow-up in the note). Is there a simpler way that still meets the ask (reuse what exists, a config change instead of code)?
 
 Each finding becomes a **heads-up** (at most 4, ranked by "would cause rework if missed"). When the ticket says X and reality says Y, put X in `ticket_says`. Corrected acceptance criteria go in `done.ac_review`.
 
@@ -118,12 +125,15 @@ HERO:       what boundary does the map draw? which views? which boxes appear, ch
 PROBLEMS:   up to 3 things wrong with TODAY (they become pins)
 SURPRISES:  up to 4 (the ticket against reality)
 DONE:       observable end states, and how each one is proved
-DECISIONS:  up to 3 with real tradeoffs; each has one recommended option and a named decider
+DECISIONS:  0 to 3 that the ticket cannot be done without; each has real tradeoffs, one recommended option and a named decider
+SMALLER:    what the engineer can drop, defer or do the simple way
 FIRST MOVE: where does the engineer start?
-CUT:        what you learned that does NOT go on the page
+CUT:        what you learned that does NOT go on the page, including every idea that adds work the ticket does not need
 ```
 
-If you cannot fill a line, the research is not finished. If the CUT line is empty, you did not edit.
+If you cannot fill a line, the research is not finished (DECISIONS and SMALLER can be "none"). If the CUT line is empty, you did not edit.
+
+Then check scope: for each decision, done item, path step and risk mitigation, ask "does the ask fail without this?" If it does not, cut it.
 
 ### 5. Write the spec
 
@@ -132,12 +142,20 @@ Start from `node scripts/brief.ts skeleton`. The fields are in [SPEC.md](SPEC.md
 - **Headings are claims.** "Released CLIs call a URL we cannot move" beats "Current architecture". The lint warns on a topic heading.
 - **One map, several views, the same canvas.** Each box has fixed grid cells in every view, so the eye sees what moves. A view hides what is not there yet or any more; the renderer marks boxes NEW, CHANGED and REMOVED by itself. Pin the problems on the first view: the pins are the reader's list of what is wrong.
 - **Numbers, not adjectives**, each with a fact. "231k of 390k calls return nothing" beats "most traffic is wasted".
-- **A decision gets a matrix only if its options trade off.** Choose criteria that separate the options, not "cost" or "effort". Exactly one option is recommended. The decider is a name. Settled or low-stakes calls go in `minor`.
+- **A decision is on the page only if the ticket forces it**: the engineer cannot finish without an answer. Zero decisions is a good result. A decision gets a matrix only if its options trade off. Choose criteria that separate the options, not "cost" or "effort". Exactly one option is recommended; prefer the one with less work that still meets the ask. The decider is a name. Settled or low-stakes calls go in `minor`, as one-line answers, not as new work ("Use the model FSDK-2072 uses", not "Measure p95, then consider Haiku").
 - **Every done item is observable and has a `verify`**: a command, a test or a dashboard.
 - **Say what only a human can do** (prod writes, a cloud console, merges), so nobody loses a day to find out.
 - **Do not tell the story of the investigation.** State the result with its badge: "I tested X and Y happened" becomes "Y happens" with `how: verified`.
 - **Do not copy the ticket.** Link it. Include only what the ticket gets wrong or leaves out.
 - **A person is a person.** A `people` row is someone whose experience changes. "As a platform engineer I want to deploy" is a task: put it in `done`.
+- **Write every text field in ASD-STE100** (Simplified Technical English), so that a reader, also one whose first language is not English, reads each line once and gets it:
+  - One topic in a sentence. One instruction in a sentence. Put the verb first in an instruction: "Set `FDR_ORIGIN` on the prod Lambda."
+  - At most 20 words in an instruction and 25 words in a description. Split a longer sentence.
+  - Active voice: "FDR caches the answer", not "the answer is cached". Say who does it.
+  - Simple tenses only: present, past, future. No "-ing" word as a noun or an adjective ("the deploy", not "the deploying").
+  - Use simple, common words, and use each word with one meaning. Use one term for one thing on the whole page: if it is the "proxy", do not also call it the "forwarder".
+  - Keep "the", "a" and "is". Do not stack more than three nouns ("skip-cache row", not "Lambda docs skip cache row cleanup").
+  - Code names, hosts, paths and product names stay as they are, in `` `code` ``.
 - Text fields take `` `code` `` and `**bold**` only.
 
 ### 6. Lint and save
@@ -153,7 +171,7 @@ Errors must reach zero: the save refuses a spec with errors. Treat warnings as e
 
 Open the brief on the dashboard (your first message gives the URL) with agent-browser, if you have it. Screenshot the page, and click each map view tab and screenshot it. Look for labels that float or cover a box, lines through boxes, cut text, and anything you would have to explain aloud. Fix it in the spec (move a box to another cell, shorten a label), then save again. If you have no browser, run `node scripts/brief.ts export --id N --out /tmp/brief-N` and read the SVGs in `diagrams/`, or rely on the lint and the cold-reader test.
 
-Then run the **cold-reader test** (skip it for size S). Give a fresh subagent only the output of `node scripts/brief.ts text --id N`, with no Jira, GitHub or Slack, and ask it these six questions:
+Then run the **cold-reader test** (skip it for size S). Give a fresh subagent only the output of `node scripts/brief.ts text --id N`, with no Jira, GitHub or Slack, and ask it these seven questions:
 
 1. In two sentences, how does the system work today?
 2. What is wrong with it, and what does the ticket change?
@@ -161,6 +179,11 @@ Then run the **cold-reader test** (skip it for size S). Give a fresh subagent on
 4. Where does the ticket disagree with reality?
 5. Which decisions are open, who makes each one, and what is the recommendation?
 6. What do you do first, in which repo and file, and what must a human do?
+7. What is out of scope, and what can you skip?
+
+Also ask it: "Which line on the page makes you do work that the ask does not need?" Cut each line it names, or say on the page why the ask needs it.
+
+Also ask it to name each sentence that it had to read two times. Rewrite each one in ASD-STE100.
 
 Every wrong or missing answer is a defect in the page. Fix the page and test again. Then spot-check the truth: pick the three facts that the page leans on most, and confirm each against its source once more.
 

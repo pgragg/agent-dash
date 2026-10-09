@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AttentionItem, ConversationSummary } from "../shared/types.ts";
-import { addUpdate, agentFinished, agentWaitsOnReview, entryOf, entryOfSignal, type Group, groupNotification, isNewSince, needSignals, newSignals, type Pending, pruneSeen, releasePending, runUpdate, SEEN_KEEP_MS, SUMMARY_WAIT_MS, signalUpdate, summaryText } from "../web/src/notify.ts";
+import { addUpdate, agentFinished, agentState, agentWaitsOnReview, asksNothing, entryOf, entryOfSignal, type Group, groupNotification, isNewSince, needSignals, newSignals, type Pending, pruneSeen, releasePending, runUpdate, SEEN_KEEP_MS, SUMMARY_WAIT_MS, signalUpdate, summaryText, waitingOnYou } from "../web/src/notify.ts";
 import { run } from "./helpers.ts";
 
 const since = "2026-10-05T10:00:00.000Z";
@@ -21,6 +21,15 @@ test("an agent is finished only when its current summary says it needs nothing",
   assert.equal(agentFinished(run({ ...waiting, askedQuestion: true }), summary()), false);
 });
 
+test("a summary asks nothing when it is current and needs nothing, or only a reviewer", () => {
+  // A stalled ticket whose newest agent asks nothing leaves Up next on this rule.
+  assert.equal(asksNothing(summary()), true);
+  assert.equal(asksNothing(summary({ needs: "Waiting on review: PR 12" })), true);
+  assert.equal(asksNothing(summary({ needs: "Restart the pod" })), false);
+  assert.equal(asksNothing(summary({ stale: true })), false);
+  assert.equal(asksNothing(undefined), false);
+});
+
 test("an agent waits on review only when its current summary says so", () => {
   const review = summary({ needs: "Waiting on review: PR 12" });
   assert.equal(agentWaitsOnReview(waiting, review), true);
@@ -29,6 +38,17 @@ test("an agent waits on review only when its current summary says so", () => {
   assert.equal(agentWaitsOnReview(waiting, summary({ ...review, stale: true })), false);
   assert.equal(agentWaitsOnReview(run({ ...waiting, dialog: { method: "confirm", title: "Run it?", since } }), review), false);
   assert.equal(summaryText(review), "The lint step passes now.\nWaiting on review: PR 12");
+});
+
+test("one status rule: an agent that waits on review is not waiting on you, in any place", () => {
+  const review = summary({ needs: "Waiting on review: PR 12" });
+  assert.equal(agentState(waiting, review), "waits_on_review");
+  assert.equal(agentState(waiting, summary({ needs: "Restart the pod" })), "awaiting_input");
+  assert.equal(agentState(waiting, undefined), "awaiting_input", "no summary: no guess");
+  assert.equal(agentState(run({ ...waiting, status: "working" }), review), "working");
+  // The waiting count leaves it out; each run counts once, also under two tickets.
+  assert.equal(waitingOnYou(2, [waiting, waiting, run({ sessionId: "s2", status: "awaiting_input" })], { s1: review }), 1);
+  assert.equal(waitingOnYou(1, [waiting], {}), 1);
 });
 
 test("a held notification is dropped when the agent only waits on a PR review", () => {
@@ -79,6 +99,9 @@ test("an agent stop says finished or waiting, and shows the summary, else the la
   assert.deepEqual(runUpdate(waiting, summary()), { key: "agent:s1", title: "Agent finished", line: "A run\nThe lint step passes now." });
   assert.deepEqual(runUpdate(waiting, summary({ needs: "Approve the merge" })), { key: "agent:s1", title: "Agent is waiting on you", line: "A run\nThe lint step passes now.\nNeeds from you: Approve the merge" });
   assert.deepEqual(runUpdate(waiting, undefined), { key: "agent:s1", title: "Agent is waiting on you", line: "A run\nDone. PR 12 is open." });
+  // A run with no name shows its drafted title, else its first prompt with no URLs.
+  assert.match(runUpdate({ ...waiting, name: null, title: "Wiki: database sources of truth" }, undefined).line, /^Wiki: database sources of truth\n/);
+  assert.match(runUpdate({ ...waiting, name: null, firstPrompt: "Read https://start.1password.com/open/i?a=1 now" }, undefined).line, /^Read \[start\.1password\.com\] now\n/);
 });
 
 // ---- one notification per board entry ----

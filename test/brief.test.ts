@@ -33,7 +33,7 @@ test("a markdown body, or JSON of another shape, is not a brief", () => {
 
 test("the lint refuses what a reader would trip over", () => {
   const b = example();
-  b.decisions!.major.push({ ...b.decisions!.major[0] });
+  b.decisions!.major.push({ ...b.decisions!.major[0] }, { ...b.decisions!.major[0] });
   b.decisions!.major[0].options.forEach((o) => (o.recommended = true));
   b.decisions!.major[1].decider = "TBD";
   b.done!.items[0].verify = "";
@@ -114,10 +114,20 @@ test("the page has one tab per map view, the pins, and the ledger collapsed", ()
   assert.equal(html.match(/<svg /g)?.length, 3);
   assert.match(html, /<details class="tb-sec tb-evidence">/);
   assert.match(html, /4 smaller calls/);
-  assert.match(html, /2 more risks/);
+  assert.match(html, /1 more risk</);
   const svgs = briefSvgs(example());
   assert.deepEqual(svgs.map((s) => s.name), ["FSDK-2073.map-1-today.svg", "FSDK-2073.map-2-during.svg", "FSDK-2073.map-3-done.svg"]);
   assert.ok(svgs.every((s) => s.svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"') && s.svg.includes("<style>")));
+});
+
+test("at a glance, the page stops after the title, the ask and the At a glance section", () => {
+  const b = example();
+  const html = briefHtml(b, { glanceOnly: true });
+  assert.match(html, /class="tb-title"/);
+  assert.match(html, /class="tb-ask"/);
+  assert.match(html, /<h2>At a glance<\/h2>/);
+  assert.doesNotMatch(html, /<svg |tb-evidence|tb-system/);
+  assert.ok(briefHtml(b).startsWith(html.slice(0, -"</div>".length)));
 });
 
 test("the text, the TL;DR and the diff", () => {
@@ -143,7 +153,7 @@ test("the text, the TL;DR and the diff", () => {
   assert.ok(lines.includes("~ verified_on: 2026-10-07 → 2026-10-14"), lines.join("\n"));
   assert.ok(lines.includes("~ work.repos[postman-eng/sdk-gen-fern-platform].pr.state: open → merged"));
   assert.ok(lines.includes("~ path.steps[M2: registry cutover].date: 2026-10-17 → 2026-10-20"));
-  assert.ok(lines.some((l) => l.startsWith("- risks.items[4].text")));
+  assert.ok(lines.some((l) => l.startsWith("- risks.items[3].text")));
   assert.ok(!lines.some((l) => l.includes("facts[")), "a reorder of facts is no change");
   assert.deepEqual(diffBriefs(b, example()), ["No change."]);
 });

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dashboard, Run, TicketDocument } from "../../shared/types.ts";
 import { parseBrief } from "../../shared/brief.ts";
-import { BriefView } from "./brief.tsx";
+import { runTitle } from "../../shared/runTitle.ts";
+import { BriefGlance, BriefView } from "./brief.tsx";
+import { useBriefOpen } from "./briefOpen.ts";
 import { age, api, elapsed, Markdown, plural, stamp } from "./lib.tsx";
 import { href } from "./routes.ts";
 
@@ -20,18 +22,24 @@ function bodyOf(d: TicketDocument): Promise<string> {
   return p;
 }
 
-/** A ticket brief's body is its JSON spec; any other body is markdown. */
-function DocumentBody({ d, compact = false }: { d: TicketDocument; compact?: boolean }) {
+/** A ticket brief's body is its JSON spec; any other body is markdown. `onRead` shows a brief closed, at a glance. */
+function DocumentBody({ d, compact = false, onRead }: { d: TicketDocument; compact?: boolean; onRead?: () => void }) {
   const [body, setBody] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     setError(null);
     bodyOf(d).then(setBody, (err: Error) => setError(err.message));
   }, [d.id, d.updatedAt]);
+  // One parse per version: each new Brief object renders new element ids, which resets open sections and the map view.
+  const brief = useMemo(() => (body === null ? null : parseBrief(body)), [body]);
   if (error) return <p className="error">{error}</p>;
   if (body === null) return <span className="shimmer wide" />;
-  const brief = parseBrief(body);
+  if (brief && onRead) return <BriefGlance brief={brief} onRead={onRead} />;
   if (brief) return <BriefView brief={brief} compact={compact} />;
+  // A closed markdown summary shows only its title, as any other closed document does.
+  if (onRead) return null;
+  // A spec that does not parse is not for a reader; markdown would show it as a wall of JSON.
+  if (d.type === "ticket-summary" && body.trimStart().startsWith("{")) return <p className="meta">This ticket brief is not a valid spec, so it cannot show yet. Ask the agent to save it again with <code>scripts/brief.ts save</code>.</p>;
   return (
     <div className="doc-body">
       <Markdown text={body} />
@@ -112,7 +120,7 @@ function PendingEdit({ d, run, now, onError }: { d: TicketDocument; run: Run | u
 /** Every run on the board, to find the agent of an edit or the folder of a document's conversation. */
 const allRuns = (data: Dashboard): Run[] => [...data.myTickets, ...data.otherTickets].flatMap((g) => g.runs).concat(data.unlinkedRuns);
 
-function DocumentCard({ d, run, open, onToggle, cwd, now, onError }: { d: TicketDocument; run: Run | undefined; open: boolean; onToggle: () => void; cwd: string; now: number; onError: (m: string | null) => void }) {
+function DocumentCard({ d, run, open, onToggle, glance = false, cwd, now, onError }: { d: TicketDocument; run: Run | undefined; open: boolean; onToggle: () => void; glance?: boolean; cwd: string; now: number; onError: (m: string | null) => void }) {
   const [prompting, setPrompting] = useState(false);
   return (
     <article className={`card doc ${open ? "open" : ""}`} id={`doc:${d.id}`}>
@@ -143,6 +151,7 @@ function DocumentCard({ d, run, open, onToggle, cwd, now, onError }: { d: Ticket
       {prompting && !d.edit && <EditPrompt d={d} cwd={cwd} onDone={() => setPrompting(false)} onError={onError} />}
       {d.edit && <PendingEdit d={d} run={run} now={now} onError={onError} />}
       {open && d.hasBody && <DocumentBody d={d} />}
+      {!open && glance && d.hasBody && <DocumentBody d={d} onRead={onToggle} />}
     </article>
   );
 }
@@ -173,12 +182,12 @@ export function WriteTicketSummary({ ticket, cwd, onError }: { ticket: string; c
   );
 }
 
-/** The ticket summary, under the Ticket section. It opens by itself. */
-export function TicketSummaryDoc({ documents, runs, cwd, now, onError }: DocsProps) {
-  const [open, setOpen] = useState(true);
+/** The ticket summary, below the parts that you act on. A brief starts at a glance; the workspace remembers an open one per ticket. */
+export function TicketSummaryDoc({ ticket, documents, runs, cwd, now, onError }: DocsProps & { ticket: string }) {
+  const [open, setOpen] = useBriefOpen(ticket);
   const d = documents.find((x) => x.type === "ticket-summary");
   if (!d) return null;
-  return <DocumentCard d={d} run={runOf(d, runs)} open={open} onToggle={() => setOpen(!open)} cwd={cwd} now={now} onError={onError} />;
+  return <DocumentCard d={d} run={runOf(d, runs)} open={open} onToggle={() => setOpen(!open)} glance cwd={cwd} now={now} onError={onError} />;
 }
 
 /** A ticket's other documents, or a conversation's. They stay short until you open one. */
@@ -233,7 +242,7 @@ export function DocumentView({ id, diagramId, data, now }: { id?: number; diagra
             <>
               <span className="sep">·</span>
               <a href={href(`c:${d.sessionId}`)} title="Open the conversation that made it">
-                {made ? (made.name ?? made.firstPrompt).slice(0, 80) : `conversation ${d.sessionId.slice(-6)}`}
+                {made ? runTitle(made).slice(0, 80) : `conversation ${d.sessionId.slice(-6)}`}
               </a>
             </>
           )}

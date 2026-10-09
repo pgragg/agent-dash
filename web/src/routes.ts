@@ -10,13 +10,14 @@ import type { Dashboard } from "../../shared/types.ts";
  * | `#/step:ID`       | A drafted next step, on its ticket                |
  * | `#/note:ID`       | A note, on its ticket                             |
  * | `#/pr:OWNER/REPO/N` | The PR panel (a view under PRs)                 |
- * | `#/needs`         | The list behind "N notifications"                 |
+ * | `#/asks:KEY`      | A ticket's parked asks on the board (`asks:none`: no ticket) |
  * | `#/parked`        | The waiting agents that agent-dash parked          |
  * | `#/c:SESSION`     | A conversation's page                             |
  * | `#/doc:ID`        | A document's page                                 |
  * | `#/documents`     | Every document                                    |
+ * | `#/wiki`          | The local Obsidian wiki: every note, and search   |
+ * | `#/wiki:REF`      | One wiki note, by path, file name, title or alias |
  * | `#/d:ID`          | The document of a diagram, from an older link     |
- * | `#/worktrees`     | Every git worktree, with Clean up                 |
  * | `#/settings`      | The config file: your own paths and accounts      |
  * | `#/help/local-url` | How to open agent-dash at your own HTTPS URL     |
  *
@@ -25,34 +26,41 @@ import type { Dashboard } from "../../shared/types.ts";
 
 export type Route =
   | { view: "board"; ref: string | null }
-  | { view: "needs" }
   | { view: "parked" }
   | { view: "prs"; pr: string | null }
   | { view: "history" }
   | { view: "conversation"; id: string | null }
   | { view: "documents" }
+  | { view: "wiki"; ref: string | null }
   | { view: "document"; id: number }
   | { view: "diagram"; id: number }
-  | { view: "worktrees" }
   | { view: "settings" }
   | { view: "localUrl" };
 
 export function parseHash(hash: string): Route {
   const path = decodeURIComponent(hash.replace(/^#\/?/, ""));
-  if (path === "needs") return { view: "needs" };
+  // The old Notifications view: its entries are the board's Up next. The old Worktrees view is gone.
+  if (path === "needs" || path === "worktrees") return { view: "board", ref: null };
   if (path === "parked") return { view: "parked" };
   if (path === "prs") return { view: "prs", pr: null };
   if (path.startsWith("pr:")) return { view: "prs", pr: path };
   if (path === "history") return { view: "history" };
   // A diagram is a document now, so an older link to the list opens the documents.
   if (path === "documents" || path === "diagrams") return { view: "documents" };
-  if (path === "worktrees") return { view: "worktrees" };
+  if (path === "wiki") return { view: "wiki", ref: null };
+  if (path.startsWith("wiki:")) return { view: "wiki", ref: path.slice(5) || null };
   if (path === "settings") return { view: "settings" };
   if (path === "help/local-url") return { view: "localUrl" };
   if (/^doc:\d+$/.test(path)) return { view: "document", id: Number(path.slice(4)) };
   if (/^d:\d+$/.test(path)) return { view: "diagram", id: Number(path.slice(2)) };
   if (path === "c" || path.startsWith("c:")) return { view: "conversation", id: path.slice(2) || null };
   return { view: "board", ref: path || null };
+}
+
+/** The hash to replace an old address with, or null. The Notifications and Worktrees views are gone, so their links open the board. */
+export function redirectHash(hash: string): string | null {
+  const path = decodeURIComponent(hash.replace(/^#\/?/, ""));
+  return path === "needs" || path === "worktrees" ? "#/" : null;
 }
 
 /** `#/t:ABC-123`: the ref stays readable, and only what would break the hash is escaped. */

@@ -1,5 +1,5 @@
 /**
- * J/K and Enter on the list views (PRs, History). The selection is a data attribute on the
+ * J/K and Enter on the list views (PRs, History, Wiki). The selection is a data attribute on the
  * row, not React state, so the views need no changes and a re-render keeps it.
  */
 const ROWS = ".main .pr-entry, .main ol.history > li";

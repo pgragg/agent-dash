@@ -32,9 +32,7 @@ For each ticket, an agent reads Jira, the PRs, Slack and your notes, then writes
 
 ### One list of what needs you
 
-The notifications list is in queue order. Each entry says what the agent did, what it needs, and has one button to the place where you act. Chrome notifications come one per ticket, not one per agent. → [Notifications](../README.md#notifications)
-
-![Notifications: each with a summary and a Reply button](images/notifications.png)
+The top bar has one count, **Needs you N**: the queue's Up next entries plus the parked agents that still ask something, with each ticket counted one time. Each Up next entry says what the agent needs, and has one button to the place where you act. Chrome notifications come one per ticket, not one per agent. → [Needs you](../README.md#needs-you)
 
 ## The controls: what you do from the page
 
