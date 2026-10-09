@@ -38,7 +38,7 @@ export interface ParkedAsks {
 
 /**
  * Where each parked ask that could need you shows on the board, so that a ticket counts one time.
- * A snoozed ticket's asks wait with it, as its other signals do; `#/parked` still lists them.
+ * A snoozed ticket's asks wait with it, as its other signals do.
  */
 export function parkedAsks(asks: ParkedRun[], queueTickets: Set<string>, snoozedTickets: Set<string>): ParkedAsks {
   const inQueue = new Map<string, ParkedRun[]>();

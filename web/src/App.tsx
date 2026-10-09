@@ -8,7 +8,7 @@ import { hideUrls } from "../../shared/runTitle.ts";
 import { READ_FEEDBACK, REVIEW_AND_MERGE } from "../../shared/prVerbs.ts";
 import { type AttentionItem, type AttentionKind, type ConversationSummary, type Dashboard, type HistoryRun, type NextStep, type Note, PARKED_ASK_CHARS, type ParkedRun, type PullRequest, type Run, type ThreadStatusChange, type TicketGroup, type TicketSummary, type TicketSummaryState } from "../../shared/types.ts";
 import { conversationHash, launchAgent, ResumeHere, resuming } from "./agents.tsx";
-import { ParkedAskList, ParkedAsksPane, ParkedView } from "./parked.tsx";
+import { ParkedAskList, ParkedAsksPane } from "./parked.tsx";
 import { askKey, askRef, type AskGroup, needsYouCount, parkedAsks, splitParked } from "./parkedRows.ts";
 import { CADDY_HTTP, CADDY_HTTPS, caddyCommands, cleanHost, cleanPort, rootScript, undoCommands } from "./localUrl.ts";
 import { SettingsView, SetupBanner } from "./settings.tsx";
@@ -2215,11 +2215,7 @@ export function App() {
       </header>
       {route.view !== "settings" && <SetupBanner setup={data.setup ?? []} />}
 
-      {route.view === "parked" ? (
-        <main className="main">
-          <ParkedView data={data} now={now} />
-        </main>
-      ) : route.view === "prs" ? (
+      {route.view === "prs" ? (
         <main className="main">
           {route.pr ? <PrPanel key={route.pr} refId={route.pr} data={data} now={now} /> : <PrsView data={data} now={now} />}
         </main>
@@ -2337,11 +2333,6 @@ export function App() {
                 <AskItem key={askRef(g.key)} g={g} title={g.key ? (subjects.get(`t:${g.key}`)?.ticket?.ticket.summary ?? g.key) : "Conversations with no ticket"} selected={boardRef === askRef(g.key)} onSelect={() => select(askRef(g.key))} now={now} />
               ))}
             </RailSection>
-            {data.parked.length > 0 && (
-              <a className="rail-link" href="#/parked" title="Every parked agent, also the ones that need nothing from you">
-                All {plural(data.parked.length, "parked agent")} →
-              </a>
-            )}
             {needsYou === 0 && (
               <div className="zero">
                 <div className="zero-mark">✓</div>

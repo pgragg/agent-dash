@@ -9,7 +9,6 @@ const url = (n: number) => `https://github.com/o/r/pull/${n}`;
 const data = (over: Partial<Dashboard> = {}) => ({
   prs: [],
   documents: [],
-  parked: [],
   counts: { working: 0, awaiting_input: 0, finished: 0 },
   myTickets: [],
   otherTickets: [],

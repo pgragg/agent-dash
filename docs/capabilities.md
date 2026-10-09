@@ -71,8 +71,6 @@ The PR panel shows feedback, checks (with the end of a failed job log), the desc
 - A smoketest plan that changes a shared environment waits for your **Confirm**.
 - At most 15 agents wait for you at one time. agent-dash parks the others and keeps what each one needed, so no question gets lost. → [Parked agents](../README.md#parked-agents)
 
-![Parked agents, each with what it needs and a reply box](images/parked.png)
-
 ## Set it up
 
 Pick **pi** or **Claude Code** as the agent. Each setting shows an example and how to find it, or **Set it up for me** starts an agent that finds them. → [Run it](../README.md#run-it), [Configuration](../README.md#configuration)

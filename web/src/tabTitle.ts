@@ -17,7 +17,7 @@ import type { Route } from "./routes.ts";
  *   ✋ Deploy FDR · agent-dash               a chat that waits on you (⚙️ when it works, 👀 when it waits on review)
  */
 
-type TitleData = Pick<Dashboard, "prs" | "documents" | "parked" | "counts" | "myTickets" | "otherTickets" | "unlinkedRuns"> & Partial<Pick<Dashboard, "conversationSummaries">>;
+type TitleData = Pick<Dashboard, "prs" | "documents" | "counts" | "myTickets" | "otherTickets" | "unlinkedRuns"> & Partial<Pick<Dashboard, "conversationSummaries">>;
 
 export interface TitleInput {
   route: Route;
@@ -103,8 +103,6 @@ export function tabTitle({ route, data, needsYou, open }: TitleInput): string {
       const d = data.documents.find((x) => (route.view === "document" ? x.id === route.id : x.diagramId === route.id));
       return join("Doc", null, d?.title);
     }
-    case "parked":
-      return join("Parked", data.parked.length || null);
     case "settings":
       return join("Settings", null);
     case "localUrl":
