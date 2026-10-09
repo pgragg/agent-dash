@@ -66,7 +66,7 @@ What Claude Code cannot do here:
 
 - **No Steer.** A message to a working agent waits until its turn ends. **Stop** works: the server sends an `interrupt` control request.
 - **Replies from the page go only to a headless run.** A Claude Code in a terminal reads only its own keys, so its card says to reply in the tab.
-- **Dialogs are tool permissions.** When Claude Code asks before a tool call, the card shows "Allow Write: /path?" with **Yes** and **No**. Yes runs the tool as asked; No and Stop deny it.
+- **Dialogs are tool permissions.** A run on the page uses the `claudePermissionMode` setting: `auto` (the default) lets Claude Code's classifier approve safe tool calls, `acceptEdits` asks before commands only, and `default` asks before each tool call. When Claude Code asks before a tool call, the card shows "Allow Write: /path?" with **Yes** and **No**. Yes runs the tool as asked; No and Stop deny it.
 
 ### OpenCode
 
@@ -541,6 +541,7 @@ Company-wide values (the Jira server, the Slack org, the deploy repos, the Postm
 | Port | `port` | `AGENT_DASH_PORT` | `7777` |
 | pi sessions folder | `sessionsDir` | `AGENT_DASH_SESSIONS_DIR` | `~/.pi/agent/sessions` |
 | Claude Code projects folder | `claudeProjectsDir` | `AGENT_DASH_CLAUDE_PROJECTS_DIR` | `~/.claude/projects` |
+| When a Claude Code run on the page asks before a tool call: `auto`, `acceptEdits` or `default` | `claudePermissionMode` | `AGENT_DASH_CLAUDE_PERMISSION_MODE` | `auto` |
 | OpenCode database | `opencodeDb` | `AGENT_DASH_OPENCODE_DB` | `~/.local/share/opencode/opencode.db` |
 | Recent days | `recentDays` | `AGENT_DASH_RECENT_DAYS` | `14` |
 | Jira server | `jiraServer` | `JIRA_SERVER` | `https://postmanlabs.atlassian.net`. Jira is off until the login is set too. |
@@ -595,7 +596,7 @@ Other env vars, all optional: `AGENT_DASH_STATUS_DIR`, `AGENT_DASH_INBOX_DIR`, `
 - **Its first message** (`setupMessage` in `server/routes/setup.ts`) lists each setting with its description, example, way to find it, and current value, and starts with what the banner says is missing.
 - **It looks, and does not change.** It runs read-only commands, never prints the Jira token, and keeps a default when it finds nothing better. It saves with `node scripts/save-settings.ts < patch.json`, which changes only the keys in the JSON and checks each value as the Settings page does. When one value is bad, the script saves nothing and says why, so the agent fixes it and runs it again.
 - **It ends with a table** of each value and where it found it, and asks you for the rest in its reply. Then restart agent-dash.
-- **Claude Code and OpenCode ask before each command** on the page (reads and searches run without a dialog; OpenCode also asks before a file change). pi asks before no tool call.
+- **Claude Code asks only when the `claudePermissionMode` setting says so** (Read, Grep, Glob and LS always run without a dialog). **OpenCode asks before each command and each file change** on the page (reads and searches run without a dialog). pi asks before no tool call.
 - **Before the restart, the board reads the other agent's logs only for this session.** A Claude Code setup agent on a pi server (or the opposite) still shows on the page: the server follows its log file in the other agent's folder.
 - A server in a worktree reads the main checkout's settings read-only, so it refuses to start the setup agent.
 
