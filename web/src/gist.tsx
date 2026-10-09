@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { needsNothing, waitsOnReview } from "../../shared/conversationSummary.ts";
 import type { ConversationSummary, Run } from "../../shared/types.ts";
-import { age, api } from "./lib.tsx";
+import { age, api, hasLastMessage } from "./lib.tsx";
 
 /** What the agent needs from Piper. A working agent needs nothing until it stops, whatever the last draft said. */
 function needsText(run: Run, s: ConversationSummary): string {
@@ -23,7 +23,7 @@ function note(s: ConversationSummary, now: number): string {
  */
 export function ConversationGist({ run, summary, now, open, onToggle }: { run: Run; summary: ConversationSummary | undefined; now: number; open?: boolean; onToggle?: () => void }) {
   // The server drafts live runs by itself; a finished one is drafted when it shows.
-  const wanted = run.status === "finished" && !!run.lastMessage && (!summary || (summary.stale && summary.status !== "in_progress"));
+  const wanted = run.status === "finished" && hasLastMessage(run) && (!summary || (summary.stale && summary.status !== "in_progress"));
   useEffect(() => {
     if (wanted) void api.summarizeConversation(run.sessionId);
   }, [wanted, run.sessionId, run.lastActivityAt]);

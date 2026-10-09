@@ -422,7 +422,9 @@ The server listens on `127.0.0.1` only, because the page shows prompts and repli
 | Local tickets | `<dir>/<status>/<PREFIX>-<n>-<slug>.md`, such as agent-dash's own `AD-<n>` tickets | The tickets are files. The folder is the status (`todo`, `in-progress`, `in-review`, `done`, `canceled`), and the `# AD-<n> — Title` heading is the title. They are read on each build, with no cache. The Ticket section shows the file, and **Move to** renames it into the other status folder; there is no due date. The key's link (`/api/local-ticket?key=AD-<n>`) shows the file as text. A key with the prefix but no file is not a ticket and links to nothing. |
 | GitHub | `gh api graphql` with your `gh` login | Your PRs updated in the last 14 days, with CI (and the names of the failing checks), review, and merge state. The [PR panel](#pr-panel) reads one PR in full on demand. |
 
-Jira and GitHub answers are cached for 2 minutes. After the first load, a stale answer is shown at once and refreshed in the background. **refresh** forces a new fetch.
+Jira and GitHub answers are cached for 2 minutes. After the first load, a stale answer is shown at once and refreshed in the background. **refresh** forces a new fetch. The last good answers (your PRs, your Jira tickets, and the other tickets that runs name) are also kept in `~/.agent-dash/cache/` (`AGENT_DASH_CACHE_DIR`), so the first load after a restart shows them at once (in about 1.5 s, not 6 to 8 s) and the fresh answers follow over SSE.
+
+`GET /api/dashboard` is sent compressed (brotli, else gzip), because the page loads it again on every change. It leaves out the long texts that only an opened row shows: a finished run has `lastMessage: ""` and `lastMessageCut: true`, and the page reads the message from `GET /api/last-message?session=<id>` when you open the card's details or the history row. A parked row has only the last 300 characters of its last message, which is all that the page and a new agent's context show.
 
 The page updates live: the server watches the session and status folders and pushes a change event over SSE.
 
@@ -612,7 +614,7 @@ A Jira entry can also have `projects` (it then owns only those prefixes) and an 
 - **`AGENT_DASH_CONFIG`** names another config file. `pnpm test` uses `test/config.json`, so your own settings never change a test.
 - **A server in a git worktree** with no `agent-dash.config.json` of its own reads the main checkout's file, so a test server runs with your settings. From there the Settings page is read-only, so a test server never changes the file that your real dashboard uses.
 
-Other env vars, all optional: `AGENT_DASH_STATUS_DIR`, `AGENT_DASH_INBOX_DIR`, `AGENT_DASH_CONVERSATIONS_DIR`, `AGENT_DASH_OPENCODE_LOG_DIR`, `AGENT_DASH_REMOTE_TTL_MS`, `AGENT_DASH_MCP_ADAPTER` (pi-mcp-adapter's `dist` folder, for posting to Slack).
+Other env vars, all optional: `AGENT_DASH_STATUS_DIR`, `AGENT_DASH_INBOX_DIR`, `AGENT_DASH_CONVERSATIONS_DIR`, `AGENT_DASH_OPENCODE_LOG_DIR`, `AGENT_DASH_REMOTE_TTL_MS`, `AGENT_DASH_CACHE_DIR`, `AGENT_DASH_MCP_ADAPTER` (pi-mcp-adapter's `dist` folder, for posting to Slack).
 
 ## Set it up for me
 

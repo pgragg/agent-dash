@@ -11,7 +11,9 @@ import { startOpencodeStatus, syncOpencodeLogs } from "./opencode.ts";
 import { recordExit, wroteRecently } from "./exits.ts";
 import { focusItermSession, runInNewItermTab } from "./iterm.ts";
 import { claudeHooksInstalled, piExtensionFile, terminalCommand } from "./agent.ts";
-import { buildDashboard, buildHistory, otherTicketKeys, ticketsInQueue } from "./model.ts";
+import { buildDashboard, buildHistory, findRun, forPage, otherTicketKeys, ticketsInQueue } from "./model.ts";
+import { readDiskCache, writeDiskCache } from "./diskCache.ts";
+import { compress } from "./compress.ts";
 import * as exitRoutes from "./routes/exits.ts";
 import { agentMessage, agentName, buildHandoff, stepMessage } from "./handoff.ts";
 import * as resumeRoute from "./routes/resume.ts";
@@ -61,10 +63,19 @@ class Cached<T> {
   private at = 0;
   private inflight: Promise<void> | null = null;
   private readonly load: () => Promise<T>;
+  private readonly file: string | null;
 
-  constructor(initial: T, load: () => Promise<T>) {
+  /** With a file, the last good answer outlives a restart, and the first build shows it at once. */
+  constructor(initial: T, load: () => Promise<T>, file: string | null = null) {
     this.value = initial;
     this.load = load;
+    this.file = file;
+    const saved = file ? readDiskCache<T>(file) : null;
+    if (saved) {
+      this.value = saved.value;
+      this.at = Date.parse(saved.fetchedAt);
+      this.health = { ok: true, fetchedAt: saved.fetchedAt };
+    }
   }
 
   async get(force = false): Promise<T> {
@@ -72,8 +83,10 @@ class Cached<T> {
       const first = this.at === 0;
       this.inflight ??= this.load()
         .then((v) => {
+          const fetchedAt = new Date().toISOString();
           this.value = v;
-          this.health = { ok: true, fetchedAt: new Date().toISOString() };
+          this.health = { ok: true, fetchedAt };
+          if (this.file) void writeDiskCache(this.file, v, fetchedAt);
         })
         .catch((err: Error) => {
           this.health = { ok: false, error: err.message, fetchedAt: this.health.fetchedAt };
@@ -101,23 +114,37 @@ interface ProviderState {
   provider: TicketProvider;
   mine: Cached<Ticket[]> | null;
   others: Map<string, Ticket>;
+  /** Where `others` outlives a restart. Tickets read from it are looked up again once, in the background. */
+  othersFile: string;
+  othersFromDisk: boolean;
   othersHealth: SourceHealth;
   /** Exhaustive providers: the last build's tickets, and its health. */
   all: Map<string, Ticket>;
   readHealth: SourceHealth;
 }
-const providerStates: ProviderState[] = ticketProviders.list.map((provider) => ({
-  provider,
-  mine: provider.enabled && !provider.exhaustive ? new Cached<Ticket[]>([], () => provider.listMine()) : null,
-  others: new Map(),
-  othersHealth: { ok: true },
-  all: new Map(),
-  readHealth: { ok: true },
-}));
+const providerStates: ProviderState[] = ticketProviders.list.map((provider) => {
+  const othersFile = join(config.cacheDir, `others-${provider.source.id}.json`);
+  const saved = provider.exhaustive ? null : readDiskCache<Ticket[]>(othersFile);
+  return {
+    provider,
+    mine: provider.enabled && !provider.exhaustive ? new Cached<Ticket[]>([], () => provider.listMine(), join(config.cacheDir, `mine-${provider.source.id}.json`)) : null,
+    others: new Map((saved?.value ?? []).map((t) => [t.key, t])),
+    othersFile,
+    othersFromDisk: !!saved,
+    othersHealth: { ok: true },
+    all: new Map(),
+    readHealth: { ok: true },
+  };
+});
 const stateFor = (key: string) => {
   const p = ticketProviders.providerFor(key);
   return providerStates.find((s) => s.provider === p);
 };
+
+/** Only the tickets that this build shows, so the file does not grow with every key ever named. */
+function saveOthers(s: ProviderState, keys: string[]): void {
+  void writeDiskCache(s.othersFile, keys.flatMap((k) => s.others.get(k) ?? []), new Date().toISOString());
+}
 
 /** One health per provider: off when it is not set up, else the worst of its reads. */
 function providerHealth(s: ProviderState): SourceHealth {
@@ -126,7 +153,7 @@ function providerHealth(s: ProviderState): SourceHealth {
   if (!s.mine) return { ...s.readHealth, label };
   return { ...(!s.mine.health.ok || s.othersHealth.ok ? s.mine.health : s.othersHealth), label };
 }
-const prs = new Cached<PullWithFeedback[]>([], () => fetchMyPrs(config.recentDays, config.ticketPattern));
+const prs = new Cached<PullWithFeedback[]>([], () => fetchMyPrs(config.recentDays, config.ticketPattern), join(config.cacheDir, "prs.json"));
 /** Force a refresh of GitHub data after login. */
 export const refreshGitHub = () => prs.get(true);
 /** Can the slack MCP grant post? Its own child process, so a slow Slack never holds up a build. */
@@ -211,9 +238,24 @@ async function dashboard(force: boolean) {
       try {
         for (const t of await s.provider.lookup(missing)) s.others.set(t.key, t);
         s.othersHealth = { ok: true };
+        saveOthers(s, keys);
       } catch (err) {
         s.othersHealth = { ok: false, error: (err as Error).message };
       }
+    }
+    // The copies from before a restart show now, and the fresh answer follows.
+    if (s.othersFromDisk) {
+      s.othersFromDisk = false;
+      const old = keys.filter((k) => !missing.includes(k));
+      if (old.length)
+        void s.provider
+          .lookup(old)
+          .then((found) => {
+            for (const t of found) s.others.set(t.key, t);
+            saveOthers(s, keys);
+            broadcast();
+          })
+          .catch(() => {});
     }
     otherTickets.push(...s.others.values());
   }
@@ -399,9 +441,16 @@ const server = createServer(async (req, res) => {
     if (await loginRoute.handle(req, res, url)) return;
     if (await slackRoute.handle(req, res, url)) return;
     if (url.pathname === "/api/dashboard") {
-      const body = JSON.stringify(await dashboard(url.searchParams.has("refresh")));
+      const body = JSON.stringify(forPage(await dashboard(url.searchParams.has("refresh"))));
       // A tab from before a rebuild runs old code; the header tells it to reload.
-      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Agent-Dash-Build": await currentBuild() }).end(body);
+      const headers = { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Agent-Dash-Build": await currentBuild() };
+      const { encoding, data } = await compress(body, String(req.headers["accept-encoding"] ?? ""));
+      res.writeHead(200, encoding ? { ...headers, "Content-Encoding": encoding, Vary: "Accept-Encoding" } : headers).end(data);
+    } else if (url.pathname === "/api/last-message") {
+      // A finished run's last message, which `/api/dashboard` leaves out.
+      const r = findRun(await dashboard(false), url.searchParams.get("session") ?? "");
+      if (!r) return void res.writeHead(404, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "no such run on the board" }));
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify({ lastMessage: r.lastMessage }));
     } else if (url.pathname === "/api/conversation-summaries" && req.method === "POST") {
       // A finished run's summary, drafted when its page opens. It starts a paid model run, so the guard.
       if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();

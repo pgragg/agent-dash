@@ -1,4 +1,4 @@
-import type { AttentionItem, Dashboard, HistoryRun, PullRequest, Run, RunStatus, ThreadStatusChange, Ticket, TicketGroup } from "../shared/types.ts";
+import { type AttentionItem, type Dashboard, type HistoryRun, PARKED_ASK_CHARS, type PullRequest, type Run, type RunStatus, type ThreadStatusChange, type Ticket, type TicketGroup } from "../shared/types.ts";
 import { rankAttention } from "./attention.ts";
 import { heuristicStatus, type ParsedSession } from "./sources/sessions.ts";
 import { resolveReported, type ReportedStatus, takesControls, takesSteer } from "./sources/status.ts";
@@ -116,6 +116,28 @@ export function buildHistory(sessions: ParsedSession[], reported: Map<string, Re
   const runs = toRuns(sessions, reported, now, isAlive);
   linkRuns(runs, prs.map((p) => ({ ...p, tickets: [...p.tickets] })), threadMap(threads));
   return runs.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt)).map(({ lastMessage: _cut, ...rest }) => rest);
+}
+
+/**
+ * What `/api/dashboard` sends. The page reloads it on every change, so the long texts that only an
+ * opened row shows stay out: a finished run's last message, and all but the end of a parked run's.
+ */
+export function forPage(d: Dashboard): Dashboard {
+  const run = (r: Run): Run => (r.status === "finished" && r.lastMessage ? { ...r, lastMessage: "", lastMessageCut: true } : r);
+  const group = (g: TicketGroup): TicketGroup => ({ ...g, runs: g.runs.map(run), ...(g.suggested && { suggested: g.suggested.map(run) }) });
+  return {
+    ...d,
+    attention: d.attention.map((a) => (a.run ? { ...a, run: run(a.run) } : a)),
+    myTickets: d.myTickets.map(group),
+    otherTickets: d.otherTickets.map(group),
+    unlinkedRuns: d.unlinkedRuns.map(run),
+    parked: d.parked.map((p) => ({ ...p, lastMessage: p.lastMessage.slice(-PARKED_ASK_CHARS) })),
+  };
+}
+
+/** A run on the board, with its whole last message, for `/api/last-message`. */
+export function findRun(d: Dashboard, sessionId: string): Run | undefined {
+  return [...d.myTickets, ...d.otherTickets].flatMap((g) => [...g.runs, ...(g.suggested ?? [])]).concat(d.unlinkedRuns).find((r) => r.sessionId === sessionId);
 }
 
 export function isRecent(iso: string, now: number, days: number): boolean {
