@@ -475,7 +475,7 @@ github_pr · agent message · 11
 
 The `usage` table shows which views and queue controls you use, so an audit reads one table.
 
-- A `view` row is added when the view changes, not on a poll or a re-render. The names are the route's view (`board`, `prs`, `history`, `conversation`, `documents`, `document`, `wiki`, `settings`, …), with `kanban` for the board as columns and `pr` for one PR's panel.
+- A `view` row is added when the view changes, not on a poll, a re-render, or a reload of the same tab (each tab keeps its last view in `sessionStorage`). The names are the route's view (`board`, `prs`, `history`, `conversation`, `documents`, `document`, `wiki`, `settings`, …), with `kanban` for the board as columns and `pr` for one PR's panel.
 - A `control` row is added for each click on a tagged button: `star` or `unstar`, `snooze:<option>` (`snooze:until-change`, `snooze:1h`, `snooze:tomorrow`, …), `resolve`, `unlink`, `link`, `hide`, `resume` and `dismiss` on a parked ask, `resume-here`, and `board:queue` or `board:kanban`. A key that fires one of these adds the same row: `E` is `snooze:until-change`, `Z` is `snooze:<option>`, and `V` is `board:queue` or `board:kanban`. One action is one row, from a click or a key. To count a new button, give it `{...usage("name", ticket)}` from `web/src/usage.ts`. If a key also fires it, call `recordControl` in the action instead.
 - The page posts each row to `POST /api/usage`. A lost row never breaks the click.
 

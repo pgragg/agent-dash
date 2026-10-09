@@ -30,6 +30,14 @@ Object.assign(globalThis, {
   Element: FakeElement,
   document: { addEventListener: (_: string, fn: typeof onClick) => (onClick = fn) },
   fetch: async (_: string, init: { body: string }) => void sent.push(JSON.parse(init.body)),
+  sessionStorage: Object.assign(new Map<string, string>(), {
+    getItem(this: Map<string, string>, k: string) {
+      return this.get(k) ?? null;
+    },
+    setItem(this: Map<string, string>, k: string, v: string) {
+      this.set(k, v);
+    },
+  }),
 });
 const { recordControl, recordView, usage } = await import("../web/src/usage.ts");
 
@@ -107,4 +115,15 @@ test("each snooze and board switch is recorded at one place, so a click or a key
   assert.equal(count("recordControl(`board:"), 1);
   assert.match(app, /e\.key === "e"\) doneAndAdvance\(\)/);
   assert.match(app, /onMark=\{doneAndAdvance\}/);
+});
+
+test("a reload of the tab adds no view row, and the next real view change still does", async () => {
+  sent.length = 0;
+  recordView("wiki");
+  // A fresh copy of the module is the page after a reload; sessionStorage stays.
+  const spec = "../web/src/usage.ts?reload";
+  const reloaded: typeof import("../web/src/usage.ts") = await import(spec);
+  reloaded.recordView("wiki");
+  reloaded.recordView("history");
+  assert.deepEqual(sent.map((u) => (u as { name: string }).name), ["wiki", "history"]);
 });
