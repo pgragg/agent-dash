@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { splitSummary } from "../../shared/nextSteps.ts";
-import type { ConversationSummary, Diagram, DocumentType, ParkedRun, DiagramKind, NextStep, Note, StepAction, ReviewDraft, SdlcEnvironment, SdlcEvent, SdlcEventType, SmoketestOutcome, ThreadStatus, ThreadStatusChange, TicketDocument, TicketDocumentWithBody, TicketSummary, WorkLane } from "../../shared/types.ts";
+import type { ConversationSummary, Diagram, DocumentType, ParkedRun, DiagramKind, NextStep, Note, StepAction, ReviewDraft, SdlcEnvironment, SdlcEvent, SdlcEventType, SmoketestOutcome, ThreadStatus, ThreadStatusChange, TicketDocument, TicketDocumentWithBody, TicketSummary } from "../../shared/types.ts";
 
 export const DB_PATH = process.env.AGENT_DASH_DB ?? join(homedir(), ".agent-dash/agent-dash.db");
 
@@ -182,8 +182,8 @@ CREATE TABLE IF NOT EXISTS pr_feedback_addressed (
   PRIMARY KEY (pr_ref, key)
 );
 
--- Parallel lanes: N agents on one ticket, each in its own git worktree. The server writes a row
--- when it makes the worktree, so every worktree has an owner from the start.
+-- Parallel lanes were removed, and nothing reads this table. It stays, so an older database
+-- keeps its rows and opens with the same schema.
 CREATE TABLE IF NOT EXISTS lanes (
   id                   INTEGER PRIMARY KEY AUTOINCREMENT,
   ticket               TEXT NOT NULL,
@@ -326,7 +326,6 @@ export function open(path = DB_PATH): DatabaseSync {
   for (const c of SDLC_EVENT_COLUMNS) if (!db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = ?").get(c)) db.exec(`ALTER TABLE SDLC_Event ADD COLUMN ${c} ${c === "plan_id" ? "INTEGER" : "TEXT"}`);
   if (!db.prepare("SELECT 1 FROM pragma_table_info('conversation_summaries') WHERE name = 'title'").get()) db.exec("ALTER TABLE conversation_summaries ADD COLUMN title TEXT");
   if (!db.prepare("SELECT 1 FROM pragma_table_info('tickets') WHERE name = 'starred_at'").get()) db.exec("ALTER TABLE tickets ADD COLUMN starred_at TEXT");
-  for (const c of ["note", "landed_at"]) if (!db.prepare("SELECT 1 FROM pragma_table_info('lanes') WHERE name = ?").get(c)) db.exec(`ALTER TABLE lanes ADD COLUMN ${c} TEXT`);
   // Before the trigger below: copying the table drops the triggers on it.
   upgradeSdlcEventChecks(db);
   // SQLite cannot change a CHECK, so an older table is copied into one that allows 'unlinked'.
@@ -510,42 +509,6 @@ export function setStarred(ticket: string, starred: boolean): void {
 /** Starred ticket keys, first starred first. */
 export function starredTickets(): string[] {
   return (open().prepare("SELECT key FROM tickets WHERE starred_at IS NOT NULL ORDER BY starred_at").all() as { key: string }[]).map((r) => r.key);
-}
-
-// ---- Parallel lanes ----------------------------------------------------------------------
-
-const LANE_COLUMNS = `id, ticket, repo, lane, mode, base, branch, worktree, integration_branch AS integrationBranch,
-  integration_worktree AS integrationWorktree, session_id AS sessionId, goal, state, note, created_at AS createdAt, landed_at AS landedAt`;
-
-export type LaneRecord = Omit<WorkLane, "git" | "integrationAhead">;
-
-export function addLane(l: Omit<LaneRecord, "id" | "state" | "note" | "createdAt" | "landedAt">): LaneRecord {
-  const createdAt = new Date().toISOString();
-  const { lastInsertRowid } = open()
-    .prepare("INSERT INTO lanes (ticket, repo, lane, mode, base, branch, worktree, integration_branch, integration_worktree, session_id, goal, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .run(l.ticket, l.repo, l.lane, l.mode, l.base, l.branch, l.worktree, l.integrationBranch, l.integrationWorktree, l.sessionId, l.goal, createdAt);
-  return { ...l, id: Number(lastInsertRowid), state: "working", note: null, createdAt, landedAt: null };
-}
-
-/** Lanes that are not removed, by ticket key, oldest first. */
-export function activeLanes(): LaneRecord[] {
-  return open().prepare(`SELECT ${LANE_COLUMNS} FROM lanes WHERE state != 'removed' ORDER BY id`).all() as unknown as LaneRecord[];
-}
-
-/** Every repo that ever had a lane, so the Worktrees view also finds what a removed lane left. */
-export function laneRepos(): string[] {
-  return (open().prepare("SELECT DISTINCT repo FROM lanes").all() as { repo: string }[]).map((r) => r.repo);
-}
-
-export function getLane(id: number): LaneRecord | null {
-  return (open().prepare(`SELECT ${LANE_COLUMNS} FROM lanes WHERE id = ?`).get(id) as unknown as LaneRecord | undefined) ?? null;
-}
-
-/** A land that goes in also stamps landed_at. */
-export function setLaneState(id: number, state: LaneRecord["state"], note: string | null = null): void {
-  open()
-    .prepare("UPDATE lanes SET state = ?, note = ?, landed_at = CASE WHEN ? = 'landed' THEN ? ELSE landed_at END WHERE id = ?")
-    .run(state, note, state, new Date().toISOString(), id);
 }
 
 // ---- PR feedback: what Piper marked addressed on the PR panel -------------------------

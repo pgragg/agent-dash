@@ -27,8 +27,6 @@ import * as documentRoute from "./routes/documents.ts";
 import * as sdlcRoute from "./routes/sdlc.ts";
 import * as smoketestPlanRoute from "./routes/smoketestPlan.ts";
 import * as reviewRoute from "./routes/reviewRequests.ts";
-import * as lanesRoute from "./routes/lanes.ts";
-import * as worktreesRoute from "./routes/worktrees.ts";
 import * as settingsRoute from "./routes/settings.ts";
 import * as wikiRoute from "./routes/wiki.ts";
 import * as setupRoute from "./routes/setup.ts";
@@ -299,7 +297,6 @@ async function dashboard(force: boolean) {
   d.sdlcEvents = summaryDb.sdlcEventsByTicket();
   d.reviewDrafts = summaryDb.reviewDrafts();
   d.reviewRequests = summaryDb.reviewRequestsByPr();
-  d.lanes = await lanesRoute.lanesByTicket();
   redraftAfterNewEvents([...d.myTickets, ...d.otherTickets], broadcast);
   // Each kanban card shows its ticket's top next step as a button with a short label.
   requestStepLabels(topSteps([...d.myTickets, ...d.otherTickets], summaries), broadcast);
@@ -308,9 +305,8 @@ async function dashboard(force: boolean) {
   requestConversationSummaries(boardRuns.filter((r) => r.status !== "finished"), (id) => sessions.fileFor(id), broadcast);
   d.conversationSummaries = summariesFor(boardRuns);
   const done = new Set([...d.myTickets, ...d.otherTickets].filter((g) => g.ticket.statusCategory === "done").map((g) => g.ticket.key));
-  const laneSessions = new Set(Object.values(d.lanes).flatMap((ls) => ls.flatMap((l) => (l.sessionId && l.state !== "landed" ? [l.sessionId] : []))));
   const runs = [...new Map(boardRuns.map((r) => [r.sessionId, r])).values()];
-  if (sweepParks({ runs, summaries: d.conversationSummaries, done, threads: summaryDb.currentThreadStatuses(), shown: ticketsInQueue(d.attention), laneSessions, now }, reported)) broadcast();
+  if (sweepParks({ runs, summaries: d.conversationSummaries, done, threads: summaryDb.currentThreadStatuses(), shown: ticketsInQueue(d.attention), now }, reported)) broadcast();
   const keepFrom = new Date(now - config.recentDays * 86_400_000).toISOString();
   d.parked = summaryDb.activeParked().filter((p) => p.parkedAt >= keepFrom);
   d.setup = setupNeeded();
@@ -433,8 +429,6 @@ const server = createServer(async (req, res) => {
     if (await sdlcRoute.handle(req, res, url, broadcast)) return;
     // The dashboard's PRs carry the tickets that cross-linking gave them.
     if (await reviewRoute.handle(req, res, url, { prs: async () => (await dashboard(false)).prs, onChange: broadcast })) return;
-    if (await lanesRoute.handle(req, res, url, { context: ticketContext, onChange: broadcast })) return;
-    if (await worktreesRoute.handle(req, res, url, broadcast)) return;
     if (await settingsRoute.handle(req, res, url)) return;
     if (wikiRoute.handle(req, res, url, config.wikiDir)) return;
     if (await setupRoute.handle(req, res, url, { follow: followSession })) return;
@@ -517,7 +511,7 @@ const server = createServer(async (req, res) => {
       const context = buildHandoff({ group, notes: d.notes[key] ?? [], summary: d.summaries[key], events: d.sdlcEvents[key] ?? [], parked: d.parked.filter((p) => p.ticket === key), now: new Date() });
       if (url.pathname === "/api/agents/context") return void res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8" }).end(context);
 
-      const body = JSON.parse((await readBody(req, 64_000)) || "{}") as { message?: string; step?: number; cwd?: string; terminal?: boolean; sdlc?: { kind?: string; env?: string; stage?: string }; lanes?: unknown; laneMode?: unknown; base?: unknown };
+      const body = JSON.parse((await readBody(req, 64_000)) || "{}") as { message?: string; step?: number; cwd?: string; terminal?: boolean; sdlc?: { kind?: string; env?: string; stage?: string } };
       const cwd = body.cwd ?? homedir();
       // A step is read from the database, so the button starts the step that the page shows.
       const step = body.step === undefined ? null : summaryDb.getStep(Number(body.step));
@@ -528,12 +522,6 @@ const server = createServer(async (req, res) => {
       if (body.sdlc && !env && !stage) return json(400, { error: "unknown SDLC verb" });
       const dir = cwd.replace(/^~(?=\/|$)/, homedir());
       if (!dir.startsWith("/") || !existsSync(dir) || !statSync(dir).isDirectory()) return json(400, { error: `not a folder: ${cwd}` });
-      if (body.lanes !== undefined) {
-        // Lanes are headless: each one is a row on the ticket page, and iTerm would open N tabs.
-        const out = await lanesRoute.startLanes({ key, context, cwd: dir, lanes: body.lanes, mode: body.laneMode, base: body.base, brief: body.message });
-        if (out.status === 201) broadcast();
-        return json(out.status, out.body);
-      }
       if (!step && !body.sdlc && !body.message?.trim()) return json(400, { error: "write the first message" });
       // Picked here, so a smoketest plan's event can link to its agent before pi starts.
       const sessionId = newSessionId();

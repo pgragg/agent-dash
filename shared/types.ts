@@ -531,8 +531,6 @@ export interface Dashboard {
   conversationSummaries: Record<string, ConversationSummary>;
   /** Review requests sent from agent-dash by PR URL, newest first. Also for PRs with no ticket. */
   reviewRequests: Record<string, SdlcEvent[]>;
-  /** Parallel lanes by ticket key, oldest first, without removed ones. */
-  lanes: Record<string, WorkLane[]>;
   /** Waiting agents that agent-dash stopped to keep the waiting list short, newest first. */
   parked: ParkedRun[];
   /** One health per ticket provider, by its id, next to GitHub and the session logs. */
@@ -585,76 +583,3 @@ export interface SlackQuote {
   text: string;
 }
 
-/**
- * How a lane's work comes back. "land": into the ticket's integration branch, one lane at a time,
- * and one PR from there. "pr": each lane opens its own PR into the base.
- */
-export type LaneMode = "land" | "pr";
-
-/** "landing" while its land runs; "conflict" and "checks_failed" after a land that did not go in. */
-export type LaneState = "working" | "landing" | "landed" | "conflict" | "checks_failed" | "removed";
-
-/** One of N agents on a ticket, each in its own git worktree. The server makes the worktree and this record. */
-export interface WorkLane {
-  id: number;
-  ticket: string;
-  /** The repo's main checkout, which holds the `.git` folder. */
-  repo: string;
-  lane: string;
-  mode: LaneMode;
-  /** The branch on origin that the work goes into, for example `main`. */
-  base: string;
-  branch: string;
-  worktree: string;
-  /** In "land" mode, the ticket's branch and worktree that the lanes land into. */
-  integrationBranch: string | null;
-  integrationWorktree: string | null;
-  sessionId: string | null;
-  goal: string;
-  state: LaneState;
-  /** What the last land said: the conflicting files, or why it was refused. */
-  note: string | null;
-  createdAt: string;
-  landedAt: string | null;
-  /** Read from the worktree on each build. Null when the worktree is gone. */
-  git: LaneGit | null;
-  /** In "land" mode, commits on the integration branch that `origin/<base>` does not have. */
-  integrationAhead: number | null;
-}
-
-export interface LaneGit {
-  /** The branch checked out now. It differs from the lane's branch when the agent switched. */
-  head: string | null;
-  /** Commits on the lane that its base does not have, and the reverse. */
-  ahead: number;
-  behind: number;
-  /** Changed and new files that are not committed. */
-  dirty: number;
-}
-
-/** A git worktree of a repo that agent-dash knows, for the Worktrees view and its Clean up. */
-export interface WorktreeInfo {
-  /** The repo's main checkout. */
-  repo: string;
-  path: string;
-  /** Null on a detached HEAD. */
-  branch: string | null;
-  /** The lane or integration branch that owns it, or null for an orphan. */
-  owner: { ticket: string; laneId: number | null; lane: string | null } | null;
-  /** Origin's default branch, which "behind" and "contained" count against. */
-  base: string;
-  ahead: number;
-  behind: number;
-  /** Every commit of the branch (or the detached HEAD) is on `origin/<base>`. */
-  contained: boolean;
-  dirty: number;
-  pr: { url: string; state: string } | null;
-  /** When git last moved its HEAD: a commit, a checkout, a reset, or the worktree's creation. */
-  lastUsedAt: string | null;
-  /** A live pi session that started in this folder. */
-  liveSession: string | null;
-  /** Why Clean up is off, or null. */
-  blocker: string | null;
-  /** Clean up also deletes the branch, because its work is on the base or its PR merged. */
-  deletesBranch: boolean;
-}

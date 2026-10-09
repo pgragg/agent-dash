@@ -36,10 +36,9 @@ test("an agent that needs nothing, or only a reviewer, parks", () => {
   assert.deepEqual(reasons(i), { a: "needs_nothing", b: "needs_nothing" });
 });
 
-test("only the newest agent on a ticket stays, except parallel lanes", () => {
+test("only the newest agent on a ticket stays", () => {
   const runs = [waiting("old", { tickets: ["FSDK-1"], startedAt: minutesAgo(300) }), waiting("mid", { tickets: ["FSDK-1"], startedAt: minutesAgo(200) }), run({ sessionId: "new", status: "working", tickets: ["FSDK-1"], startedAt: minutesAgo(100) })];
   assert.deepEqual(reasons(input(runs)), { old: "superseded", mid: "superseded" });
-  assert.deepEqual(reasons(input(runs, { laneSessions: new Set(["old", "mid"]) })), {});
   // A finished newer run does not carry the work on.
   runs[2] = { ...runs[2], status: "finished" };
   assert.deepEqual(reasons(input(runs)), { old: "superseded" });
