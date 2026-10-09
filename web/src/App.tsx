@@ -41,7 +41,7 @@ import { type BoardMode, kanbanColumns, type Searchable, searchCards, stageOf, u
 import { starredFirst } from "./star.ts";
 import { FullScreenButton, ResizeHandle, useViewWidth, ViewTools, ViewToolsSlot } from "./resizeView.tsx";
 import { rowName, rowType } from "./whyRow.ts";
-import { recordView, usage } from "./usage.ts";
+import { recordControl, recordView, usage } from "./usage.ts";
 import { DEFAULT_SNOOZE, isSnoozed, SNOOZE_OPTIONS, type SnoozeChoice, snoozeAction, UNTIL_CHANGE_LABEL, untilLabel } from "./snooze.ts";
 import { importLegacy, isMarked, type Marks, type Pending, settle, withPending } from "./untilChange.ts";
 import { tabTitle } from "./tabTitle.ts";
@@ -1093,10 +1093,14 @@ function SnoozeControl({ ticket, until, marked, canMark, now, signal, onMark, on
     onError(err);
     if (!err && next) onSnoozed();
   };
+  // The click and `Z` both land here, and "until a change" in onMark, so each snooze adds one usage row.
   const press = () => {
     if (action?.kind === "change") {
       if (canMark && !marked) onMark();
-    } else if (action && !busy) save(action.at);
+    } else if (action && !busy) {
+      recordControl(`snooze:${choice}`, ticket);
+      save(action.at);
+    }
   };
   // The control mounts again for each entry, so only a press after the mount counts.
   const seen = useRef(signal);
@@ -1131,7 +1135,7 @@ function SnoozeControl({ ticket, until, marked, canMark, now, signal, onMark, on
   const title = action?.kind === "change" ? "Hide until something about it changes" : action ? `Hide from the board until ${action.at.toLocaleString()}` : "Pick a date in the future";
   return (
     <span className="verb">
-      <button className="btn" onClick={press} disabled={!action || busy} title={title} {...usage(`snooze:${choice === "change" ? "until-change" : choice}`, ticket)}>
+      <button className="btn" onClick={press} disabled={!action || busy} title={title}>
         Snooze <Kbd>{choice === "change" ? "E" : "Z"}</Kbd>
       </button>
       {options.length > 1 && (
@@ -2039,6 +2043,8 @@ export function App() {
 
   const doneAndAdvance = useCallback(() => {
     if (!selected || !actionable(selected)) return;
+    // `E` and the Snooze button both land here; a second `E` on a marked entry is no new snooze.
+    if (!untilChange.isMarked(selected)) recordControl("snooze:until-change", selected.ticket?.ticket.key);
     const i = queue.findIndex((s) => s.id === selected.id);
     const next = queue[i + 1] ?? queue[i - 1];
     untilChange.mark(selected);
@@ -2072,7 +2078,12 @@ export function App() {
         else if (viewWidth.full) viewWidth.setFull(false);
         else setDrawer(false);
       } else if (e.key === "f" && (boardMode === "queue" || drawer)) viewWidth.setFull(!viewWidth.full);
-      else if (e.key === "v") setBoardMode(boardMode === "queue" ? "kanban" : "queue");
+      else if (e.key === "v") {
+        // The toggle's buttons count their own clicks.
+        const next = boardMode === "queue" ? "kanban" : "queue";
+        recordControl(`board:${next}`);
+        setBoardMode(next);
+      }
       else if (e.key === "Enter" && boardMode === "kanban" && !drawer && selected) setDrawer(true);
       else if (e.key === "/" && boardMode === "kanban") searchRef.current?.focus();
       else if (e.key === "r") setFocusSignal((n) => n + 1);
