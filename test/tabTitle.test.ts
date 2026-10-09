@@ -16,13 +16,15 @@ const data = (over: Partial<Dashboard> = {}) => ({
   unlinkedRuns: [],
   ...over,
 });
-const title = (hash: string, d = data(), queue = 0, open: string | null = null) => tabTitle({ route: parseHash(hash), data: d, queue, open });
+const title = (hash: string, d = data(), needsYou = 0, open: string | null = null) => tabTitle({ route: parseHash(hash), data: d, needsYou, open });
 
-test("the board says how many entries need you, then the entry that is open", () => {
+test("the board gives the top bar's Needs you count, then the entry that is open", () => {
   assert.equal(title("#/", data(), 3, "Fix the login redirect"), "Board (3) · Fix the login redirect · agent-dash");
   assert.equal(title("#/", data()), "Board · agent-dash");
-  // An agent can wait on you without an entry in the queue.
-  assert.equal(title("#/", data({ counts: { working: 0, awaiting_input: 2, finished: 0 } })), "Board (2) · agent-dash");
+  // One count of work: a waiting agent with no entry in Up next or Parked asks does not add to it.
+  assert.equal(title("#/", data({ counts: { working: 0, awaiting_input: 2, finished: 0 } })), "Board · agent-dash");
+  // The old Notifications address is the board now.
+  assert.equal(title("#/needs", data(), 3), "Board (3) · agent-dash");
   assert.equal(title("#/", data(), 0, "A very long ticket title that goes on and on past the limit"), "Board · A very long ticket title that goes on a… · agent-dash");
 });
 
@@ -60,15 +62,12 @@ test("a conversation gives its status and name; the other views give their count
   assert.equal(title("#/history", d), "History 2 live · agent-dash");
   assert.equal(title("#/documents", d), "Documents 1 · agent-dash");
   assert.equal(title("#/doc:4", d), "Doc · How login works · agent-dash");
-  assert.equal(title("#/needs", d, 3), "Notifications (3) · agent-dash");
   assert.equal(title("#/settings", d), "Settings · agent-dash");
-  assert.equal(tabTitle({ route: parseHash("#/prs"), data: null, queue: 0, open: null }), "agent-dash");
+  assert.equal(tabTitle({ route: parseHash("#/prs"), data: null, needsYou: 0, open: null }), "agent-dash");
 });
 
 test("an agent that only waits on a PR review is not waiting on you in the tab title", () => {
   const needs = (n: string) => ({ s1: { sessionId: "s1", status: "done", about: "a", latest: "PR is open.", needs: n, generatedAt: "", error: null, stale: false } as const });
   const d = data({ unlinkedRuns: [run({ sessionId: "s1", name: "Deploy FDR", status: "awaiting_input" })], counts: { working: 0, awaiting_input: 1, finished: 0 } });
   assert.equal(title("#/c:s1", { ...d, conversationSummaries: needs("Waiting on review: PR 12") }), "👀 Deploy FDR · agent-dash");
-  assert.equal(title("#/", { ...d, conversationSummaries: needs("Waiting on review: PR 12") }), "Board · agent-dash");
-  assert.equal(title("#/", { ...d, conversationSummaries: needs("Restart the pod") }), "Board (1) · agent-dash");
 });

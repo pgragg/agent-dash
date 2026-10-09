@@ -1,14 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AttentionItem } from "../shared/types.ts";
-import { parseHash } from "../web/src/routes.ts";
+import { parseHash, redirectHash } from "../web/src/routes.ts";
 import { needStep } from "../web/src/needs.ts";
 
 const item = (o: Partial<AttentionItem>): AttentionItem => ({ kind: "awaiting_input", score: 1, reason: "", name: "", status: "", ticketKey: "FSDK-1", ticketUrl: null, since: "", updatedAt: "", ...o });
 const step = { id: 5, summaryId: 1, ticket: "FSDK-1", position: 1, body: "do", label: null, action: null };
 
-test("#/needs opens the needs-you view", () => {
-  assert.deepEqual(parseHash("#/needs"), { view: "needs" });
+test("#/needs opens the board: the Notifications view is gone", () => {
+  assert.deepEqual(parseHash("#/needs"), { view: "board", ref: null });
+  assert.equal(redirectHash("#/needs"), "#/");
+  assert.equal(redirectHash("#needs"), "#/");
+  assert.equal(redirectHash("#/parked"), null, "the parked archive stays");
+  assert.deepEqual(parseHash("#/parked"), { view: "parked" });
+  assert.equal(redirectHash("#/t:FSDK-1"), null);
 });
 
 test("each signal leads to the place in agent-dash where you act on it", () => {

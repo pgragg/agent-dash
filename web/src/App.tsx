@@ -5,10 +5,10 @@ import { splitSummary } from "../../shared/nextSteps.ts";
 import { awaitsOwner, ownerWaitText } from "../../shared/ownerApproval.ts";
 import { prRef } from "../../shared/refs.ts";
 import { READ_FEEDBACK, REVIEW_AND_MERGE } from "../../shared/prVerbs.ts";
-import type { AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, NextStep, Note, PullRequest, Run, LaneMode, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState } from "../../shared/types.ts";
+import type { AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, NextStep, Note, ParkedRun, PullRequest, Run, LaneMode, ThreadStatusChange, TicketGroup, TicketSummary, TicketSummaryState } from "../../shared/types.ts";
 import { conversationHash, launchAgent, ResumeHere, resuming } from "./agents.tsx";
-import { ParkedView } from "./parked.tsx";
-import { splitParked } from "./parkedRows.ts";
+import { ParkedAskList, ParkedAsksPane, ParkedView } from "./parked.tsx";
+import { askKey, askRef, type AskGroup, needsYouCount, parkedAsks, splitParked } from "./parkedRows.ts";
 import { CADDY_HTTP, CADDY_HTTPS, caddyCommands, cleanHost, cleanPort, rootScript, undoCommands } from "./localUrl.ts";
 import { SettingsView, SetupBanner } from "./settings.tsx";
 import { FIRST_LANES, type LaneDraft, LanesCard, LanesEditor, type LaneRun, WorktreesView } from "./lanes.tsx";
@@ -21,7 +21,7 @@ import { Composer, LivePanel } from "./liveControl.tsx";
 import { needStep } from "./needs.ts";
 import { agentFinished, agentState, agentWaitsOnReview, asksNothing, isNewSince, readySummary, runsOf, summaryText, waitingOnYou } from "./notify.ts";
 import { needsNothing } from "../../shared/conversationSummary.ts";
-import { href, humanAge, parseHash, resolveBoardRef, type Route } from "./routes.ts";
+import { href, humanAge, parseHash, redirectHash, resolveBoardRef, type Route } from "./routes.ts";
 import { FixLogin } from "./fixLogin.tsx";
 import { rowKey } from "./rowNav.ts";
 import { ReviewRequest, useReviewDrafts } from "./reviewRequest.tsx";
@@ -328,7 +328,7 @@ function laneRun(s: Subject, sessionId: string, now: number, summary?: Conversat
 
 // ---- queue (left rail) --------------------------------------------------------------
 
-function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snoozedUntil, card = false, dim = false, starred = false, footer }: { s: Subject; selected: boolean; onSelect: () => void; now: number; summary?: TicketSummaryState; rank?: number; notes?: number; snoozedUntil?: string; card?: boolean; dim?: boolean; starred?: boolean; footer?: React.ReactNode }) {
+function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snoozedUntil, card = false, dim = false, starred = false, need = null, footer }: { s: Subject; selected: boolean; onSelect: () => void; now: number; summary?: TicketSummaryState; rank?: number; notes?: number; snoozedUntil?: string; card?: boolean; dim?: boolean; starred?: boolean; need?: string | null; footer?: React.ReactNode }) {
   const top = lead(s);
   const run = primaryRun(s);
   const ref = useRef<HTMLButtonElement & HTMLDivElement>(null);
@@ -356,6 +356,11 @@ function QueueItem({ s, selected, onSelect, now, summary, rank, notes = 0, snooz
           <span className="q-when">{when}</span>
         </span>
         <span className="q-title">{subjectTitle(s)}</span>
+        {need && (
+          <span className="q-need" title={need}>
+            Needs from you: {need}
+          </span>
+        )}
         <span className="q-tags">
           {s.ticket && <span className="q-key">{s.ticket.ticket.key}</span>}
           {done && <span className="tag tone-good">done</span>}
@@ -412,6 +417,37 @@ function RailSection({ title, count, children, defaultOpen = true, hint }: { tit
       </button>
       {open && <div className="rail-list">{children}</div>}
     </section>
+  );
+}
+
+/** One ticket's parked asks in the rail, or the asks with no ticket. The pane it opens has Send, Resume and Dismiss. */
+function AskItem({ g, title, selected, onSelect, now }: { g: AskGroup; title: string; selected: boolean; onSelect: () => void; now: number }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (selected) ref.current?.scrollIntoView({ block: "nearest" });
+  }, [selected]);
+  const newest = g.rows.reduce((m, p) => (p.parkedAt > m.parkedAt ? p : m));
+  const ask = newest.needs ?? newest.lastMessage.slice(-300);
+  return (
+    <button ref={ref} className={`q-item ${selected ? "selected" : ""}`} onClick={onSelect} aria-current={selected}>
+      <span className="q-rank" />
+      <span className="q-body">
+        <span className="q-head">
+          <Dot tone="waiting" />
+          <span className="q-headline tone-text-waiting">{g.rows.length === 1 ? "A parked agent asks" : `${g.rows.length} parked agents ask`}</span>
+          <span className="q-when">{age(newest.parkedAt, now)}</span>
+        </span>
+        <span className="q-title">{title}</span>
+        <span className="q-need" title={ask}>
+          Needs from you: {ask}
+        </span>
+        {g.key && (
+          <span className="q-tags">
+            <span className="q-key">{g.key}</span>
+          </span>
+        )}
+      </span>
+    </button>
   );
 }
 
@@ -1125,7 +1161,7 @@ function whyLine(r: WhyRow, needs: boolean): string | null {
  * The ticket header: what needs you, then news, newest first in each, one line a row. A click on
  * a row opens its full summary under it.
  */
-function WhyList({ s, data, now, cwd, lastLook, onError }: { s: Subject; data: Dashboard; now: number; cwd: string; lastLook: string | null; onError: (m: string | null) => void }) {
+function WhyList({ s, parked, data, now, cwd, lastLook, onError }: { s: Subject; parked: ParkedRun[]; data: Dashboard; now: number; cwd: string; lastLook: string | null; onError: (m: string | null) => void }) {
   const t = s.ticket?.ticket;
   const [open, setOpen] = useState<string | null>(null);
   const [all, setAll] = useState(false);
@@ -1208,6 +1244,12 @@ function WhyList({ s, data, now, cwd, lastLook, onError }: { s: Subject; data: D
           <ul className="why-rows">{needs.map((r) => row(r, true))}</ul>
         </>
       )}
+      {parked.length > 0 && (
+        <>
+          <div className="why-group">Parked asks · {parked.length}</div>
+          <ParkedAskList rows={parked} now={now} onError={onError} />
+        </>
+      )}
       {updates.length > 0 && (
         <>
           <div className="why-group">
@@ -1226,8 +1268,10 @@ function WhyList({ s, data, now, cwd, lastLook, onError }: { s: Subject; data: D
   );
 }
 
-function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, onSnoozed, focusSignal, noteSignal, agentSignal, snoozeSignal, anchor, lastLook }: {
+function Workspace({ s, parked, data, now, position, doneForNow, onDoneForNow, onWake, onSnoozed, focusSignal, noteSignal, agentSignal, snoozeSignal, anchor, lastLook }: {
   s: Subject;
+  /** The ticket's parked asks that could need you. */
+  parked: ParkedRun[];
   /** Your look at this entry before this one: what came after it is marked new. */
   lastLook: string | null;
   data: Dashboard;
@@ -1324,7 +1368,7 @@ function Workspace({ s, data, now, position, doneForNow, onDoneForNow, onWake, o
             ))}
         </div>
         {s.ticket && <SdlcBar group={s.ticket} events={data.sdlcEvents[s.ticket.ticket.key] ?? []} cwd={cwd} onError={setError} />}
-        {s.items.length > 0 && <WhyList s={s} data={data} now={now} cwd={cwd} lastLook={lastLook} onError={setError} />}
+        {s.items.length + parked.length > 0 && <WhyList s={s} parked={parked} data={data} now={now} cwd={cwd} lastLook={lastLook} onError={setError} />}
       </header>
 
       {t && <TicketPanel key={t.key} ticket={t} onError={setError} />}
@@ -1467,7 +1511,7 @@ function PrsView({ data, now }: { data: Dashboard; now: number }) {
   );
 }
 
-// ---- Needs you view ---------------------------------------------------------------
+// ---- queue entry: the next step ------------------------------------------------------
 
 /** The first step of the ticket's newest finished next-steps draft. */
 function firstStep(data: Dashboard, s: Subject): NextStep | null {
@@ -1476,90 +1520,23 @@ function firstStep(data: Dashboard, s: Subject): NextStep | null {
   return shown?.steps[0] ?? null;
 }
 
-/** The entries behind "N notifications", in queue order, each with where to act. */
-function NeedsView({
-  queue,
-  hidden,
-  data,
-  now,
-  onDismiss,
-}: {
-  queue: Subject[];
-  hidden: number;
-  data: Dashboard;
-  now: number;
-  onDismiss: (s: Subject) => void;
-}) {
+/** What the lead agent needs from you, from its summary: the "Needs from you" line of a queue entry. */
+function needLine(s: Subject, data: Dashboard): string | null {
+  const a = lead(s);
+  if (!a || a.info || !a.sessionId || (a.kind !== "awaiting_input" && a.kind !== "run_error")) return null;
+  const ready = readySummary(data.conversationSummaries[a.sessionId]);
+  return ready && !needsNothing(ready.needs) ? ready.needs : null;
+}
+
+/** The queue entry's one next step: the place in agent-dash where you act on its lead signal. */
+function NextStepLink({ s, data }: { s: Subject; data: Dashboard }) {
+  const a = lead(s);
+  if (!a) return null;
+  const next = needStep(a, firstStep(data, s), s.id);
   return (
-    <article className="workspace">
-      <header className="ws-head">
-        <h1>{queue.length ? plural(queue.length, "notification") : "No notifications"}</h1>
-        <div className="ws-meta">
-          <span className="meta">
-            Most urgent first, as in the queue{hidden > 0 && ` · ${hidden} done for now, not shown`}
-          </span>
-        </div>
-      </header>
-      {queue.length === 0 ? (
-        <div className="zero big">No notifications. The agents at work and the PRs out for review are on the board.</div>
-      ) : (
-        <div className="card flush">
-          <ol className="actions">
-            {queue.map((s, i) => {
-              const item = lead(s)!;
-              const step = firstStep(data, s);
-              const next = needStep(item, step, s.id);
-              const tone = look(item).tone;
-              return (
-                <li key={s.id} className="action need" id={`need:${s.id}`}>
-                  <span className="q-rank">{i + 1}</span>
-                  <Dot tone={tone} />
-                  <div className="action-body">
-                    <div className="action-summary">
-                      <TypeChip kind={item.kind} /> <b className={`tone-text-${tone}`}>{look(item).title}</b> · {inline(item.reason)}
-                    </div>
-                    {item.gist && <div className="need-gist">{item.gist}</div>}
-                    <div className="action-meta">
-                      {s.ticket ? (
-                        <a className="key-link" href={href(`t:${s.ticket.ticket.key}`)} title="Open the ticket on the board">
-                          {s.ticket.ticket.key}
-                        </a>
-                      ) : (
-                        <span className="meta">no ticket</span>
-                      )}
-                      <span className="meta action-ticket">{subjectTitle(s)}</span>
-                      <OtherTags s={s} />
-                    </div>
-                    {step && next.ref !== `step:${step.id}` && (
-                      <div className="action-meta need-step">
-                        <span className="meta">Drafted next step:</span>
-                        <a href={href(`step:${step.id}`)} className="need-step-body">
-                          {inline(step.body)}
-                        </a>
-                      </div>
-                    )}
-                  </div>
-                  <span className="meta action-age" title={stamp(item.updatedAt)}>
-                    {age(item.updatedAt, now)} ago
-                  </span>
-                  <PrVerbButton item={item} data={data} />
-                  <a className="btn small primary" href={href(next.ref)}>
-                    {next.label} →
-                  </a>
-                  <button
-                    className="btn small ghost"
-                    onClick={() => onDismiss(s)}
-                    title="Done for now. It comes back when something about it changes."
-                  >
-                    Dismiss
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
-        </div>
-      )}
-    </article>
+    <a className="btn small" href={href(next.ref)}>
+      {next.label} →
+    </a>
   );
 }
 
@@ -1974,8 +1951,19 @@ export function App() {
   // The search keeps only the matching cards, best match first, and J/K walk them in that order.
   const kanbanOrder = boardMode === "kanban" && data ? searchCards(order, kanbanQuery, (s) => searchFields(s, data)) : order;
 
-  const target = data && boardRef ? resolveBoardRef(boardRef, data, new Set(subjects.keys())) : null;
-  const selected = (target && subjects.get(target.subjectId)) || queue[0] || order[0] || null;
+  // The parked asks that could need you: each one shows in its ticket's "why" list when the ticket is in Up next, else under Parked asks.
+  const parkedNeeds = useMemo(() => (data ? splitParked(data).needsYou : []), [data]);
+  const queueTickets = new Set(queue.flatMap((s) => (s.ticket ? [s.ticket.ticket.key] : [])));
+  const snoozedTickets = new Set(Object.entries(data?.snoozedUntil ?? {}).flatMap(([k, u]) => (isSnoozed(u, now) ? [k] : [])));
+  const asks = parkedAsks(parkedNeeds, queueTickets, snoozedTickets);
+  // The one count of work: the top bar, the tab title, and the board agree on it.
+  const needsYou = needsYouCount(queue.length, asks);
+  const askSel = askKey(boardRef);
+  const asksOf = (key: string) => parkedNeeds.filter((p) => p.ticket === key);
+
+  const target = data && boardRef && askSel === undefined ? resolveBoardRef(boardRef, data, new Set(subjects.keys())) : null;
+  // A Parked asks group shows its own pane, so no entry is selected.
+  const selected = askSel !== undefined ? null : (target && subjects.get(target.subjectId)) || queue[0] || order[0] || null;
   // You look at an entry while its workspace shows in a focused tab. On the kanban, that is the drawer.
   const looking = focused && view === "board" && (boardMode === "queue" || drawer) && selected ? selected.id : null;
   const look = useLook(looking);
@@ -1983,6 +1971,8 @@ export function App() {
 
   useEffect(() => {
     const onHash = () => {
+      const to = redirectHash(location.hash);
+      if (to) history.replaceState(null, "", to);
       const next = parseHash(location.hash);
       setRoute(next);
       if (next.view === "board") {
@@ -1990,6 +1980,7 @@ export function App() {
         if (next.ref) setDrawer(true);
       }
     };
+    onHash();
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -2066,8 +2057,8 @@ export function App() {
 
   const openTitle = view === "board" && (boardMode === "queue" || drawer) && selected ? subjectTitle(selected) : null;
   useEffect(() => {
-    document.title = tabTitle({ route, data, queue: queue.length, open: openTitle });
-  }, [route, data, queue.length, openTitle]);
+    document.title = tabTitle({ route, data, needsYou, open: openTitle });
+  }, [route, data, needsYou, openTitle]);
 
   if (!data) return <main className="loading">{error ? <pre className="error">{error}</pre> : <span className="shimmer wide" />}</main>;
 
@@ -2093,13 +2084,16 @@ export function App() {
           )}
         </p>
       )}
-      {boardRef && !target && (
+      {boardRef && !target && askSel === undefined && (
         <p className="banner">
           <code>{boardRef}</code> is not on the board. It may be older than 14 days, or closed: look for it in <a href="#/history">History</a>.
         </p>
       )}
-      {selected ? (
+      {askSel !== undefined ? (
+        <ParkedAsksPane ticketKey={askSel} rows={askSel ? asksOf(askSel) : asks.groups.find((g) => !g.key)?.rows ?? []} data={data} onBoard={!!askSel && subjects.has(`t:${askSel}`)} now={now} />
+      ) : selected ? (
         <Workspace
+          parked={selected.ticket ? asksOf(selected.ticket.ticket.key) : []}
           s={selected}
           data={data}
           now={now}
@@ -2133,7 +2127,7 @@ export function App() {
           agent-dash
           <nav className="views" aria-label="Views">
             <a href={selected ? href(selected.id) : "#/"} className={view === "board" ? "active" : ""} aria-current={view === "board" ? "page" : undefined}>
-              Board {queue.length > 0 && <span className="count">{queue.length}</span>}
+              Board
             </a>
             <a href="#/prs" className={view === "prs" ? "active" : ""} aria-current={view === "prs" ? "page" : undefined}>
               PRs {openPrs > 0 && <span className="count">{openPrs}</span>}
@@ -2156,21 +2150,18 @@ export function App() {
           </nav>
         </div>
         <div className="headline">
-          <a href="#/needs" className={`needs-link ${view === "needs" ? "active" : ""}`} title="See your notifications, and where to act on each">
-            <b>{queue.length ? plural(queue.length, "notification") : "No notifications"}</b>
+          <a href="#/" className="needs-link" onClick={() => setBoardMode("queue")} title={`${queue.length} in Up next, and ${asks.entries} under Parked asks. A ticket counts one time.`}>
+            <b>{needsYou ? `Needs you ${needsYou}` : "Nothing needs you"}</b>
           </a>
           <span className="sep">·</span>
-          <span>
-            <Dot tone="waiting" /> {waitingRuns} waiting
+          <span className="live-status" title="Live agents now: a status, not a count of work">
+            <span>
+              <Dot tone="waiting" /> {waitingRuns} waiting
+            </span>
+            <span>
+              <Dot tone="working" pulse={workingRuns > 0} /> {workingRuns} working
+            </span>
           </span>
-          <span>
-            <Dot tone="working" pulse={workingRuns > 0} /> {workingRuns} working
-          </span>
-          {data.parked.length > 0 && (
-            <a href="#/parked" className={view === "parked" ? "active" : ""} title={`Parked agents that could need you: an open ticket, and an ask of their own. ${data.parked.length} parked in all.`}>
-              <Dot tone="muted" /> {splitParked(data).needsYou.length} parked
-            </a>
-          )}
         </div>
         <span className="grow" />
         <span className={`sources ${down.length ? "bad" : ""}`} title={sources.map(([n, h]) => `${h.label ?? n}: ${h.off ? "off (not set up)" : h.ok ? "ok" : h.error}`).join("\n")}>
@@ -2189,11 +2180,7 @@ export function App() {
       </header>
       {route.view !== "settings" && <SetupBanner setup={data.setup ?? []} />}
 
-      {route.view === "needs" ? (
-        <main className="main">
-          <NeedsView queue={queue} hidden={done.length} data={data} now={now} onDismiss={doneForNow.markDone} />
-        </main>
-      ) : route.view === "parked" ? (
+      {route.view === "parked" ? (
         <main className="main">
           <ParkedView data={data} now={now} />
         </main>
@@ -2301,15 +2288,25 @@ export function App() {
             </div>
             <RailSection title="Starred" count={starredList.length} hint="Tickets you starred, pinned to the top">
               {starredList.map((s) => (
-                <QueueItem key={s.id} s={s} starred rank={queue.includes(s) ? queue.indexOf(s) + 1 : undefined} dim={done.includes(s) || finishedList.includes(s) || quiet.includes(s)} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
+                <QueueItem key={s.id} s={s} starred rank={queue.includes(s) ? queue.indexOf(s) + 1 : undefined} need={queue.includes(s) ? needLine(s, data) : null} footer={queue.includes(s) ? <NextStepLink s={s} data={data} /> : undefined} dim={done.includes(s) || finishedList.includes(s) || quiet.includes(s)} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
               ))}
             </RailSection>
             <RailSection title="Up next" count={unstarred(queue).length}>
               {unstarred(queue).map((s) => (
-                <QueueItem key={s.id} s={s} rank={queue.indexOf(s) + 1} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
+                <QueueItem key={s.id} s={s} rank={queue.indexOf(s) + 1} need={needLine(s, data)} footer={<NextStepLink s={s} data={data} />} selected={s.id === selected?.id} onSelect={() => select(s.id)} now={now} summary={s.ticket ? data.summaries[s.ticket.ticket.key] : undefined} notes={s.ticket ? (data.notes[s.ticket.ticket.key]?.length ?? 0) : 0} />
               ))}
             </RailSection>
-            {queue.length === 0 && (
+            <RailSection title="Parked asks" count={asks.entries} hint="Agents that agent-dash parked with an ask of their own, on an open ticket. A ticket in Up next shows its asks in its own why list.">
+              {asks.groups.map((g) => (
+                <AskItem key={askRef(g.key)} g={g} title={g.key ? (subjects.get(`t:${g.key}`)?.ticket?.ticket.summary ?? g.key) : "Conversations with no ticket"} selected={boardRef === askRef(g.key)} onSelect={() => select(askRef(g.key))} now={now} />
+              ))}
+            </RailSection>
+            {data.parked.length > 0 && (
+              <a className="rail-link" href="#/parked" title="Every parked agent, also the ones that need nothing from you">
+                All {plural(data.parked.length, "parked agent")} →
+              </a>
+            )}
+            {needsYou === 0 && (
               <div className="zero">
                 <div className="zero-mark">✓</div>
                 <p>

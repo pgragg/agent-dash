@@ -87,6 +87,53 @@ function ParkedRow({ p, now, onError }: { p: ParkedRun; now: number; onError: (m
   );
 }
 
+/** A ticket's parked asks inside its "why" list, with the same Send, Resume and Dismiss as `#/parked`. */
+export function ParkedAskList({ rows, now, onError }: { rows: ParkedRun[]; now: number; onError: (m: string | null) => void }) {
+  return (
+    <ol className="actions why-parked">
+      {rows.map((p) => (
+        <ParkedRow key={p.sessionId} p={p} now={now} onError={onError} />
+      ))}
+    </ol>
+  );
+}
+
+/** One group of the board's Parked asks: a ticket's asks, or the asks with no ticket (`ticketKey` null). */
+export function ParkedAsksPane({ ticketKey, rows, data, onBoard, now }: { ticketKey: string | null; rows: ParkedRun[]; data: Dashboard; onBoard: boolean; now: number }) {
+  const [error, setError] = useState<string | null>(null);
+  const ticket = ticketKey ? [...data.myTickets, ...data.otherTickets].find((g) => g.ticket.key === ticketKey)?.ticket : undefined;
+  const dismissAll = async (list: ParkedRun[]) => {
+    for (const p of list) {
+      const err = await post(`/api/parked/dismiss?session=${encodeURIComponent(p.sessionId)}`);
+      if (err) return setError(err);
+    }
+    setError(null);
+  };
+  return (
+    <article className="workspace">
+      <header className="ws-head">
+        <div className="eyebrow">
+          <span className="tone-text-waiting">Parked asks</span>
+        </div>
+        <h1>{ticket?.summary ?? ticketKey ?? "Conversations with no ticket"}</h1>
+        <div className="ws-meta">
+          {ticketKey && onBoard && (
+            <a className="key-link" href={href(`t:${ticketKey}`)} title="Open the ticket on the board">
+              {ticketKey}
+            </a>
+          )}
+          <span className="meta">
+            {rows.length ? `${plural(rows.length, "agent")} parked, each with its own ask. Send or Resume continues the same session, and Dismiss removes the ask.` : "No parked ask here any more."}
+          </span>
+        </div>
+      </header>
+      {error && <pre className="error">{error}</pre>}
+      {rows.length > 0 && <ParkedGroups groups={[{ key: ticketKey, ticket, rows }]} now={now} onError={setError} dismissAll={dismissAll} />}
+      <a href="#/parked">All {plural(data.parked.length, "parked agent")}, also the ones that need nothing from you →</a>
+    </article>
+  );
+}
+
 export function ParkedView({ data, now }: { data: Dashboard; now: number }) {
   const [error, setError] = useState<string | null>(null);
   const { needsYou, rest } = splitParked(data);
