@@ -28,6 +28,7 @@ function dashboard(): Dashboard {
     notes: {},
     snoozedUntil: {},
     starred: [],
+    untilChange: {},
     diagrams: [],
     documents: [],
     sdlcEvents: {},

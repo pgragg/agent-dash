@@ -281,6 +281,7 @@ async function dashboard(force: boolean) {
     notes: summaryDb.notesByTicket(),
     snoozedUntil: summaryDb.snoozedUntilByTicket(),
     starred: summaryDb.starredTickets(),
+    untilChange: summaryDb.untilChangeMarks(),
     threads: summaryDb.currentThreadStatuses(),
     parked: new Set(summaryDb.activeParked().map((p) => p.sessionId)),
     folderExists: existsSync,
@@ -491,6 +492,21 @@ const server = createServer(async (req, res) => {
       summaryDb.setSnoozedUntil(ticket, at);
       broadcast();
       json(200, { ok: true, snoozedUntil: at?.toISOString() ?? null });
+    } else if (url.pathname === "/api/until-change" && req.method === "POST") {
+      if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
+      const json = (code: number, body: unknown) => void res.writeHead(code, { "Content-Type": "application/json" }).end(JSON.stringify(body));
+      const { id, fingerprint, marks } = JSON.parse((await readBody(req, 256_000)) || "{}") as { id?: unknown; fingerprint?: unknown; marks?: unknown };
+      if (url.searchParams.has("import")) {
+        if (!marks || typeof marks !== "object" || Object.values(marks).some((v) => typeof v !== "string")) return json(400, { error: "marks must map entry ids to fingerprints" });
+        const added = summaryDb.importUntilChange(marks as Record<string, string>);
+        if (added) broadcast();
+        return json(200, { ok: true, added });
+      }
+      if (typeof id !== "string" || !id) return json(400, { error: "id must be an entry id" });
+      if (fingerprint !== null && typeof fingerprint !== "string") return json(400, { error: "fingerprint must be a string, or null to put the entry back" });
+      summaryDb.setUntilChange(id, fingerprint);
+      broadcast();
+      json(200, { ok: true });
     } else if (url.pathname === "/api/star" && req.method === "POST") {
       if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
       const json = (code: number, body: unknown) => void res.writeHead(code, { "Content-Type": "application/json" }).end(JSON.stringify(body));

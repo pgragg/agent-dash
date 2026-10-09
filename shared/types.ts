@@ -517,6 +517,8 @@ export interface Dashboard {
   notes: Record<string, Note[]>;
   /** When each snoozed ticket comes back to the board, by ticket key. It can be in the past. */
   snoozedUntil: Record<string, string>;
+  /** "Snooze until something changes" marks: entry id to the fingerprint it had at the click. */
+  untilChange: Record<string, string>;
   /** Starred ticket keys, first starred first. They go to the top of the board and the PRs view. */
   starred: string[];
   /** Every picture an agent showed in a message, newest first, without its source: a message finds its document from here. */

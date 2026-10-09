@@ -172,6 +172,16 @@ CREATE TABLE IF NOT EXISTS tickets (
   starred_at    TEXT
 );
 
+-- "Snooze until something changes" (E): the entry stays off the queue while its fingerprint is
+-- the same. entry_id is the board's entry id (t:KEY, r:session, p:url). marked_at is the click.
+-- "Back to the queue" sets fingerprint to NULL and keeps the row, so a later import of an old
+-- localStorage mark cannot hide the entry again.
+CREATE TABLE IF NOT EXISTS until_change (
+  entry_id    TEXT PRIMARY KEY,
+  fingerprint TEXT,
+  marked_at   TEXT NOT NULL
+);
+
 -- PR feedback that Piper marked addressed on the PR panel. GitHub has no resolved state for a
 -- review body or a conversation comment. A thread's key is its newest comment, so a new reply
 -- makes it "to address" again.
@@ -496,6 +506,34 @@ export function snoozedUntilByTicket(): Record<string, string> {
   const out: Record<string, string> = {};
   for (const r of open().prepare("SELECT key, snoozed_until AS until FROM tickets WHERE snoozed_until IS NOT NULL").all() as { key: string; until: string }[]) out[r.key] = r.until;
   return out;
+}
+
+// ---- snooze until something changes: hide a queue entry while its fingerprint is the same ----
+
+/** `fingerprint` null puts the entry back in the queue. */
+export function setUntilChange(entryId: string, fingerprint: string | null, now = new Date()): void {
+  open()
+    .prepare("INSERT INTO until_change (entry_id, fingerprint, marked_at) VALUES (?, ?, ?) ON CONFLICT (entry_id) DO UPDATE SET fingerprint = excluded.fingerprint, marked_at = excluded.marked_at")
+    .run(entryId, fingerprint, now.toISOString());
+}
+
+/** The fingerprint of each marked entry, by entry id. A mark whose fingerprint is old no longer hides it. */
+export function untilChangeMarks(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const r of open().prepare("SELECT entry_id AS id, fingerprint FROM until_change WHERE fingerprint IS NOT NULL").all() as { id: string; fingerprint: string }[]) out[r.id] = r.fingerprint;
+  return out;
+}
+
+/**
+ * Copies a browser's old localStorage marks. Each entry that has a row already keeps it: that row
+ * is newer, because the page stopped writing to localStorage when SQLite got the marks. The click
+ * time is lost, so an imported mark gets the import time. Returns how many rows it added.
+ */
+export function importUntilChange(marks: Record<string, string>, now = new Date()): number {
+  const insert = open().prepare("INSERT INTO until_change (entry_id, fingerprint, marked_at) VALUES (?, ?, ?) ON CONFLICT (entry_id) DO NOTHING");
+  let added = 0;
+  for (const [id, fingerprint] of Object.entries(marks)) added += Number(insert.run(id, fingerprint, now.toISOString()).changes);
+  return added;
 }
 
 // ---- star: pin a ticket to the top of the board and the PRs view ----------------------

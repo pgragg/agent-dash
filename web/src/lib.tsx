@@ -389,6 +389,9 @@ export const api = {
   deleteNote: (id: number) => post(`/api/notes?id=${id}`, undefined, "DELETE"),
   /** `until` null wakes the ticket. */
   snooze: (ticket: string, until: string | null) => post(`/api/snooze?ticket=${encodeURIComponent(ticket)}`, { until }),
+  /** `fingerprint` null puts the entry back in the queue. */
+  untilChange: (id: string, fingerprint: string | null) => post("/api/until-change", { id, fingerprint }),
+  importUntilChange: (marks: Record<string, string>) => post("/api/until-change?import", { marks }),
   star: (ticket: string, starred: boolean) => post(`/api/star?ticket=${encodeURIComponent(ticket)}`, { starred }),
   /** Starts a headless pi with the first message; resolves to its session id, or throws the reason. */
   newConversation: async (message: string, cwd: string): Promise<string> => {

@@ -17,6 +17,7 @@ export interface ModelInput {
   notes?: Dashboard["notes"];
   snoozedUntil?: Dashboard["snoozedUntil"];
   starred?: Dashboard["starred"];
+  untilChange?: Dashboard["untilChange"];
   /** Current status of each (ticket, thread) pair that has one. */
   threads?: ThreadStatusChange[];
   /** Runs that agent-dash parked. A parked run that ended is no signal, also not for an API error. */
@@ -277,6 +278,7 @@ export function buildDashboard(input: ModelInput): Dashboard {
     notes: input.notes ?? {},
     snoozedUntil: input.snoozedUntil ?? {},
     starred: input.starred ?? [],
+    untilChange: input.untilChange ?? {},
     // Filled by the server, which keeps each action's row in SQLite.
     diagrams: [],
     documents: [],
