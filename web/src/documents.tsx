@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dashboard, Run, TicketDocument } from "../../shared/types.ts";
 import { parseBrief } from "../../shared/brief.ts";
+import { runTitle } from "../../shared/runTitle.ts";
 import { BriefGlance, BriefView } from "./brief.tsx";
 import { useBriefOpen } from "./briefOpen.ts";
 import { age, api, elapsed, Markdown, plural, stamp } from "./lib.tsx";
@@ -241,7 +242,7 @@ export function DocumentView({ id, diagramId, data, now }: { id?: number; diagra
             <>
               <span className="sep">·</span>
               <a href={href(`c:${d.sessionId}`)} title="Open the conversation that made it">
-                {made ? (made.name ?? made.firstPrompt).slice(0, 80) : `conversation ${d.sessionId.slice(-6)}`}
+                {made ? runTitle(made).slice(0, 80) : `conversation ${d.sessionId.slice(-6)}`}
               </a>
             </>
           )}

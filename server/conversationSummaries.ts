@@ -47,7 +47,7 @@ export function runsToDraft(runs: Run[], rows: Map<string, db.ConversationSummar
 export async function draftOne(r: Run, file: string): Promise<ConversationGist> {
   const digest = digestSession(await readFile(file, "utf8"), DIGEST_CHARS);
   // Three short lines: the cheap model is enough.
-  const { cmd, args, env } = draftCommand(config.agent, gistPrompt(r.status, digest));
+  const { cmd, args, env } = draftCommand(config.agent, gistPrompt(r.status, digest, !r.name));
   const agent = run(cmd, args, { timeout: 90_000, env });
   // `-p` waits for stdin to close before it starts.
   agent.child.stdin?.end();
@@ -83,6 +83,12 @@ export function requestConversationSummaries(runs: Run[], fileFor: (sessionId: s
   for (let i = 0; i < workers; i++) void worker();
   if (started.length) onChange();
   return started;
+}
+
+/** Each session with the short title drafted for it, for a run with no session name. */
+export function withTitles<T extends { sessionId: string }>(sessions: T[]): (T & { title: string | null })[] {
+  const rows = db.conversationSummaries();
+  return sessions.map((s) => ({ ...s, title: rows.get(s.sessionId)?.title ?? null }));
 }
 
 /** The summaries of the given runs, for the page, each marked stale when the run moved on since. */

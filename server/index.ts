@@ -31,7 +31,7 @@ import * as settingsRoute from "./routes/settings.ts";
 import * as wikiRoute from "./routes/wiki.ts";
 import * as setupRoute from "./routes/setup.ts";
 import { confirmDeployMessage, deployStageOf, parseEnvironment, planMessage } from "../shared/sdlc.ts";
-import { requestConversationSummaries, summariesFor } from "./conversationSummaries.ts";
+import { requestConversationSummaries, summariesFor, withTitles } from "./conversationSummaries.ts";
 import { syncDiagrams } from "./diagramSync.ts";
 import { sweep as sweepParks } from "./park.ts";
 import { fetchMyPrs, ghLogin, type PullWithFeedback } from "./sources/github.ts";
@@ -172,7 +172,7 @@ async function dashboard(force: boolean) {
     const s = stateFor(k);
     return !s?.provider.exhaustive || s.all.has(k);
   };
-  const parsed = scanned.map((s) => (s.tickets.every(real) && s.suggestedTickets.every(real) ? s : { ...s, tickets: s.tickets.filter(real), suggestedTickets: s.suggestedTickets.filter(real) }));
+  const parsed = withTitles(scanned.map((s) => (s.tickets.every(real) && s.suggestedTickets.every(real) ? s : { ...s, tickets: s.tickets.filter(real), suggestedTickets: s.suggestedTickets.filter(real) })));
   const pulls = rawPulls.map(withToAddress).map((p) => (p.tickets.every(real) ? p : { ...p, tickets: p.tickets.filter(real) }));
   const exhaustiveMine = await Promise.all(providerStates.map((s) => (s.provider.exhaustive && s.provider.enabled ? s.provider.listMine().catch(() => []) : [])));
   const mine = [...remoteMine.flat(), ...exhaustiveMine.flat()];
@@ -557,7 +557,7 @@ const server = createServer(async (req, res) => {
       res.writeHead(code, { "Content-Type": "application/json" }).end(JSON.stringify(out));
     } else if (url.pathname === "/api/history") {
       const [parsed, reported, pulls] = await Promise.all([sessions.scan(), readReportedStatuses(config.statusDir), prs.get(false)]);
-      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify(buildHistory(parsed, reported, pulls, Date.now(), undefined, summaryDb.currentThreadStatuses())));
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify(buildHistory(withTitles(parsed), reported, pulls, Date.now(), undefined, summaryDb.currentThreadStatuses())));
     } else if (url.pathname === "/api/transcript") {
       const sessionId = url.searchParams.get("session") ?? "";
       const file = sessions.fileFor(sessionId) ?? ((await sessions.scan()) && sessions.fileFor(sessionId));

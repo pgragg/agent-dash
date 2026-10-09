@@ -1,4 +1,5 @@
 import { needsNothing, waitsOnReview } from "../../shared/conversationSummary.ts";
+import { runTitle } from "../../shared/runTitle.ts";
 import type { AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, Run, RunStatus } from "../../shared/types.ts";
 
 /**
@@ -174,7 +175,7 @@ export function groupNotification(g: Group): { title: string; body: string } {
 
 /** An agent stop as an update. Without a ready summary, the last reply is the best text we have. */
 export function runUpdate(r: Run, s: ConversationSummary | undefined): Update {
-  const name = r.name ?? r.firstPrompt;
+  const name = runTitle(r);
   const what = agentFinished(r, s) ? "Agent finished" : "Agent is waiting on you";
   return { key: `agent:${r.sessionId}`, title: what, line: `${cut(name, 60)}\n${summaryText(s) ?? (r.lastReply || "Waiting for you")}` };
 }

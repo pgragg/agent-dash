@@ -4,24 +4,30 @@
  * free of Node and React, so the server, the page and the tests share one copy.
  */
 import type { RunStatus } from "./types.ts";
+import { shortTitle } from "./runTitle.ts";
 import { User, user } from "./team.ts";
 
 export interface ConversationGist {
   about: string;
   latest: string;
   needs: string;
+  /** A short title for a run with no session name. Null or absent when not asked for or not given. */
+  title?: string | null;
 }
 
 /** A function, not a constant: the user's name comes from the settings after this module loads. */
 const statusText = (status: RunStatus): string =>
   ({ working: "The agent is working now.", awaiting_input: `The agent stopped and waits for ${user()}.`, finished: "The conversation ended." })[status];
 
-/** The prompt for the cheap model. `digest` is the chat without tool traffic, newest kept. */
-export function gistPrompt(status: RunStatus, digest: string): string {
+/**
+ * The prompt for the cheap model. `digest` is the chat without tool traffic, newest kept.
+ * `wantTitle`: the run has no session name, so the page needs a title for it too.
+ */
+export function gistPrompt(status: RunStatus, digest: string, wantTitle = false): string {
   return `Summarise this conversation between ${user()} (USER) and a coding agent (AGENT) for a card on ${user()}'s dashboard. ${statusText(status)}
 
-Write exactly three lines, in this format, with plain text and no markdown:
-ABOUT: <what the conversation is about, at most 15 words>
+Write exactly ${wantTitle ? "four" : "three"} lines, in this format, with plain text and no markdown:
+${wantTitle ? "TITLE: <a title for the conversation, at most 8 words, with no URLs>\n" : ""}ABOUT: <what the conversation is about, at most 15 words>
 LATEST: <what the agent's latest message says, at most 35 words>
 NEEDS: <what the agent needs from ${user()} now (an answer, a decision, an approval, a review), at most 25 words; or "Nothing">
 
@@ -34,7 +40,7 @@ ${digest}
 </conversation>`;
 }
 
-/** The three lines of the model's reply. Null when one is missing. */
+/** The lines of the model's reply. Null when ABOUT, LATEST or NEEDS is missing; TITLE is optional. */
 export function parseGist(raw: string): ConversationGist | null {
   const field = (name: string) =>
     raw
@@ -44,11 +50,11 @@ export function parseGist(raw: string): ConversationGist | null {
   const about = field("ABOUT");
   const latest = field("LATEST");
   const needs = field("NEEDS");
-  return about && latest && needs ? { about, latest, needs } : null;
+  return about && latest && needs ? { about, latest, needs, title: shortTitle(field("TITLE")) } : null;
 }
 
 /** Changes the basis of every summary, so a new prompt drafts the current ones again. */
-export const GIST_VERSION = 2;
+export const GIST_VERSION = 3;
 
 /** The prompt's marker for a stop where the next move is a reviewer's, not Piper's. */
 export function waitsOnReview(needs: string | null): boolean {

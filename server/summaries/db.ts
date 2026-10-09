@@ -225,7 +225,9 @@ CREATE TABLE IF NOT EXISTS conversation_summaries (
   needs        TEXT,
   error        TEXT,
   requested_at TEXT NOT NULL,
-  generated_at TEXT
+  generated_at TEXT,
+  -- A short title for a run with no pi session name. agent-dash only: the session keeps no name.
+  title        TEXT
 );
 
 -- One row per waiting agent that agent-dash parked: it stopped the pi process and kept what the
@@ -322,6 +324,7 @@ export function open(path = DB_PATH): DatabaseSync {
   // CREATE TABLE IF NOT EXISTS does not add a column to a table that is already there.
   // The copy below adds the CHECK on confirmed_by and the reference of plan_id.
   for (const c of SDLC_EVENT_COLUMNS) if (!db.prepare("SELECT 1 FROM pragma_table_info('SDLC_Event') WHERE name = ?").get(c)) db.exec(`ALTER TABLE SDLC_Event ADD COLUMN ${c} ${c === "plan_id" ? "INTEGER" : "TEXT"}`);
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('conversation_summaries') WHERE name = 'title'").get()) db.exec("ALTER TABLE conversation_summaries ADD COLUMN title TEXT");
   if (!db.prepare("SELECT 1 FROM pragma_table_info('tickets') WHERE name = 'starred_at'").get()) db.exec("ALTER TABLE tickets ADD COLUMN starred_at TEXT");
   for (const c of ["note", "landed_at"]) if (!db.prepare("SELECT 1 FROM pragma_table_info('lanes') WHERE name = ?").get(c)) db.exec(`ALTER TABLE lanes ADD COLUMN ${c} TEXT`);
   // Before the trigger below: copying the table drops the triggers on it.
@@ -1018,6 +1021,7 @@ export interface ConversationSummaryRow {
   about: string | null;
   latest: string | null;
   needs: string | null;
+  title: string | null;
   error: string | null;
   requestedAt: string;
   generatedAt: string | null;
@@ -1025,7 +1029,7 @@ export interface ConversationSummaryRow {
 
 export function conversationSummaries(): Map<string, ConversationSummaryRow> {
   const rows = open()
-    .prepare("SELECT session_id AS sessionId, status, basis, about, latest, needs, error, requested_at AS requestedAt, generated_at AS generatedAt FROM conversation_summaries")
+    .prepare("SELECT session_id AS sessionId, status, basis, about, latest, needs, title, error, requested_at AS requestedAt, generated_at AS generatedAt FROM conversation_summaries")
     .all() as unknown as ConversationSummaryRow[];
   return new Map(rows.map((r) => [r.sessionId, { ...r }]));
 }
@@ -1048,13 +1052,13 @@ export function claimConversationSummary(sessionId: string, basis: string, retry
 }
 
 /** Saves a finished draft. A failed one keeps the old texts. False when another draft took the row since. */
-export function finishConversationSummary(sessionId: string, basis: string, result: { about: string; latest: string; needs: string } | { error: string }, now = new Date()): boolean {
+export function finishConversationSummary(sessionId: string, basis: string, result: { about: string; latest: string; needs: string; title?: string | null } | { error: string }, now = new Date()): boolean {
   const d = open();
   if ("error" in result) return d.prepare("UPDATE conversation_summaries SET status = 'failed', error = ? WHERE session_id = ? AND basis = ? AND status = 'in_progress'").run(result.error, sessionId, basis).changes > 0;
   return (
     d
-      .prepare("UPDATE conversation_summaries SET status = 'done', about = ?, latest = ?, needs = ?, error = NULL, generated_at = ? WHERE session_id = ? AND basis = ? AND status = 'in_progress'")
-      .run(result.about, result.latest, result.needs, now.toISOString(), sessionId, basis).changes > 0
+      .prepare("UPDATE conversation_summaries SET status = 'done', about = ?, latest = ?, needs = ?, title = COALESCE(?, title), error = NULL, generated_at = ? WHERE session_id = ? AND basis = ? AND status = 'in_progress'")
+      .run(result.about, result.latest, result.needs, result.title ?? null, now.toISOString(), sessionId, basis).changes > 0
   );
 }
 

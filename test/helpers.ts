@@ -30,6 +30,7 @@ export function run(over: Partial<Run> = {}): Run {
     sessionFile: "/f.jsonl",
     cwd: "/repo",
     name: "A run",
+    title: null,
     firstPrompt: "do it",
     lastReply: "",
     lastMessage: "",
