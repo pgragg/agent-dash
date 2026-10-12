@@ -1,0 +1,3 @@
+#!/bin/sh
+# The demo's stand-in for the GitHub CLI: answers from scripts/demo/world.ts, never from GitHub.
+exec node "$(dirname "$0")/../fake-gh.ts" "$@"
