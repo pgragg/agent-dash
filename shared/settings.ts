@@ -34,6 +34,8 @@ export interface Settings extends Team {
   port: number;
   sessionsDir: string;
   claudeProjectsDir: string;
+  /** The `--permission-mode` of the Claude Code runs that the dash starts. */
+  claudePermissionMode: "auto" | "acceptEdits" | "default";
   opencodeDb: string;
   recentDays: number;
   jiraServer: string;
@@ -88,6 +90,7 @@ export const DEFAULT_SETTINGS: Settings = {
   port: 7777,
   sessionsDir: "~/.pi/agent/sessions",
   claudeProjectsDir: "~/.claude/projects",
+  claudePermissionMode: "auto",
   opencodeDb: "~/.local/share/opencode/opencode.db",
   recentDays: 14,
   jiraServer: "https://postmanlabs.atlassian.net",
@@ -116,6 +119,17 @@ export const SETTING_FIELDS: SettingField[] = [
     help: "The coding agent that agent-dash starts for runs, summaries and drafts, and whose session logs the board shows.",
     example: "pi",
     find: "The agent you use for your coding sessions. `pi --version`, `claude --version` and `opencode --version` show which ones are installed.",
+  },
+  {
+    key: "claudePermissionMode", group: "Agent", label: "Claude Code permissions", kind: "choice", env: "AGENT_DASH_CLAUDE_PERMISSION_MODE",
+    options: [
+      { value: "auto", label: "Auto: a classifier approves safe tool calls" },
+      { value: "acceptEdits", label: "Accept edits: ask before commands only" },
+      { value: "default", label: "Ask before each tool call" },
+    ],
+    help: "When a Claude Code run on the page asks before a tool call. Used when the agent is Claude Code; a run in iTerm uses your own Claude Code settings.",
+    example: "auto",
+    find: "Keep auto. Pick acceptEdits when `claude --permission-mode auto` says that auto mode is not available.",
   },
   {
     key: "userName", group: "You", label: "Your first name", kind: "text", pattern: /^[^\s"'`]{1,40}$/,
