@@ -4,7 +4,7 @@ A local dashboard for one person who oversees many coding agents at the same tim
 
 **It is the bridge of a ship, for software engineering.** A captain does not run to the engine room to change speed. The captain moves the engine telegraph on the bridge, and the crew does the work. agent-dash does this for a developer: you see your agents, tickets, PRs, reviews, smoketests and deploys on one page, and you give each order from there. Your coding agents are the crew.
 
-![The agent-dash board: a ranked queue of tickets on the left; on the right, the selected ticket with its SDLC progress bar, what needs you, and the drafted next steps](docs/images/board.png)
+![The agent-dash board: a ranked queue of tickets on the left; on the right, the selected ticket with its SDLC progress bar, what needs you, a parked ask, and the drafted next steps](docs/images/board.png)
 
 - **See what needs you.** One queue ranked by urgency, or a kanban with one column per SDLC stage. Each ticket shows what each agent did and what it needs from you, the asks of the agents that agent-dash parked, and how far the change is on its way to prod. The top bar has one **Needs you** count, and Chrome sends one notification per ticket.
 - **Act from the page.** Start, reply to, steer and stop agents. Move a ticket and set its due date, request a review in Slack, start an agent to fix a red PR, and plan and run smoketests, without a terminal tab.
@@ -636,3 +636,16 @@ pnpm typecheck
 ```
 
 Node 24 or later is needed, for its built-in TypeScript type stripping.
+
+### Screenshots
+
+The images in `docs/images/` come from a demo dashboard with fictional data only, so they never show your tickets, people or repos.
+
+```bash
+pnpm build && node scripts/demo/start.ts   # the demo on http://127.0.0.1:7790; leave it running
+node scripts/demo/shoot.ts                 # all images, or name some: node scripts/demo/shoot.ts board kanban
+```
+
+- **The data** is in `scripts/demo/world.ts`: the tickets, sessions, PRs and drafts of a made-up company (Acme, with Sam, Alex and Jordan).
+- **Nothing real reaches the demo.** `start.ts` sets `HOME` to `/tmp/agent-dash-demo`, writes a demo config, serves a fake Jira on port 7791, and puts fake `gh` and `pi` first on `PATH` (`scripts/demo/bin`). The server gets no other env var. The fake `pi` prints the drafts from `world.ts`, so no model runs.
+- **A check before each capture.** `shoot.ts` reads the text in the viewport and refuses to save an image that names a company, a real person or a real ticket project. agent-dash's own labels for the Postman and Fern environments are product text, so it shows them as "Staging" and "Acme" first.

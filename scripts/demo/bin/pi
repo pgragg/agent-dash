@@ -1,0 +1,11 @@
+#!/bin/sh
+# The demo's stand-in for pi: prints canned drafts from scripts/demo/world.ts, never calls a model.
+# The prompt goes in a file: a managed Mac can kill `node <script>` that gets a long argument.
+mode=""
+for a; do [ "$a" = "-p" ] && mode="-p"; last=$a; done
+f=$(mktemp)
+printf '%s' "$last" > "$f"
+node "$(dirname "$0")/../fake-pi.ts" $mode --prompt-file "$f"
+code=$?
+rm -f "$f"
+exit $code

@@ -6,7 +6,7 @@ A developer who runs many coding agents leaves the bridge all the time: iTerm fo
 
 This page is a short tour. The [README](../README.md) is the full reference.
 
-> The screenshots show fictional tickets, repos and people. They are from 2026-10-07, so some parts look different now: the top bar has one **Needs you** count, the navbar has **Documents** and **Wiki** (not Diagrams and Worktrees), and **Snooze** has the **Until something changes** option that replaced **Done for now**.
+> The screenshots show a demo dashboard with fictional tickets, repos and people. `scripts/demo` makes them again: see [Develop](../README.md#develop).
 
 ## The instruments: what you see
 
@@ -69,6 +69,8 @@ The PR panel shows feedback, checks (with the end of a failed job log), the desc
 ### Find past work
 
 **History** lists every chat on this machine, newest first, with a search box, and opens one to read. **Documents** lists every document. **Wiki** searches and opens the notes of your local Obsidian vault, read-only. → [Board](../README.md#board), [Documents](../README.md#documents), [Wiki](../README.md#wiki)
+
+![Wiki: one note of the local Obsidian vault, with a chart and the notes that link to it](images/wiki.png)
 
 ## The safety rules
 
