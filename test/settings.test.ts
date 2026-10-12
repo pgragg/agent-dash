@@ -8,7 +8,8 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { buildConfig, effectiveSettings, findConfigFile, readSettingsFile, setupNeeded, ticketPatternOf } from "../server/config.ts";
 import { handle } from "../server/routes/settings.ts";
-import { DEFAULT_SETTINGS, validateSettings } from "../shared/settings.ts";
+import { DEFAULT_SETTINGS, providerIdOf, validateSettings } from "../shared/settings.ts";
+import { providerOf, rowOf, rowsFromFlat } from "../web/src/providerRows.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "agent-dash-settings-"));
 
@@ -79,6 +80,31 @@ test("a bad ticketProviders entry is refused with its number", () => {
   assert.match(validateSettings({ ticketProviders: "x" }).errors.ticketProviders ?? "", /list/);
 });
 
+test("each bad ticketProviders entry gets its own error, and two entries cannot share an id", () => {
+  const { errors, providerErrors } = validateSettings({
+    ticketProviders: [{ type: "local", prefix: "AD", dir: "/a" }, { type: "local", prefix: "ad", dir: "/b" }, { type: "local", prefix: "AD", dir: "/c" }, { type: "jira", server: "nope" }],
+  });
+  assert.match(errors.ticketProviders ?? "", /^entry 2: prefix/);
+  assert.equal(providerErrors?.length, 4);
+  assert.equal(providerErrors?.[0], "");
+  assert.match(providerErrors?.[1] ?? "", /prefix/);
+  assert.match(providerErrors?.[2] ?? "", /local-AD is used by entry 1/);
+  assert.match(providerErrors?.[3] ?? "", /server/);
+  // An own id fixes the clash, and an empty id box means no id.
+  const ok = validateSettings({ ticketProviders: [{ type: "local", id: "", prefix: "AD", dir: "/a" }, { type: "local", id: "ad-2", prefix: "AD", dir: "/c" }] });
+  assert.deepEqual(ok.errors, {});
+  assert.deepEqual(ok.settings.ticketProviders.map(providerIdOf), ["local-AD", "ad-2"]);
+});
+
+test("the Settings page's rows: the flat fields make the same list as the server does without one", () => {
+  const flat = { jiraServer: "https://x.atlassian.net", jiraLogin: "sam@x.com", jiraTokenFile: "~/j.env", jiraExcludeProjects: "FSM, OLD", localTicketsDir: "~/tickets" };
+  const { settings, errors } = validateSettings({ ticketProviders: rowsFromFlat(flat).map(providerOf) });
+  assert.deepEqual(errors, {});
+  const s = { ...DEFAULT_SETTINGS, jiraServer: flat.jiraServer, jiraLogin: flat.jiraLogin, jiraTokenFile: flat.jiraTokenFile, jiraExcludeProjects: ["FSM", "OLD"], localTicketsDir: flat.localTicketsDir };
+  assert.deepEqual(buildConfig(settings).ticketProviders, buildConfig(s).ticketProviders);
+  assert.deepEqual(settings.ticketProviders.map((p) => providerOf(rowOf(p))), settings.ticketProviders);
+});
+
 test("ticket patterns escape nothing surprising and skip ignored keys in any position", () => {
   assert.deepEqual("FSDK-1 FSDK-10 EFSUP-2".match(ticketPatternOf(["FSDK", "EFSUP"], ["FSDK-1"])), ["FSDK-10", "EFSUP-2"]);
 });
@@ -125,6 +151,26 @@ test("Save needs the header, refuses a bad value without writing, and writes the
   writeFileSync(file, JSON.stringify({ ...written, ticketProviders: list }));
   assert.equal((await post({ jiraServer: "https://z.atlassian.net" })).status, 200);
   assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).ticketProviders, list);
+});
+
+test("Save with a ticketProviders list writes it; a bad list is refused per row and the file stays", async () => {
+  const post = (body: unknown) => fetch(base, { method: "POST", headers: { "X-Agent-Dash": "1" }, body: JSON.stringify(body) });
+  const list = [{ type: "local", prefix: "NOTE", dir: "/notes" }, { type: "local", prefix: "AD", dir: "/a" }];
+  const ok = await post({ ticketProviders: list });
+  assert.equal(ok.status, 200);
+  assert.deepEqual((await ok.json()).saved.ticketProviders, list);
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).ticketProviders, list);
+
+  const bad = await post({ ticketProviders: [{ type: "local", prefix: "NOTE", dir: "/notes" }, { type: "local", prefix: "NOTE", dir: "" }] });
+  assert.equal(bad.status, 400);
+  const body = await bad.json();
+  assert.match(body.errors.ticketProviders, /^entry 2: dir/);
+  assert.deepEqual(body.providerErrors, ["", "dir must be a folder"]);
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).ticketProviders, list);
+
+  // An empty list hands the trackers back to the flat fields.
+  assert.equal((await post({ ticketProviders: [] })).status, 200);
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).ticketProviders, []);
 });
 
 test("team settings: no name says the user, no channel turns review requests off, and only enabled environments are offered", async () => {

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { DEFAULT_SETTINGS, SETTING_FIELDS, type SettingKey, type Settings, splitList, type TicketProviderSettings, validateSettings } from "../shared/settings.ts";
+import { DEFAULT_SETTINGS, providerIdOf, SETTING_FIELDS, type SettingKey, type Settings, splitList, type TicketProviderSettings, validateSettings } from "../shared/settings.ts";
 import { setTeam } from "../shared/team.ts";
 
 const home = homedir();
@@ -119,8 +119,8 @@ export function ticketProvidersOf(s: Settings): TicketProviderConfig[] {
       ];
   return list.map((p) =>
     p.type === "jira"
-      ? { ...p, id: p.id ?? "jira", tokenFile: expandPath(p.tokenFile) }
-      : { ...p, id: p.id ?? `local-${p.prefix}`, dir: expandPath(p.dir) },
+      ? { ...p, id: providerIdOf(p), tokenFile: expandPath(p.tokenFile) }
+      : { ...p, id: providerIdOf(p), dir: expandPath(p.dir) },
   );
 }
 
