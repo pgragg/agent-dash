@@ -206,10 +206,11 @@ sequenceDiagram
 flowchart TB
     subgraph views["Views (URL Hash Routes)"]
         board["#/ Board<br/>Queue + Workspace"]
-        actions["#/actions<br/>Action List"]
         prsView["#/prs<br/>PR List"]
         history["#/history<br/>Chat History"]
-        diagrams["#/diagrams<br/>Agent Diagrams"]
+        documents["#/documents<br/>Documents"]
+        wiki["#/wiki<br/>Obsidian Wiki"]
+        settings["#/settings<br/>Settings"]
         conv["#/c:sessionId<br/>Conversation"]
     end
 
@@ -241,7 +242,7 @@ flowchart TB
     notes["Notes<br/>(local, per ticket)"]
     steps["Next Steps<br/>(AI-drafted)"]
     sdlc["SDLC Events<br/>(smoketests, deploys)"]
-    diagrams["Diagrams<br/>(from agent runs)"]
+    diagrams["Documents<br/>(briefs, and diagrams<br/>from agent runs)"]
 
     ticket --- runs
     ticket --- prs
@@ -419,6 +420,6 @@ Agent-dash provides:
 3. **Live Control**: Send replies, steer, and stop agents without switching to iTerm
 4. **SDLC Tracking**: Tracks progress from ideation through production deployment
 5. **AI Summaries**: Auto-generated summaries of agent conversations and next steps
-6. **Diagram Collection**: Captures and displays charts/diagrams agents create
+6. **Documents**: Ticket briefs and markdown documents, and each chart or diagram that an agent shows becomes a document
 
 All data stays local (SQLite + file system), with external APIs called only for Jira/GitHub/Slack data.
