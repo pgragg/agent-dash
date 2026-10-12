@@ -426,11 +426,32 @@ export const NOTES: Record<string, { minAgo: number; body: string }[]> = {
   ],
 };
 
-export const DOCUMENT = {
-  ticket: "ACME-412",
-  title: "How the release bot picks its config file",
-  body: "The bot reads `release.yml` first, and falls back to `legacy.yml`.\n\n```mermaid\nflowchart LR\n  merge[Merge to main] --> bot[Release bot]\n  bot --> q{release.yml?}\n  q -- yes --> new[Build targets from release.yml]\n  q -- no --> old[Build targets from legacy.yml]\n```\n\nA repo with neither file gets no release, and the bot logs a warning.",
-};
+export const DOCUMENTS = [
+  {
+    ticket: "ACME-412",
+    minAgo: 22 * 60,
+    title: "How the release bot picks its config file",
+    body: "The bot reads `release.yml` first, and falls back to `legacy.yml`.\n\n```mermaid\nflowchart LR\n  merge[Merge to main] --> bot[Release bot]\n  bot --> q{release.yml?}\n  q -- yes --> new[Build targets from release.yml]\n  q -- no --> old[Build targets from legacy.yml]\n```\n\nA repo with neither file gets no release, and the bot logs a warning.",
+  },
+  {
+    ticket: "ACME-77",
+    minAgo: 4 * 24 * 60,
+    title: "Search cluster move plan",
+    body: "The API moves first, the indexer last, so search stays up.\n\n```mermaid\nflowchart LR\n  a[Move search API] --> b[Switch DNS] --> c[Move indexer] --> d[Drain old cluster]\n```\n\n| Step | Downtime | Undo |\n|---|---|---|\n| Move search API | none | switch DNS back |\n| Move indexer | 10 min of stale results | move it back |",
+  },
+  {
+    ticket: "ACME-398",
+    minAgo: 9 * 60,
+    title: "Why the indexer never scaled",
+    body: "The indexer waits on disk, so its CPU stays under 40% while the queue grows.\n\n```mermaid\nflowchart LR\n  q[Job queue: 5,000] --> i[Indexer pods: 2]\n  i -. CPU 35% .-> h[Autoscaler: no change]\n```\n\nScaling on queue depth adds pods when the queue passes 1,000 jobs.",
+  },
+  {
+    ticket: "ACME-421",
+    minAgo: 7 * 60,
+    title: "GitHub App install request",
+    body: "**To:** Jordan\n\nPlease install the review bot's GitHub App on `acme`, with read access to `acme/web-platform`. web-platform#181 waits on it.",
+  },
+];
 
 export const WIKI: Record<string, string> = {
   "services/Release bot.md":
@@ -440,3 +461,105 @@ export const WIKI: Record<string, string> = {
   "services/Search.md": "---\ntype: service\ntags: [search]\n---\n# Search\n\nThe search API and its indexer. The indexer scales on queue depth.\n",
   "decisions/Use release.yml.md": "---\ntype: decision\nstatus: stale\n---\n# Use release.yml\n\nNew repos use `release.yml`. Old repos keep `legacy.yml` until they move.\n",
 };
+
+/** A ticket brief for ACME-412, so the Documents pictures show one. `day` is today's date. */
+export function brief(today: string) {
+  return {
+    schema: "ticket-brief/1",
+    key: "ACME-412",
+    title: "Release bot reads release.yml, and falls back to legacy.yml",
+    size: "M",
+    ask: "Make the release bot read `release.yml` first so that teams that moved to it get their releases again.",
+    verified_on: today,
+    links: [{ label: "release-bot#239", url: "https://github.com/acme/release-bot/pull/239" }],
+    glance: {
+      shifts: [
+        { what: "Config the bot reads", before: "`legacy.yml` only", after: "`release.yml`, else `legacy.yml`" },
+        { what: "Repos on release.yml", before: "get no release", after: "get a release on each merge" },
+        { what: "Repos on legacy.yml", before: "get a release", after: "no change" },
+      ],
+      numbers: [
+        { value: "14", label: "repos moved to release.yml and get no release", fact: "f1" },
+        { value: "1", label: "file changes: src/config.ts", fact: "f2" },
+      ],
+      headsups: [
+        {
+          title: "The Staging smoketest needs acme-demo access",
+          ticket_says: "Test it on Staging.",
+          body: "The Staging bot app is installed only on `acme-demo`, so the test token needs that org.",
+          facts: ["f3"],
+        },
+      ],
+    },
+    system: {
+      heading: "The bot picks one config file per repo, and today it never looks for the new one",
+      nodes: [
+        { id: "merge", label: "Merge to main", sub: "any Acme repo", col: 0, row: 0, kind: "actor" },
+        { id: "bot", label: "Release bot", sub: "builds the release", col: 1, row: 0 },
+        { id: "legacy", label: "legacy.yml", sub: "old config", col: 3, row: 0, kind: "store" },
+        { id: "release", label: "release.yml", sub: "new config", col: 3, row: 1, kind: "store" },
+      ],
+      views: [
+        {
+          id: "today",
+          label: "Today",
+          caption: "The bot reads only legacy.yml, so a moved repo gets nothing.",
+          hide: ["release"],
+          edges: [
+            { from: "merge", to: "bot" },
+            { from: "bot", to: "legacy", label: "always" },
+          ],
+          pins: [{ node: "legacy", text: "The only file read: 14 repos on release.yml get no release.", fact: "f1" }],
+        },
+        {
+          id: "done",
+          label: "Done",
+          caption: "The bot reads release.yml first, and legacy.yml only when it is missing.",
+          edges: [
+            { from: "merge", to: "bot" },
+            { from: "bot", to: "release", tone: "new", label: "first" },
+            { from: "bot", to: "legacy", label: "fallback" },
+          ],
+        },
+      ],
+    },
+    done: {
+      items: [
+        { text: "A merge in a repo with `release.yml` makes a release.", verify: "The Staging smoketest in `acme-demo/release-smoke` passes." },
+        { text: "A repo with only `legacy.yml` still gets its release.", verify: "`pnpm test test/config.test.ts`" },
+      ],
+      ac_review: [{ ac: "AC 1: the bot reads release.yml", verdict: "change", note: "Add: and falls back to legacy.yml." }],
+    },
+    path: {
+      steps: [
+        { title: "Read release.yml first", who: "agent opens the PR, Alex merges", state: "done", detail: "release-bot#239 changes `src/config.ts`.", gate: "CI is green.", undo: "Revert the PR." },
+        { title: "Smoketest on Staging", who: "agent, after Sam gives the token acme-demo access", state: "now", detail: "Run the confirmed plan again.", gate: "The smoketest passes.", undo: "Delete the test release." },
+        { title: "Ship to prod", who: "Sam", state: "next", detail: "Deploy the 4.9.20 build to prod.", gate: "A moved repo gets a release.", undo: "Roll back to 4.9.19." },
+      ],
+    },
+    work: {
+      first_move: "Read `src/config.ts`, then the Staging smoketest plan on the ticket.",
+      repos: [
+        {
+          repo: "acme/release-bot",
+          url: "https://github.com/acme/release-bot",
+          why: "The config loader.",
+          paths: ["src/config.ts"],
+          pr: { label: "#239 read release.yml first", url: "https://github.com/acme/release-bot/pull/239", state: "merged" },
+          who: "agent",
+          human_only: "The prod deploy.",
+        },
+      ],
+    },
+    risks: {
+      items: [{ text: "A repo with both files changes its targets.", mitigation: "The bot logs which file it read.", fact: "f2" }],
+      questions: [{ q: "Skip or fail a repo with neither file?", owner: "Alex" }],
+    },
+    facts: [
+      { id: "f1", text: "14 repos have release.yml and no legacy.yml.", source: "`gh search code filename:release.yml org:acme`", how: "verified", as_of: today },
+      { id: "f2", text: "release-bot#239 changes only src/config.ts.", source: "release-bot#239", how: "read", as_of: today },
+      { id: "f3", text: "The Staging bot app is installed only on acme-demo.", source: "ACME-412 smoketest result", how: "verified", as_of: today },
+    ],
+    glossary: [{ term: "legacy.yml", means: "The release config that repos used before release.yml." }],
+  };
+}

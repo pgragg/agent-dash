@@ -32,12 +32,14 @@ const SANITIZE = `(() => {
 
 /**
  * What must never be in a screenshot: company names, real people, and real ticket projects. Only
- * the text inside the viewport counts, because the capture holds only the viewport.
+ * the text that the capture holds counts: inside the element, or else inside the viewport.
  */
-const GUARD = `(() => {
+const guard = (selector?: string) => `(() => {
   const bad = /postman|fern|piper|gragg|\\b(FSDK|EFSUP|FSM)-\\d|cloud9|enterprise\\.slack/i;
-  const seen = (r) => r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth;
-  const parts = [document.title];
+  const el = ${selector ? `document.querySelector(${JSON.stringify(selector)})` : "null"};
+  const box = el ? el.getBoundingClientRect() : { top: 0, left: 0, bottom: innerHeight, right: innerWidth };
+  const seen = (r) => r.width > 0 && r.height > 0 && r.bottom > box.top && r.right > box.left && r.top < box.bottom && r.left < box.right;
+  const parts = el ? [] : [document.title];
   const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   for (let n; (n = walk.nextNode()); ) {
     if (!n.nodeValue.trim()) continue;
@@ -72,24 +74,34 @@ const clickText = (selector: string, text: string) =>
     return "ok";
   })()`);
 
+/** A window this tall holds the whole ticket view: an element capture outside the window comes out blank. */
+const TALL = 4400;
+
+/** Tags the element that `find` returns, so a shot can capture an element with no selector of its own. */
+const mark = (find: string) => {
+  if (evalJs(`(() => { const el = ${find}; if (!el) return "missing"; el.setAttribute("data-shot", ""); return "ok"; })()`) !== '"ok"') throw new Error(`no element for ${find}`);
+  return "[data-shot]";
+};
+
 /** Each shot starts from a fresh page: no layout, width or "seen" marks kept from the last one. */
-async function open(hash: string) {
+async function open(hash: string, height = 1000) {
   ab("open", `${BASE}/${hash}`);
-  ab("set", "viewport", "1600", "1000");
+  ab("set", "viewport", "1600", String(height));
   evalJs("localStorage.clear(); sessionStorage.clear()");
   ab("reload");
   await sleep(2500);
 }
 
-async function capture(name: string) {
+/** A shot is the viewport, or one element when `selector` is set. */
+async function capture(name: string, selector?: string) {
   for (let attempt = 0; attempt < 3; attempt++) {
     evalJs(SANITIZE);
-    const before = JSON.parse(evalJs(GUARD));
+    const before = JSON.parse(evalJs(guard(selector)));
     if (before) throw new Error(`${name}: the page shows "${before}"`);
     const tmp = `${ROOT}/${name}.png`;
-    ab("screenshot", tmp);
+    ab("screenshot", ...(selector ? [selector] : []), tmp);
     // A live update can re-render the page between the check and the capture: check again.
-    if (!JSON.parse(evalJs(GUARD))) {
+    if (!JSON.parse(evalJs(guard(selector)))) {
       renameSync(tmp, `${OUT}${name}.png`);
       console.log(`docs/images/${name}.png`);
       return;
@@ -98,7 +110,8 @@ async function capture(name: string) {
   throw new Error(`${name}: the page kept changing`);
 }
 
-const SHOTS: Record<string, () => Promise<void>> = {
+/** Each shot sets up the page, and returns the element to capture, or nothing for the viewport. */
+const SHOTS: Record<string, () => Promise<string | void>> = {
   async board() {
     await open("#/t:ACME-412");
   },
@@ -137,6 +150,52 @@ const SHOTS: Record<string, () => Promise<void>> = {
   async settings() {
     await open("#/settings");
   },
+    async "ticket-view"() {
+    await open("#/t:ACME-412", TALL);
+    return "article.workspace";
+  },
+  async queue() {
+    await open("#/t:ACME-412", 1500);
+    return "nav.rail";
+  },
+  async "why-list"() {
+    await open("#/t:ACME-412", TALL);
+    return "article.workspace .why";
+  },
+  async "next-steps"() {
+    await open("#/t:ACME-412", TALL);
+    return "#next-steps";
+  },
+  async sdlc() {
+    await open("#/t:ACME-412", TALL);
+    return "article.workspace .sdlc";
+  },
+  async agents() {
+    await open("#/t:ACME-412", TALL);
+    return mark(`[...document.querySelectorAll("article.workspace h2.section-title")].find((h) => h.textContent.startsWith("Agent"))?.parentElement`);
+  },
+  async "smoketests-card"() {
+    await open("#/t:ACME-412", TALL);
+    return "#smoketests";
+  },
+  async "ticket-section"() {
+    await open("#/t:ACME-412", TALL);
+    ab("press", "t");
+    await sleep(1500);
+    return "section.ticket-panel";
+  },
+  async document() {
+    await open("#/doc:1");
+    await sleep(1500);
+  },
+  async "ticket-brief"() {
+    await open("#/doc:5", 3600);
+    await sleep(1500);
+    return "article.workspace";
+  },
+  async documents() {
+    await open("#/documents");
+  },
   async wiki() {
     await open("#/wiki:services/Release bot.md");
     await sleep(1500);
@@ -147,8 +206,7 @@ const names = process.argv.slice(2).length ? process.argv.slice(2) : Object.keys
 try {
   for (const name of names) {
     if (!SHOTS[name]) throw new Error(`no shot named ${name}; the shots are ${Object.keys(SHOTS).join(", ")}`);
-    await SHOTS[name]();
-    await capture(name);
+    await capture(name, (await SHOTS[name]()) ?? undefined);
   }
 } finally {
   ab("close");

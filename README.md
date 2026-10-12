@@ -90,15 +90,15 @@ The navbar at the top switches between the views: **Board** (`#/`, the queue and
 ### Board
 
 - **Left: the queue.** One entry per ticket (or per ticket-less run or PR), ranked by its most urgent signal (see [Queue ranking](#queue-ranking)). Each entry in **Up next** also shows what its agent needs from you (from its [summary](#conversation-summaries)) and one button to the place where you act (see [Needs you](#needs-you)). Under it: **Parked asks** (see [Needs you](#needs-you)), **Waiting on others** (only context left, such as a PR out for review, or an agent whose only ask is that a reviewer approves its PR), **Done tickets** (closed tickets that still have agents open, tagged green **done**; never in the queue), **Agents at work**, **Agents finished** (agents that stopped and whose [summary](#conversation-summaries) says they need nothing; never in the queue, unless a smoketest of theirs still needs you), **Snoozed**, and **Quiet tickets** (your tickets with nothing going on). An entry with several signals shows the most urgent one, with the others as tags: for example "Agent is waiting on you" with **in review**.
-- **Right: a workspace for the selected entry.** In order, with the parts that you act on first:
-  - **The header**: the status, the title, the ticket key, status, priority and due date, then **Write a ticket brief** (see [Documents](#documents)), **Star**, **Snooze** and **Full screen**.
-  - The [SDLC progress bar](#sdlc-progress-and-smoketests).
-  - **The "why" list**: why the entry is on the board, in three groups. **Needs you** has each signal that waits on you, with its action button (a PR signal has its [verb button](#pr-verbs)). **Parked asks** has each [parked agent](#parked-agents) of the ticket that still asks something, with what it needs, a reply box, **Send**, **Resume** and **Dismiss**. **Updates** has the context, such as a PR out for review or an agent that finished: the newest 3, and **Show N more**. Each group is newest first, and a row that came since you last looked is marked **new** (see below).
-  - The drafted [next steps](#next-steps-summaries).
-  - Each live agent's [summary](#conversation-summaries) with a reply box (see [Live control](#live-control)). With no live agent, the last run shows. **Show the conversation** on an agent card shows the whole chat in the card (prompts and replies, no tool traffic), so you can read an agent on the board or on its page.
-  - Then the PRs, the [Smoketests](#sdlc-progress-and-smoketests), the [ticket brief](#ticket-briefs) when there is one, the [Ticket](#the-ticket-section) section, **Start a new agent**, your notes, the [Documentation](#documents), and the run history, with the runs that only [mention the ticket](#how-a-run-links-to-a-ticket).
+
+  <img src="docs/images/queue.png" width="320" alt="The queue: Starred and Up next entries, each with what its agent needs from you and one button to the place where you act, then Snoozed and Quiet tickets">
+
+- **Right: the ticket view** of the selected entry. See [The ticket view](#the-ticket-view).
 - **Width and full screen**: drag an edge of the workspace (or the left edge of the kanban drawer) to make it wider or narrower, and double-click the edge for the default 860 px. The browser keeps the width in localStorage, and the queue and the kanban use the same width. **Full screen** (`F`), in the workspace header row next to **Snooze**, shows the workspace across the full window under the top bar, without the rail or the kanban columns. `F` or `Esc` leaves it. A reload always gives the normal board. In the kanban drawer, **Close** sits next to it. No button floats over the workspace.
 - **Queue or Kanban** (`V`): the toggle at the top of the board picks the layout, and the browser keeps your choice in localStorage. **Kanban** shows the same entries as cards, in one column per [SDLC stage](#sdlc-progress-and-smoketests), then a **No ticket** column. A card sits in the column of the furthest stage that its ticket reached, and each column keeps the queue order. Snoozed and quiet entries are dimmed. A click on a card (or `↵`) opens its workspace in a drawer over the columns, and `Esc` closes it. A card of an open ticket with drafted next steps also shows its top next step as a button that says what a click does, for example **▶ Agent opens prod parcel bump PR** or **▶ Move ticket to In Review**, written from the exact action that the click takes, so you start that step without opening the ticket (see [the card button](#the-kanban-card-button)). The column uses only the PRs on the board (yours, from the last 14 days), so a PR by someone else does not move the card, but the progress bar in the workspace shows it. The search box in the kanban bar (`/`) keeps only the cards that match every word, case-insensitive, best match first in each column. A match on a ticket key (`FSDK-1502`, `AD-11`, or only `1502`) counts much more than a match in the text (the title, run names, prompts and replies, PR titles and branches), and an exact key counts more than a longer one, so `AD-1` puts AD-1 above AD-11. `↵` in the box opens the first card, and `Esc` clears the box. The rules are in `web/src/kanban.ts`.
+
+  ![The kanban: one column per SDLC stage, each card with its top next step as a button that says what a click does](docs/images/kanban.png)
+
 - **Snooze** hides an entry. The list next to the button has **Until something changes** first, then the times. The button presses the picked option, and `Z` does the same.
   - **Until something changes** (`E` does it at once) hides a queue entry until one of its signals changes, so the queue works like an inbox. It shows in **Snoozed** in the rail, tagged **until a change**, and **Back to the queue** brings it back. The mark is saved in SQLite (`until_change`: the entry id, its fingerprint, and the time of the click), so every origin of the page (`127.0.0.1:7777`, `agent-dash.pgragg.com`) sees it. `POST /api/until-change` with `{id, fingerprint}` sets it, and `{id, fingerprint: null}` clears it. The page kept these marks in localStorage (`agent-dash:done-for-now`) before. On the first load on each origin, it copies them to SQLite one time (`POST /api/until-change?import` with `{marks}`) and removes the key; a mark that SQLite has already, also a cleared one, stays as it is.
   - **A time** hides a ticket from the whole board until then, for a ticket that needs a follow-up later: 1 hour, 4 hours, tomorrow at 9:00 (the default), 3 days, next Monday at 9:00, 1 week, 2 weeks, or a date. Options of a day or more come back at 9:00 local time. A new signal does not bring the ticket back early. These tickets show under **Snoozed** in the rail, with their time, and **Unsnooze** brings one back now. The time is saved in SQLite (`tickets.snoozed_until`); `POST /api/snooze?ticket=KEY` with `{until}` sets it, and `{until: null}` clears it.
@@ -117,6 +117,30 @@ The navbar at the top switches between the views: **Board** (`#/`, the queue and
   - **Slack** has no login that the dash can refresh. It checks both Slack logins again, and gives the steps for only the one that failed: for search, how to save a new Slack login state from your Chrome; for **Post to Slack**, the **Slack sign-in command** [setting](#configuration).
 - **Slack health**: the top bar shows **Slack** next to the other sources, and **Slack down** when one of its two logins fails. Posting: each refresh runs `scripts/slack-post.ts --check`, which connects with the pi-mcp-adapter `slack` grant and checks that it can post (`chat:write`), and posts nothing. Search: the server reads the Slack login state file and checks its session cookie. It never opens Slack with that login to test it, because a headless browser with copied cookies can get the session revoked. So a login that Slack ended early shows when a next-steps draft says so: when the newest finished draft has a **Gaps** line about an expired Slack login, Slack is down until the login state file is saved again or **Fix Slack login** works. With neither login set up, the top bar says **Slack off**. The rules are in `server/sources/slack.ts`.
 - `#/t:ABC-123` or `#/r:<sessionId>` in the URL selects an entry. See [Addresses](#addresses) for the other objects.
+
+### The ticket view
+
+The ticket view is the main place where you work. It shows everything about one ticket, with the parts that you act on first. It is the right side of the board, and the kanban drawer. `F` shows it across the full window.
+
+![The whole ticket view: the header, the SDLC progress bar, the "why" list with a parked ask, the next steps, two agent cards, the PR, the Smoketests card, the ticket brief, the Ticket section, Start a new agent, notes, documentation and history](docs/images/ticket-view.png)
+
+In order:
+
+- **The header**: the status, the title, the ticket key, status, priority and due date, then **Write a ticket brief** (see [Documents](#documents)), **Star**, **Snooze** and **Full screen**.
+- The [SDLC progress bar](#sdlc-progress-and-smoketests).
+- **The "why" list**: why the entry is on the board, in three groups. **Needs you** has each signal that waits on you, with its action button (a PR signal has its [verb button](#pr-verbs)). **Parked asks** has each [parked agent](#parked-agents) of the ticket that still asks something, with what it needs, a reply box, **Send**, **Resume** and **Dismiss**. **Updates** has the context, such as a PR out for review or an agent that finished: the newest 3, and **Show N more**. Each group is newest first, and a row that came since you last looked is marked **new** (see **New since you last looked** under [Board](#board)).
+
+  ![The "why" list: a blocked smoketest under Needs you, and a parked agent's ask with a reply box, Send, Resume and Dismiss](docs/images/why-list.png)
+
+- The drafted [next steps](#next-steps-summaries).
+
+  ![Next steps: the state, three numbered steps with a Start agent button each, the blockers and the gaps](docs/images/next-steps.png)
+
+- Each live agent's [summary](#conversation-summaries) with a reply box (see [Live control](#live-control)). With no live agent, the last run shows. **Show the conversation** on an agent card shows the whole chat in the card (prompts and replies, no tool traffic), so you can read an agent on the board or on its page.
+
+  ![Two agent cards: one waits with what it needs from you in orange, one works and shows the command that it runs now, each with a reply box](docs/images/agents.png)
+
+- Then the PRs, the [Smoketests](#sdlc-progress-and-smoketests), the [ticket brief](#ticket-briefs) when there is one, the [Ticket](#the-ticket-section) section, **Start a new agent**, your notes, the [Documentation](#documents), and the run history, with the runs that only [mention the ticket](#how-a-run-links-to-a-ticket).
 
 ### Parked agents
 
@@ -148,12 +172,16 @@ When the window is narrow, the top bar drops its least useful text first: **upda
 
 Your open PRs, grouped by ticket. A PR links to a ticket as on the board, so a PR with no key in its title or branch takes the ticket of the run that opened it. A PR that names two tickets shows under both. The groups of starred tickets come first. Then the groups with the most urgent PR come first, in the [queue ranking](#queue-ranking) order, and PRs with no ticket come last. Under each PR, the signals that need you (for example "CI is red: lint, test") show with the reason and a [verb button](#pr-verbs). The ticket title opens that ticket on the board. A click on a PR row, here or on the board, opens the [PR panel](#pr-panel); the small `↗` at the end of the row opens GitHub. The CI tag of a red PR names the failing checks. Only PRs updated in the last 14 days show, because the GitHub fetch uses that window. `J`/`K` select a PR, and `↵` opens it.
 
+![The PRs view: open PRs grouped by ticket, each with its CI and review state, a drafted Slack review request, and a verb button such as Fix CI or Address review](docs/images/prs.png)
+
 **Review requests.** Under each PR is a drafted Slack message in the team's format, for example `PR: bind slack token env vars https://github.com/postman-eng/cloud9-parcels-production-deployments/pull/13612`. You can edit it. **Post to Slack** (or `⌘↵` in the message) posts it to your review channel (a [setting](#configuration); with none, PRs show no draft) as you, and the click is your approval. After Slack takes the message, the server records a `review_request` [SDLC event](#sdlc-progress-and-smoketests) with the PR, the text and the permalink, on the PR's tickets, so the ticket's **Review requested** stage turns done. The PR then shows "Review requested … Open in Slack", and **Post again** opens the draft again. If the post fails, nothing is recorded, and the PR shows Slack's reason.
 
 - **Drafts.** When the PRs view loads, it calls `POST /api/review-drafts`. The server takes each open PR from its own list that has no draft, marks it in progress, and drafts at most 6 at once in the background: it reads the PR body and files with `gh pr view`, then runs one tool-less `pi -p --no-session` turn with a cheap model (`AGENT_DASH_DRAFT_MODEL`, default `anthropic/claude-haiku-4-5`). The model writes only the phrase; the server adds `PR:` and the link. Each finished draft reloads the page. A failed or stuck draft is tried again on a page load after 5 minutes; meanwhile the message starts from the PR title. **Redraft** (`POST /api/review-drafts?pr=<url>`) asks for a new draft.
 - **Posting.** `POST /api/review-requests` with `{prUrl, text}`, with the `X-Agent-Dash` guard. The PR must be one of the dashboard's PRs. The server runs `scripts/slack-post.ts`, which posts through Slack's hosted MCP with your own OAuth grant from pi-mcp-adapter, because copied Slack cookies get the session revoked. The grant needs the `chat:write` scope. The adapter config hides the send tool from pi agents (`excludeTools`), so only this button posts. If the grant has no `chat:write`, the PR shows how to sign in again, with the **Slack sign-in command** [setting](#configuration).
 
 ### PR panel
+
+![The PR panel: the signal with its Fix CI button, the feedback with one thread to address, the ticket and the run that opened the PR, and the failed check with the end of its job log](docs/images/pr-panel.png)
 
 `#/pr:<owner>/<repo>/<number>` shows one PR without GitHub. It shows:
 
@@ -191,6 +219,8 @@ A GitHub PR link in a message opens the PR panel, and a Jira link to a ticket on
 
 The **Ticket** section, under the ticket brief, is closed at first. A click or `T` opens it (`T` also scrolls to it), and the page then reads the ticket from Jira: the description and the 10 newest comments. `GET /api/ticket?key=KEY` (with the `X-Agent-Dash` guard, because each call can reach Jira with your token) makes three read-only GETs (`/rest/api/3/issue/KEY`, its `/comment` list, and its `/transitions`), turns Jira's rich text (ADF) into markdown (`shared/adf.ts`), and caches the answer for 2 minutes. **Reload** reads it again. The `KEY ↗` link and the `↗` in the section still open the ticket in Jira.
 
+![The Ticket section: the Jira description and newest comment, then Move to and Set due date](docs/images/ticket-section.png)
+
 The section also has the verbs that the ticket's provider supports: both for Jira, **Move to** for a local ticket. Your click is the approval of that one change.
 
 - **Move to**: the statuses that Jira's transitions list offers now, plus **In Progress (through To Do)** when the ticket is in Backlog, because FSDK's Backlog cannot reach In Progress in one transition (`moveTargets` in `shared/jiraVerbs.ts`). The click moves the ticket at once, with no agent: `POST /api/ticket/move?key=KEY` (body `{to, from}`, with the `X-Agent-Dash` guard). `from` is the status that the page showed. If Jira holds another one now, or cannot reach `to`, the server changes nothing and answers 409. Each transition sends its screen fields, as the `jira-tickets` skill does: FSDK screens reject an empty field that Jira calls optional, so the server echoes each value the ticket holds and fills an empty date (the due date two weeks out, any other date with today). A move into an in-progress status sets the default due date first when the ticket has none. The board shows the new status at once.
@@ -201,6 +231,8 @@ An **Overdue** or **Due soon** line in the "why" list has a **New due date…** 
 ### SDLC progress and smoketests
 
 A progress bar at the top of each ticket shows where its change is on the way to prod. The order is a recommendation, not a gate: when a later stage is done or skipped, the open stages before it show as **skipped**. The rules are in `shared/sdlc.ts`.
+
+![The SDLC progress bar: done stages in green, a blocked Beta smoketest, the hint for the next stage, and its buttons](docs/images/sdlc.png)
 
 | Stage | Done when | Source |
 |---|---|---|
@@ -226,6 +258,9 @@ A progress bar at the top of each ticket shows where its change is on the way to
   - Review requested: **Request review** opens the PRs view, where each open PR has a drafted Slack message. When it is done, **Open in Slack** opens the message.
   - In Beta and In Prod: **Confirm in Argo** (in any state until the stage is done, also when no deploy PR or earlier stage is seen) starts an agent that checks the Argo app read-only and records a deploy event. **Check off by hand** records it at once, for a change with no Argo deploy. **Undo** removes the newest deploy event.
 - **The Smoketests card** has one row per smoketest stage pair of the bar: **Local** (localhost), **Beta** (Postman Beta or Fern Dev), and **Prod** (Postman Prod or Fern Prod). Each row shows a **Plan** and a **Run** lamp (the bar's state of its two stages, with the same colours and signs), a **History** strip (one dot per execution, oldest first, green passed, red failed, grey blocked, yellow running, dashed skipped; the newest 12, with a count of the older ones), and the **Latest** line: the newest plan or execution, its environment and its age. A plan that waits shows what Confirm lets it write, on amber. The row of the bar's next stage has a dark left edge, and a row after it is dimmed, with "after <next stage>". A row shows its buttons only when it is the next stage, or when a plan or smoketest on it waits or runs: the same buttons as the bar (Plan, Confirm, Run the plan again, Skip, Open the agent), with an environment list on Beta and Prod. A click on a row opens it, one row at a time: its buttons, and its plans and executions, newest first. **See the plan** on the bar opens the row and scrolls to the plan. **Record by hand**, at the top, saves a smoketest execution that you ran yourself. A finished execution shows one row: its outcome, the whole summary that its agent wrote at the end (on more lines when it is long), the environments, and its age. A row from before summaries shows the first line of its results. A click on the line shows the full row: the time, how long it ran, the environment tags, the outcome, a link to its plan, the test details, and the results (closed at first). A running or skipped execution always shows the full row. A plan shows its status (planning, waits for your confirmation, confirmed by you, or accepted with no Beta or Prod state changes), then two sections: **Writes**, a short summary of the state changes and their environments (or none), and **Plan**, a very short summary of the plan. The exact state changes that Confirm approves and the full plan are closed under them. A plan that waits shows **Confirm** at the top, under its status. A plan that runs or waits is open. A running plan shows the planning agent's conversation and reply box at the bottom. A waiting plan shows **Ask the agent for changes**, which opens them: write to the agent there to change the plan, and it records the new version. In the conversation, the first message (agent-dash's plan prompt) is closed. A plan that is accepted or confirmed shows one line, like a finished execution: a green **plan** tag, the first two lines of its plan summary, the environments, and its age. A click on the line, or **See the plan** on the bar, opens the full row. A plan from before the summaries opens its exact state changes and its full plan while it waits. **Delete** removes one; a deleted plan keeps its executions.
+
+  ![The Smoketests card: one row per environment with its Plan and Run lamps, the history of its runs, and the latest result; the Beta row is blocked and shows Run the plan again and Skip smoketest](docs/images/smoketests-card.png)
+
 - **A tag is the environment under test**, not every system that the test touched. A local frontend against the Postman Beta backend tests Beta, so its tag is Postman Beta. Two tags are for the rare test where both sides are under test. The tags are `localhost`, `fern_dev`, `fern_prod`, `postman_beta` and `postman_prod` (or their labels: "Fern Dev" and so on).
 - **The next-steps summary and the context of a new agent** both get the progress, one line per stage. The summary prompt tells the run to follow the order, to name the environment when the next stage is a smoketest, and to plan no step for a skipped stage.
 - **A new or changed event redrafts the next steps.** When a smoketest, a skip, a deploy, or a review request is recorded or changed (on the page or with the script), the server starts a new [next-steps](#next-steps-summaries) draft for each ticket of the event, because the old steps can name a stage that is now done. A change is any `UPDATE` of its `SDLC_Event` row: a SQLite trigger marks the event's tickets for a new draft, so it works for every writer. A draft that is in progress and started before the event was made or changed is stopped and replaced. A smoketest that only started does not start a draft, because it moves no stage yet; its result does. A plan never starts a draft: it changes several times in minutes, and the trigger skips `smoketest_plan` rows. A ticket that is not on the board gets no draft. A delete does not start a draft.
@@ -280,7 +315,12 @@ An object that is not on the page any more (an old run, a merged PR) shows a not
 
 A document is markdown, with mermaid diagrams and images inline. Documents replace diagrams: each diagram that an agent shows becomes a document, so you can add text to it and change it.
 
+![The Documents view: a ticket brief first, then the other documents of each ticket, each with a preview of its text and charts](docs/images/documents.png)
+
 - **Where it shows**: a ticket's summary shows below the PRs and the Smoketests, above the [Ticket](#the-ticket-section) section. A ticket brief starts closed: its title, its one-line ask, the "At a glance" section and **Read the brief**. The workspace remembers open or closed for each ticket, in the browser's localStorage. A closed markdown summary shows only its title. `#/doc:<id>` always shows the whole brief. The ticket's other documents are in the **Documentation** section, lower on the page; a click on a title opens it. A run with no ticket shows its own documents, and so does a conversation's page. **Documents** (`#/documents`) lists every document with a preview and a search box. A document's page (`#/doc:<id>`) shows it in full, with its ticket and its conversation, **Edit** and **Delete**.
+
+  ![A document's page: its ticket, Edit and Delete, and the markdown with a mermaid chart](docs/images/document.png)
+
 - **Write a ticket brief**: the button is at the top of the workspace, next to the star, and shows only while the ticket has no `ticket-summary` document. It makes an empty one at once, so the button goes and a second click cannot make two, and starts a headless agent in the workspace's folder, with the ticket's context and the prompt in `ticketSummaryMessage` (`server/documents.ts`). The agent follows [docs/ticket-brief/GUIDE.md](docs/ticket-brief/GUIDE.md) and saves a [ticket brief](#ticket-briefs). The document says "An agent writes this ticket brief" until the agent saves it.
 - **Edit**: **Edit** opens a prompt box under the document's head. **Ask the agent** (`⌘↵`) starts a headless agent with the ticket's context and your prompt. It reads the document, changes it, and saves the new version with the same id. Until then the document shows your prompt and a link to the conversation. One edit at a time per document.
 - **Stop waiting / Remove**: when the editing agent stops without a save, the document says so. **Stop waiting** ends the edit and keeps the old version; if the agent saves later, its version still wins. On a ticket brief with no first version, **Remove** deletes it, so the button comes back.
@@ -290,6 +330,8 @@ A document is markdown, with mermaid diagrams and images inline. Documents repla
 ### Ticket briefs
 
 A ticket brief is a ticket summary whose body is a JSON spec (`"schema": "ticket-brief/1"`), not markdown. It is one visual-first page that gets an engineer who does not know the repo up to speed on the ticket in about five minutes. A markdown ticket summary from before shows as before.
+
+![A ticket brief: the ask, At a glance with the today-and-done rows, two numbers and a heads-up, the system map, what done looks like, the path, where the work is, and the risks](docs/images/ticket-brief.png)
 
 - **The page has a fixed shape**: the ask; at a glance (Today → When done rows, three numbers, heads-ups where the ticket and reality differ); one system map with several views on the same canvas (Today / During / Done: boxes keep their place, and show NEW, CHANGED and REMOVED, with the problems pinned); what done looks like, each item with a proof, and the acceptance criteria checked; the path with gates and undos; at most three tradeoff matrices, each with one recommendation and a named decider; who notices; where the work is, with what only a human may do; the top risks; and the evidence ledger (each fact badged verified, read, said or inferred), collapsed.
 - **One renderer** (`shared/briefRender.ts`) makes the page on the dashboard, the HTML file and the SVGs. The page needs no script, and every text of the spec is escaped.
@@ -321,6 +363,8 @@ A file that the agent only names (a screenshot it read, for example) does not co
 
 Each agent card opens on a short summary of its conversation, in three lines: **About** (what the conversation is about), **Latest** (what the agent's latest message says), and **Needs from you** (the answer, decision, approval or review that the agent waits for, or "Nothing"). A Needs line that asks for something is orange. A click on the summary (or **Show the details**) shows what the card showed before: the agent's whole last message, and **Show the conversation**. The reply box, the activity line and a dialog always show. A conversation's page (`#/c:<sessionId>`) shows the summary above the chat.
 
+![Two agent cards, each with About, Latest and Needs from you, and a reply box; the working agent also shows the command that it runs now, with Steer now and Stop](docs/images/agents.png)
+
 - **Who writes it**: a cheap model (`AGENT_DASH_DRAFT_MODEL`, default `anthropic/claude-haiku-4-5`), in one tool-less `pi -p --no-session` turn, reads the newest 16,000 characters of the chat (prompts and replies, no tool traffic). One draft takes about 2 s, and at most 4 run at once.
 - **When**: on each dashboard load, the server drafts each live run (working or waiting) that has no summary, or whose prompt count, last message or end changed since its summary. A working run changes its last message on each turn, so it gets a new draft only when it stops; until then its Needs line says "Nothing now: the agent is working." A finished run that shows on the board or on its page is drafted when the page shows it (`POST /api/conversation-summaries?session=<id>`, with the `X-Agent-Dash` guard). The server reads the table first and writes only for a real draft, because each write reloads the page.
 - **While it updates**, the card keeps the old summary and says **updating…**, or **out of date** when a newer message came. A failed draft keeps the old texts, and is tried again after 5 minutes.
@@ -345,6 +389,8 @@ This section and the next two describe pi. For what is different with Claude Cod
 ## Wiki
 
 **Wiki** (`#/wiki`) shows a local Obsidian vault, read-only. Set the folder in **Settings** → **Wiki folder** (`wikiDir`, for example `~/pi/wiki`). With no folder, the view says how to set it.
+
+![A wiki note: its type, tags and aliases, the markdown with wiki links and a chart, and the notes that link to it](docs/images/wiki.png)
 
 - **The list** groups the notes by folder. The chips filter by the front matter `type` (`gotcha`, `runbook`, …). A note whose `status` is `stale` or `superseded` is dimmed and tagged.
 - **Search** (`/`): a note must hold every word of the query, in its title, tags, aliases, type, path or text. A word in the title counts most, and the whole query in the title counts more again. Each hit shows up to three matching lines with their line numbers. `↵` opens the first hit, and `J`/`K` and `↵` move through the rows.
@@ -523,6 +569,8 @@ Draft PRs score half. A run counts first for a ticket that is still open. Everyt
 
 The **Next steps** card on a ticket's workspace starts a headless pi run (**Draft next steps**, or `S`) that writes a very short summary for the ticket: its state, 1 to 4 next steps with who acts, and its blockers.
 
+![Next steps: the state, three numbered steps with a Start agent button each, the blockers and the gaps](docs/images/next-steps.png)
+
 1. The server adds an `in_progress` row to SQLite (`~/.agent-dash/agent-dash.db`, table `summaries`) with the ticket and `requested_at`.
 2. It writes `~/.agent-dash/summaries/<id>/context.md` with what it already knows: your notes on the ticket, ticket fields, linked PRs, and a digest of each pi session about the ticket (prompts and replies, no tool output, newest first within a 60k-character budget).
 3. It starts `pi -p --no-extensions --tools read,bash --session-dir ~/.agent-dash/summary-sessions`. The separate session folder keeps summary runs out of the ticket's run list. The prompt is read-only, and tells the run to read the context, then `jira issue view --comments`, `gh pr view --comments`, and `scripts/slack-search.ts`.
@@ -559,6 +607,8 @@ Optional: `AGENT_DASH_SUMMARY_MODEL` and `AGENT_DASH_SUMMARY_THINKING` choose th
 ## Configuration
 
 Your own paths and accounts live in `agent-dash.config.json` at the repo root. Git ignores it, so a clone never runs with someone else's paths. Edit it on the **Settings** page (`#/settings`), or by hand: `agent-dash.config.example.json` shows every key. A path can start with `~/`.
+
+![The Settings page: the agent toggle, your first name and the server settings, each with an example and how to find it](docs/images/settings.png)
 
 Company-wide values (the Jira server, the Slack org, the deploy repos, the Postman environments) are defaults, so you set only your own: your first name, Jira login and token file, ticket projects, your team's review channel, and the paths on your machine.
 
