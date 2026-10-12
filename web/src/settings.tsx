@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { DEFAULT_SETTINGS, SETTING_FIELDS, type SettingField, type SettingKey, type Settings, type SettingsState } from "../../shared/settings.ts";
 import { AGENT_LABEL, type AgentKind, team } from "../../shared/team.ts";
+import { emptyRow, type ProviderRow, providerOf, rowOf, rowsFromFlat } from "./providerRows.ts";
 
 /** A list shows as "A, B" in its box; the server splits it again. */
 const toText = (f: SettingField, v: Settings[SettingKey]): string => (Array.isArray(v) ? v.join(", ") : String(v));
@@ -108,11 +109,101 @@ function FieldGuide({ f }: { f: SettingField }) {
   );
 }
 
+const PROVIDER_FIELDS: Record<ProviderRow["type"], { key: keyof ProviderRow; label: string; placeholder: string }[]> = {
+  jira: [
+    { key: "server", label: "Server", placeholder: "https://example.atlassian.net" },
+    { key: "login", label: "Login", placeholder: "sam@example.com" },
+    { key: "tokenFile", label: "Token file", placeholder: "~/.config/agent-dash/jira.env" },
+    { key: "projects", label: "Projects", placeholder: "(empty: every key that no other provider claims)" },
+    { key: "excludeProjects", label: "Projects to leave out", placeholder: "FSM" },
+  ],
+  local: [
+    { key: "prefix", label: "Key prefix", placeholder: "NOTE" },
+    { key: "dir", label: "Folder", placeholder: "~/notes/tickets" },
+  ],
+};
+
+/** The `ticketProviders` list: one row per tracker, in order. Each server error shows on its row. */
+function ProvidersCard({ rows, setRows, error, rowErrors, flat, readOnly }: { rows: ProviderRow[]; setRows: (f: (rows: ProviderRow[]) => ProviderRow[]) => void; error?: string; rowErrors: string[]; flat: Record<string, string>; readOnly: boolean }) {
+  const edit = (i: number, patch: Partial<ProviderRow>) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const move = (i: number, by: number) =>
+    setRows((rs) => {
+      const out = [...rs];
+      [out[i], out[i + by]] = [out[i + by]!, out[i]!];
+      return out;
+    });
+  const fromFlat = rowsFromFlat(flat);
+  return (
+    <div className="card providers">
+      <header className="card-head">
+        <h3>Ticket providers</h3>
+      </header>
+      <p className="meta">
+        The ticket trackers, in order. A key goes to the provider that names its prefix, else to the first Jira with no projects. {rows.length ? "This list is set, so the Jira fields and the local tickets folder above are not used." : "With no providers here, the Jira fields and the local tickets folder above make them."} Paths can start with <code>~/</code>; separate projects with commas.
+        {error && !rowErrors.some(Boolean) ? <b className="setting-error"> {error}.</b> : null}
+      </p>
+      {rows.map((r, i) => (
+        <div className="provider" key={i}>
+          <div className="setting">
+            <span className="setting-label">{i + 1}.</span>
+            <span className="provider-tools">
+              <span className="seg" role="radiogroup" aria-label={`Provider ${i + 1} type`}>
+                {(["jira", "local"] as const).map((t) => (
+                  <button key={t} role="radio" aria-checked={r.type === t} className={`btn small ${r.type === t ? "" : "ghost"}`} disabled={readOnly} onClick={() => edit(i, { type: t })}>
+                    {t === "jira" ? "Jira" : "Local folder"}
+                  </button>
+                ))}
+              </span>
+              {!readOnly && (
+                <>
+                  <button className="btn ghost small" disabled={i === 0} onClick={() => move(i, -1)} aria-label={`Move provider ${i + 1} up`}>
+                    ↑
+                  </button>
+                  <button className="btn ghost small" disabled={i === rows.length - 1} onClick={() => move(i, 1)} aria-label={`Move provider ${i + 1} down`}>
+                    ↓
+                  </button>
+                  <button className="btn ghost small" onClick={() => setRows((rs) => rs.filter((_, j) => j !== i))}>
+                    Remove
+                  </button>
+                </>
+              )}
+            </span>
+            {rowErrors[i] ? <b className="meta setting-error">{rowErrors[i]}.</b> : null}
+          </div>
+          {[{ key: "id" as const, label: "Id", placeholder: r.type === "jira" ? "jira" : `local-${r.prefix || "<prefix>"}` }, ...PROVIDER_FIELDS[r.type]].map((f) => (
+            <label className="setting" key={f.key}>
+              <span className="setting-label">{f.label}</span>
+              <input type="text" value={r[f.key]} placeholder={f.placeholder} spellCheck={false} readOnly={readOnly} aria-invalid={!!rowErrors[i]} onChange={(e) => edit(i, { [f.key]: e.target.value })} />
+            </label>
+          ))}
+        </div>
+      ))}
+      {!readOnly && (
+        <div className="settings-bar">
+          <button className="btn ghost small" onClick={() => setRows((rs) => [...rs, emptyRow("jira")])}>
+            Add Jira
+          </button>
+          <button className="btn ghost small" onClick={() => setRows((rs) => [...rs, emptyRow("local")])}>
+            Add local folder
+          </button>
+          {!rows.length && fromFlat.length > 0 && (
+            <button className="btn ghost small" onClick={() => setRows(() => fromFlat)} title="Make the list from the Jira fields and the local tickets folder above">
+              Make the list from the fields above
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** `#/settings`: edit agent-dash.config.json. The server runs with the new values after a restart. */
 export function SettingsView() {
   const [state, setState] = useState<SettingsState | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
+  const [rows, setRowsState] = useState<ProviderRow[]>([]);
   const [errors, setErrors] = useState<Partial<Record<SettingKey, string>>>({});
+  const [rowErrors, setRowErrors] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -121,6 +212,14 @@ export function SettingsView() {
   const load = (s: SettingsState) => {
     setState(s);
     setDraft(Object.fromEntries(SETTING_FIELDS.map((f) => [f.key, toText(f, s.saved[f.key])])));
+    setRowsState(s.saved.ticketProviders.map(rowOf));
+    setRowErrors([]);
+  };
+  const setRows = (f: (rows: ProviderRow[]) => ProviderRow[]) => {
+    setSaved(false);
+    // The row numbers change, so an old error could point at the wrong row.
+    setRowErrors([]);
+    setRowsState(f);
   };
   useEffect(() => {
     fetch("/api/settings")
@@ -128,14 +227,15 @@ export function SettingsView() {
       .catch((err: Error) => setError(err.message));
   }, []);
 
-  const dirty = !!state && SETTING_FIELDS.some((f) => draft[f.key] !== toText(f, state.saved[f.key]));
+  const dirty = !!state && (SETTING_FIELDS.some((f) => draft[f.key] !== toText(f, state.saved[f.key])) || JSON.stringify(rows) !== JSON.stringify(state.saved.ticketProviders.map(rowOf)));
   const save = async () => {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch("/api/settings", { method: "POST", headers: { "X-Agent-Dash": "1", "Content-Type": "application/json" }, body: JSON.stringify(draft) });
+      const res = await fetch("/api/settings", { method: "POST", headers: { "X-Agent-Dash": "1", "Content-Type": "application/json" }, body: JSON.stringify({ ...draft, ticketProviders: rows.map(providerOf) }) });
       const body = await res.json().catch(() => ({}));
       setErrors(body.errors ?? {});
+      setRowErrors(body.providerErrors ?? []);
       if (!res.ok) return setError(body.error ?? `could not save (${res.status})`);
       load(body);
       setSaved(true);
@@ -166,11 +266,6 @@ export function SettingsView() {
       {state?.readOnly && (
         <div className="toast settings-note" role="status">
           This server runs in a worktree, so it uses the main checkout's settings. Change them from the main checkout's server.
-        </div>
-      )}
-      {state && state.saved.ticketProviders.length > 0 && (
-        <div className="toast settings-note" role="status">
-          The file's <code>ticketProviders</code> list sets the ticket trackers ({state.saved.ticketProviders.map((p) => (p.type === "jira" ? `Jira at ${p.server || "no server"}` : `${p.prefix} files`)).join(", ")}), so the Jira fields and the local tickets folder below are not used. Edit the list in the file.
         </div>
       )}
       {state?.restartNeeded && (
@@ -242,6 +337,7 @@ export function SettingsView() {
             })}
           </div>
         ))}
+      {state && <ProvidersCard rows={rows} setRows={setRows} error={errors.ticketProviders} rowErrors={rowErrors} flat={draft} readOnly={state.readOnly} />}
       {state && !state.readOnly && (
         <div className="settings-bar">
           <button className="btn" disabled={saving || !dirty} onClick={save}>

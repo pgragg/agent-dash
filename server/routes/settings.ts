@@ -51,10 +51,10 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   } catch {
     return json(400, { error: "the body is not JSON" });
   }
-  // The page's form does not hold the ticket providers list, so a save keeps the file's.
+  // A body without the ticket providers list (the setup agent's) keeps the file's.
   const kept = { ticketProviders: readSettingsFile(file).settings.ticketProviders };
-  const { settings, errors } = validateSettings({ ...kept, ...(body && typeof body === "object" ? body : {}) });
-  if (Object.keys(errors).length) return json(400, { error: "some settings are not valid", errors });
+  const { settings, errors, providerErrors } = validateSettings({ ...kept, ...(body && typeof body === "object" ? body : {}) });
+  if (Object.keys(errors).length) return json(400, { error: "some settings are not valid", errors, providerErrors });
   writeSettingsFile(settings, file);
   return json(200, settingsState(file, readOnly));
 }
