@@ -12,7 +12,7 @@ import { mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, join } from "node:path";
 import { PORT, ROOT } from "./config.ts";
-import { CATEGORY, DOCUMENT, NEXT_STEPS, NOTES, PARKED, PRS, RUNS, TICKETS, USER, WIKI, ago, jiraIssue, prUrl } from "./world.ts";
+import { brief, CATEGORY, DOCUMENTS, NEXT_STEPS, NOTES, PARKED, PRS, RUNS, TICKETS, USER, WIKI, ago, jiraIssue, prUrl } from "./world.ts";
 
 const JIRA_PORT = PORT + 1;
 const HOME = join(ROOT, "home");
@@ -155,7 +155,9 @@ for (const [key, s] of Object.entries(NEXT_STEPS)) {
   db.markDone(rec.id, s.text, at(s.minAgo));
 }
 
-db.addDocument({ ticket: DOCUMENT.ticket, type: "document", title: DOCUMENT.title, body: DOCUMENT.body }, at(22 * 60));
+for (const d of DOCUMENTS) db.addDocument({ ticket: d.ticket, type: "document", title: d.title, body: d.body }, at(d.minAgo));
+const spec = brief(new Date(now).toISOString().slice(0, 10));
+db.addDocument({ ticket: spec.key, type: "ticket-summary", title: spec.title, body: JSON.stringify(spec) }, at(21 * 60));
 
 // ---- a fake Jira -------------------------------------------------------------------------
 const byKey = new Map(TICKETS.map((t) => [t.key, t]));
