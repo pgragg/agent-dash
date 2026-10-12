@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { findInReply, findInWrite, mermaidTitle, sha1, sniffImage } from "../server/diagrams.ts";
@@ -39,7 +39,7 @@ test("a mermaid fence in a reply is a diagram, titled by itself, else by the lin
 test("an embedded local image is a diagram to read later; a web image is not", () => {
   const found = findInReply("![p95 latency](charts/p95.png) and ![logo](https://x.io/a.png) and ![](~/c.svg)", "/repo", null);
   assert.deepEqual(
-    found.map((f) => f.kind === "file" && [f.title, f.path.replace(/^\/Users\/[^/]+/, "~"), f.origin]),
+    found.map((f) => f.kind === "file" && [f.title, f.path.replace(homedir(), "~"), f.origin]),
     [
       ["p95 latency", "/repo/charts/p95.png", "charts/p95.png"],
       ["c.svg", "~/c.svg", "~/c.svg"],
