@@ -65,10 +65,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # The repo is public, so a home path or user name tells strangers how a machine is set up.
-      # `/Users/me/` is a test fixture for home-path shortening.
+      # `me` and `sam` are made-up users in tests and in the demo dashboard.
       - name: Find absolute home paths and user names
         run: |
-          if git grep -nIE '/Users/[A-Za-z]|/home/[a-z]|piper\.gragg' -- . ':!pnpm-lock.yaml' | grep -v '/Users/me/'; then
+          if git grep -nIE '/Users/[A-Za-z]|/home/[a-z]|piper\.gragg' -- . ':!pnpm-lock.yaml' | grep -vE '/Users/(me|sam)\b'; then
             echo "::error::Use ~ or a relative path, not an absolute home path or a user name."
             exit 1
           fi
