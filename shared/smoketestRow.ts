@@ -1,5 +1,5 @@
-import { isPlanRunning, isPlanWaiting, isSmoketestRunning } from "../../shared/sdlc.ts";
-import type { SdlcEnvironment, SdlcEvent } from "../../shared/types.ts";
+import { isPlanRunning, isPlanWaiting, isSmoketestRunning } from "./sdlc.ts";
+import type { SdlcEnvironment, SdlcEvent } from "./types.ts";
 
 /**
  * A waiting agent that agent-dash started for a smoketest plan or run shows as that smoketest

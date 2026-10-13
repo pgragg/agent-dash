@@ -1,5 +1,5 @@
-import { needsNothing, waitsOnReview } from "../../shared/conversationSummary.ts";
-import type { Dashboard, ParkedRun } from "../../shared/types.ts";
+import { needsNothing, waitsOnReview } from "./conversationSummary.ts";
+import type { Dashboard, ParkedRun } from "./types.ts";
 
 /**
  * A parked agent that could still need you: its ticket is open, and it parked with an ask of its

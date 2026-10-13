@@ -6,21 +6,11 @@ import { IMAGE_EXT, wikiLinkParts } from "../../shared/wiki.ts";
 import { href } from "./routes.ts";
 import { dashClick, internalHref, JIRA_BROWSE, splitTrailing } from "./links.ts";
 import { EmbeddedImage, MermaidFence, setKnownDiagrams } from "./mermaid.tsx";
-import { addUpdate, entryOf, entryOfSignal, type Group, groupNotification, needSignals, newlyWaiting, newSignals, type Pending, pruneSeen, releasePending, runsOf, runUpdate, type Seen, type SeenAt, signalUpdate, snapshot, type Update } from "./notify.ts";
+import { addUpdate, entryOf, entryOfSignal, type Group, groupNotification, needSignals, newlyWaiting, newSignals, type Pending, pruneSeen, releasePending, runsOf, runUpdate, type Seen, type SeenAt, signalUpdate, snapshot, type Update } from "../../shared/notify.ts";
 
 // ---- time ---------------------------------------------------------------------------
 
-/** "45s", "12m", "3h", "4d", "2w". */
-export function age(iso: string | null | undefined, now: number): string {
-  if (!iso) return "";
-  const s = Math.max(0, Math.round((now - Date.parse(iso)) / 1000));
-  if (!Number.isFinite(s)) return "";
-  if (s < 60) return `${s}s`;
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
-  if (s < 86_400) return `${Math.floor(s / 3600)}h`;
-  if (s < 14 * 86_400) return `${Math.floor(s / 86_400)}d`;
-  return `${Math.floor(s / (7 * 86_400))}w`;
-}
+export { age } from "../../shared/time.ts";
 
 /** "1m 12s" for a timer that counts up. */
 export function elapsed(iso: string, now: number): string {
@@ -394,8 +384,8 @@ export const api = {
   importUntilChange: (marks: Record<string, string>) => post("/api/until-change?import", { marks }),
   star: (ticket: string, starred: boolean) => post(`/api/star?ticket=${encodeURIComponent(ticket)}`, { starred }),
   /** Starts a headless pi with the first message; resolves to its session id, or throws the reason. */
-  newConversation: async (message: string, cwd: string): Promise<string> => {
-    const res = await fetch("/api/conversations", { method: "POST", headers: { "X-Agent-Dash": "1", "Content-Type": "application/json" }, body: JSON.stringify({ message, cwd }) });
+  newConversation: async (message: string, cwd: string, skill?: "agent-dash"): Promise<string> => {
+    const res = await fetch("/api/conversations", { method: "POST", headers: { "X-Agent-Dash": "1", "Content-Type": "application/json" }, body: JSON.stringify({ message, cwd, skill }) });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(json.error ?? `failed (${res.status})`);
     return json.sessionId;

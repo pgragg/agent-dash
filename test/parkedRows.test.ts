@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ParkedRun, ParkReason } from "../shared/types.ts";
-import { askKey, askRef, needsYouCount, parkedAsks, parkedNeedsYou, splitParked } from "../web/src/parkedRows.ts";
+import { askKey, askRef, needsYouCount, parkedAsks, parkedNeedsYou, splitParked } from "../shared/parkedRows.ts";
 import { minutesAgo, ticket } from "./helpers.ts";
 
 const row = (sessionId: string, reason: ParkReason, over: Partial<ParkedRun> = {}): ParkedRun => ({ sessionId, ticket: "FSDK-1", name: sessionId, cwd: "/repo", reason, parkedAt: minutesAgo(5), needs: "A decision on X", latest: "l", lastMessage: "m", ...over });

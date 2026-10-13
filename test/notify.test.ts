@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AttentionItem, ConversationSummary } from "../shared/types.ts";
-import { addUpdate, agentFinished, agentState, agentWaitsOnReview, asksNothing, entryOf, entryOfSignal, type Group, groupNotification, isNewSince, needSignals, newSignals, type Pending, pruneSeen, releasePending, runUpdate, SEEN_KEEP_MS, SUMMARY_WAIT_MS, signalUpdate, summaryText, waitingOnYou } from "../web/src/notify.ts";
+import { addUpdate, agentFinished, agentState, agentWaitsOnReview, asksNothing, entryOf, entryOfSignal, type Group, groupNotification, isNewSince, needSignals, newSignals, type Pending, pruneSeen, releasePending, runUpdate, SEEN_KEEP_MS, SUMMARY_WAIT_MS, signalUpdate, summaryText, waitingOnYou } from "../shared/notify.ts";
 import { run } from "./helpers.ts";
 
 const since = "2026-10-05T10:00:00.000Z";

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isSnoozed, snoozeUntil } from "../web/src/snooze.ts";
+import { isSnoozed, snoozeUntil } from "../shared/snooze.ts";
 
 // A Friday, 15:30 local time.
 const friday = new Date(2026, 9, 2, 15, 30);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SdlcEvent } from "../shared/types.ts";
-import { smoketestRow } from "../web/src/smoketestRow.ts";
+import { smoketestRow } from "../shared/smoketestRow.ts";
 
 let nextId = 1;
 function ev(over: Partial<SdlcEvent> = {}): SdlcEvent {

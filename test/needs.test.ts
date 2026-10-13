@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AttentionItem } from "../shared/types.ts";
 import { parseHash, redirectHash } from "../web/src/routes.ts";
-import { needStep } from "../web/src/needs.ts";
+import { needStep } from "../shared/needs.ts";
 
 const item = (o: Partial<AttentionItem>): AttentionItem => ({ kind: "awaiting_input", score: 1, reason: "", name: "", status: "", ticketKey: "FSDK-1", ticketUrl: null, since: "", updatedAt: "", ...o });
 const step = { id: 5, summaryId: 1, ticket: "FSDK-1", position: 1, body: "do", label: null, action: null };

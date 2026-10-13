@@ -1,6 +1,6 @@
-import { needsNothing, waitsOnReview } from "../../shared/conversationSummary.ts";
-import { runTitle } from "../../shared/runTitle.ts";
-import type { AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, Run, RunStatus } from "../../shared/types.ts";
+import { needsNothing, waitsOnReview } from "./conversationSummary.ts";
+import { runTitle } from "./runTitle.ts";
+import type { AttentionItem, AttentionKind, ConversationSummary, Dashboard, HistoryRun, Run, RunStatus } from "./types.ts";
 
 /**
  * Which runs to announce with a browser notification. Kept free of React so the tests can import it.

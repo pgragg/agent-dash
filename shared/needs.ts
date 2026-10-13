@@ -1,5 +1,5 @@
-import { prRef } from "../../shared/refs.ts";
-import type { AttentionItem, NextStep } from "../../shared/types.ts";
+import { prRef } from "./refs.ts";
+import type { AttentionItem, NextStep } from "./types.ts";
 
 /** The next move for a "needs you" item, as a place in agent-dash: never Jira or GitHub. */
 export interface NeedStep {
