@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import * as db from "../server/summaries/db.ts";
-import { DEFAULT_SNOOZE, snoozeAction } from "../web/src/snooze.ts";
-import { importLegacy, isMarked, LEGACY_KEY, type Marks, type Pending, settle, withPending } from "../web/src/untilChange.ts";
+import { DEFAULT_SNOOZE, snoozeAction } from "../shared/snooze.ts";
+import { importLegacy, isMarked, LEGACY_KEY, type Marks, type Pending, settle, withPending } from "../shared/untilChange.ts";
 
 db.open(join(mkdtempSync(join(tmpdir(), "agent-dash-until-change-")), "test.db"));
 

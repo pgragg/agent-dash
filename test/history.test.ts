@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { buildHistory } from "../server/model.ts";
 import { parseSession, transcriptTurns } from "../server/sources/sessions.ts";
 import { filterHistory, groupByDay } from "../web/src/history.ts";
-import { boardHash, newlyWaiting, runsOf, snapshot } from "../web/src/notify.ts";
+import { boardHash, newlyWaiting, runsOf, snapshot } from "../shared/notify.ts";
 import { NOW, PATTERN, header, jsonl, minutesAgo, name, pr, reply, run, ticket, toolCall, toolResult, user } from "./helpers.ts";
 
 const secondsAgo = (s: number) => new Date(NOW - s * 1000).toISOString();

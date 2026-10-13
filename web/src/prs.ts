@@ -1,5 +1,5 @@
 import type { AttentionItem, Dashboard, PullRequest, Ticket } from "../../shared/types.ts";
-import { starredFirst } from "./star.ts";
+import { starredFirst } from "../../shared/star.ts";
 
 /** Open PRs grouped by ticket, for the PRs view. Kept free of React so the tests can import it. */
 

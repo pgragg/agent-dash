@@ -1,7 +1,7 @@
 import type { Dashboard, PullRequest } from "../../shared/types.ts";
 import { prRef } from "../../shared/refs.ts";
 import { runTitle } from "../../shared/runTitle.ts";
-import { agentState } from "./notify.ts";
+import { agentState } from "../../shared/notify.ts";
 import type { Route } from "./routes.ts";
 
 /**

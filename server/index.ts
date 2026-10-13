@@ -30,6 +30,8 @@ import * as reviewRoute from "./routes/reviewRequests.ts";
 import * as settingsRoute from "./routes/settings.ts";
 import * as wikiRoute from "./routes/wiki.ts";
 import * as setupRoute from "./routes/setup.ts";
+import * as agentRoute from "./routes/agent.ts";
+import { SKILL_RUN_NAME, skillMessage } from "../shared/agentView.ts";
 import { confirmDeployMessage, deployStageOf, parseEnvironment, planMessage } from "../shared/sdlc.ts";
 import { requestConversationSummaries, summariesFor, withTitles } from "./conversationSummaries.ts";
 import { syncDiagrams } from "./diagramSync.ts";
@@ -49,6 +51,8 @@ import { reconcile, redraftAfterNewEvents, requestSummary } from "./summaries/ru
 const WEB_DIST = new URL("../web/dist/", import.meta.url).pathname;
 /** Agents record smoketests and deploys with this script, into this dash's database. */
 const SDLC_SCRIPT = new URL("../scripts/sdlc-event.ts", import.meta.url).pathname;
+/** The skill that teaches an agent the agent mode (`/api/agent`). The "What's next?" button starts an agent on it. */
+const AGENT_SKILL = new URL("../skills/agent-dash/SKILL.md", import.meta.url).pathname;
 
 /**
  * Keeps the last good answer when a refresh fails, and reports the failure next to it.
@@ -425,6 +429,7 @@ const server = createServer(async (req, res) => {
   try {
     if (await exitRoutes.handle(req, res, url)) return;
     if (await resumeRoute.handle(req, res, url, sessions)) return;
+    if (await agentRoute.handle(req, res, url, () => dashboard(false))) return;
     if (await liveControl.handle(req, res, url)) return;
     if (await prRoute.handle(req, res, url, broadcast)) return;
     if (await ticketRoute.handle(req, res, url, onTicketChange)) return;
@@ -591,11 +596,14 @@ const server = createServer(async (req, res) => {
       // A plain pi with no ticket and no context file, run headless so the page is its UI.
       if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
       const json = (code: number, body: unknown) => void res.writeHead(code, { "Content-Type": "application/json" }).end(JSON.stringify(body));
-      const body = JSON.parse((await readBody(req, 64_000)) || "{}") as { message?: string; cwd?: string };
-      if (!body.message?.trim()) return json(400, { error: "write the first message" });
+      const body = JSON.parse((await readBody(req, 64_000)) || "{}") as { message?: string; cwd?: string; skill?: string };
+      // `skill: "agent-dash"` is the "What's next?" button: the server writes the message, as it knows the skill's path.
+      if (body.skill !== undefined && body.skill !== "agent-dash") return json(400, { error: "the only skill is agent-dash" });
+      if (!body.skill && !body.message?.trim()) return json(400, { error: "write the first message" });
       const dir = (body.cwd?.trim() || "~").replace(/^~(?=\/|$)/, homedir());
       if (!dir.startsWith("/") || !existsSync(dir) || !statSync(dir).isDirectory()) return json(400, { error: `not a folder: ${body.cwd}` });
-      json(201, { sessionId: startConversation({ cwd: dir, message: body.message.trim() }) });
+      const message = body.skill ? skillMessage(AGENT_SKILL, `http://127.0.0.1:${config.port}`, body.message) : body.message!.trim();
+      json(201, { sessionId: startConversation({ cwd: dir, message, ...(body.skill && { name: SKILL_RUN_NAME }) }) });
     } else if (url.pathname === "/api/conversations/end" && req.method === "POST") {
       if (req.headers["x-agent-dash"] !== "1") return void res.writeHead(403).end();
       const status = (await readReportedStatuses(config.statusDir)).get(url.searchParams.get("session") ?? "");

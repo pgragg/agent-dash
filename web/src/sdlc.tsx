@@ -7,7 +7,7 @@ import { Chat } from "./chat.tsx";
 import { age, Markdown, post, stamp } from "./lib.tsx";
 import { Composer, LivePanel } from "./liveControl.tsx";
 import { href } from "./routes.ts";
-import type { SmoketestRow } from "./smoketestRow.ts";
+import type { SmoketestRow } from "../../shared/smoketestRow.ts";
 
 /**
  * The SDLC progress bar at the top of a ticket, and the ticket's Smoketests card. Smoketest plans,

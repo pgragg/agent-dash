@@ -6,10 +6,11 @@ import { awaitsOwner, ownerWaitText } from "../../shared/ownerApproval.ts";
 import { prRef } from "../../shared/refs.ts";
 import { hideUrls } from "../../shared/runTitle.ts";
 import { READ_FEEDBACK, REVIEW_AND_MERGE } from "../../shared/prVerbs.ts";
-import { type AttentionItem, type AttentionKind, type ConversationSummary, type Dashboard, type HistoryRun, type NextStep, type Note, PARKED_ASK_CHARS, type ParkedRun, type PullRequest, type Run, type ThreadStatusChange, type TicketGroup, type TicketSummary, type TicketSummaryState } from "../../shared/types.ts";
+import { type AttentionKind, type ConversationSummary, type Dashboard, type HistoryRun, type NextStep, type Note, PARKED_ASK_CHARS, type ParkedRun, type PullRequest, type Run, type ThreadStatusChange, type TicketGroup, type TicketSummary, type TicketSummaryState } from "../../shared/types.ts";
 import { conversationHash, launchAgent, ResumeHere, resuming } from "./agents.tsx";
 import { ParkedAskList, ParkedAsksPane } from "./parked.tsx";
-import { askKey, askRef, type AskGroup, needsYouCount, parkedAsks, splitParked } from "./parkedRows.ts";
+import { askKey, askRef, type AskGroup } from "../../shared/parkedRows.ts";
+import { actionable, boardSections, buildSubjects, firstStep, type Item, isDone, isResolved, lead, liveRuns, needLine, primaryRun, relevantRuns, type Subject, subjectTitle as sharedSubjectTitle } from "../../shared/board.ts";
 import { CADDY_HTTP, CADDY_HTTPS, caddyCommands, cleanHost, cleanPort, rootScript, undoCommands } from "./localUrl.ts";
 import { SettingsView, SetupBanner } from "./settings.tsx";
 import { filterHistory, groupByDay } from "./history.ts";
@@ -18,8 +19,8 @@ import { ciTag } from "./prView.ts";
 import { countPrs, groupOpenPrs } from "./prs.ts";
 import { age, api, dirLabel, dueLabel, elapsed, inline, Markdown, type NotifyState, plural, prName, lastSeen, resumeCommand, runTitle, shortDate, stamp, useDashboard, useFlash, useLastMessage, useLook, useNow, usePageFocus, useWaitNotifications } from "./lib.tsx";
 import { Composer, LivePanel } from "./liveControl.tsx";
-import { needStep } from "./needs.ts";
-import { agentFinished, agentState, agentWaitsOnReview, asksNothing, isNewSince, readySummary, runsOf, summaryText, waitingOnYou } from "./notify.ts";
+import { needStep } from "../../shared/needs.ts";
+import { agentState, isNewSince, readySummary, runsOf, waitingOnYou } from "../../shared/notify.ts";
 import { needsNothing } from "../../shared/conversationSummary.ts";
 import { href, humanAge, parseHash, redirectHash, resolveBoardRef, type Route, usageView } from "./routes.ts";
 import { FixLogin } from "./fixLogin.tsx";
@@ -27,7 +28,7 @@ import { rowKey } from "./rowNav.ts";
 import { ReviewRequest, useReviewDrafts } from "./reviewRequest.tsx";
 import { wantsReviewRequest } from "../../shared/reviewRequest.ts";
 import { SdlcBar, SmoketestAction, SmoketestName, Smoketests } from "./sdlc.tsx";
-import { type SmoketestRow, smoketestRow } from "./smoketestRow.ts";
+import { type SmoketestRow, smoketestRow } from "../../shared/smoketestRow.ts";
 import { groupWhy, statusWord, UPDATES_SHOWN } from "./whyGroups.ts";
 import { Chat, useLoad } from "./chat.tsx";
 import { ConversationGist } from "./gist.tsx";
@@ -38,12 +39,11 @@ import { WikiListView, WikiNoteView } from "./wiki.tsx";
 import { SessionScope } from "./mermaid.tsx";
 import { CardStep } from "./cardStep.tsx";
 import { type BoardMode, kanbanColumns, type Searchable, searchCards, stageOf, useBoardMode } from "./kanban.ts";
-import { starredFirst } from "./star.ts";
 import { FullScreenButton, ResizeHandle, useViewWidth, ViewTools, ViewToolsSlot } from "./resizeView.tsx";
 import { rowName, rowType } from "./whyRow.ts";
 import { recordControl, recordView, usage } from "./usage.ts";
-import { DEFAULT_SNOOZE, isSnoozed, SNOOZE_OPTIONS, type SnoozeChoice, snoozeAction, UNTIL_CHANGE_LABEL, untilLabel } from "./snooze.ts";
-import { importLegacy, isMarked, type Marks, type Pending, settle, withPending } from "./untilChange.ts";
+import { DEFAULT_SNOOZE, isSnoozed, SNOOZE_OPTIONS, type SnoozeChoice, snoozeAction, UNTIL_CHANGE_LABEL, untilLabel } from "../../shared/snooze.ts";
+import { importLegacy, isMarked, type Marks, type Pending, settle, withPending } from "../../shared/untilChange.ts";
 import { tabTitle } from "./tabTitle.ts";
 
 /**
@@ -57,29 +57,6 @@ import { tabTitle } from "./tabTitle.ts";
  */
 
 // ---- subjects: the things you can select --------------------------------------------
-
-interface Subject {
-  id: string;
-  ticket: TicketGroup | null;
-  /** A run with no ticket. */
-  run: Run | null;
-  /** A PR with no ticket and no run. */
-  prUrl: string | null;
-  /** Most urgent first. */
-  items: Item[];
-  /** Changes whenever a signal changes, so "snooze until something changes" expires on news. */
-  fingerprint: string;
-}
-
-/** A signal, with the summary of its agent's conversation when it has one. */
-interface Item extends AttentionItem {
-  /** The summary for the notification. Null until it is ready, so nothing old shows. */
-  gist: string | null;
-  /** The agent stopped, and its summary says it needs nothing from you. */
-  finished: boolean;
-  /** The agent stopped, and its only ask is that a reviewer approves its PR. */
-  waitsOnReview: boolean;
-}
 
 const KIND: Record<AttentionKind, { title: string; tone: "waiting" | "working" | "bad" | "warn" | "good" | "muted" }> = {
   run_error: { title: "Agent hit an error", tone: "bad" },
@@ -118,58 +95,6 @@ function look(a: Item): { title: string; tone: string; short: string } {
   return a.finished ? FINISHED : { ...KIND[a.kind], short: SHORT[a.kind] };
 }
 
-function buildSubjects(d: Dashboard): Map<string, Subject> {
-  const out = new Map<string, Subject>();
-  const add = (id: string, init: Omit<Subject, "id" | "items" | "fingerprint">) => {
-    if (!out.has(id)) out.set(id, { id, items: [], fingerprint: "", ...init });
-    return out.get(id)!;
-  };
-  for (const g of [...d.myTickets, ...d.otherTickets]) add(`t:${g.ticket.key}`, { ticket: g, run: null, prUrl: null });
-  for (const r of d.unlinkedRuns) add(`r:${r.sessionId}`, { ticket: null, run: r, prUrl: null });
-  const runs = new Map(runsOf(d).map((r) => [r.sessionId, r]));
-  for (const a of d.attention) {
-    const id = a.ticketKey ? `t:${a.ticketKey}` : a.sessionId ? `r:${a.sessionId}` : `p:${a.prUrl}`;
-    const s = out.get(id) ?? add(id, { ticket: null, run: a.run ?? null, prUrl: a.prUrl ?? null });
-    const agent = a.kind === "awaiting_input" || a.kind === "run_error";
-    const summary = agent && a.sessionId ? d.conversationSummaries[a.sessionId] : undefined;
-    const run = runs.get(a.sessionId ?? "");
-    const finished = a.kind === "awaiting_input" && agentFinished(run, summary);
-    // The reviewer has the next move, so the stop waits on others, as a PR out for review does.
-    const review = a.kind === "awaiting_input" && agentWaitsOnReview(run, summary);
-    const name = run && `“${runTitle(run).slice(0, 60)}”`;
-    // The server's reason says "is waiting for you", which a finished agent is not.
-    const reason = review && name ? `${name} waits on a PR review` : finished && name ? `${name} finished ${age(run.statusSince, Date.parse(d.generatedAt))} ago` : a.reason;
-    const status = review ? "waits on review" : finished ? "finished" : a.status;
-    // A finished agent needs nothing, so it is not on your queue, unless its smoketest still needs you (a plan to Confirm, a failed run).
-    const idle = finished && !smoketestRow(a.sessionId, a.ticketKey ? (d.sdlcEvents[a.ticketKey] ?? []) : [], { asked: false, finished: true })?.needsYou;
-    // A stalled ticket whose newest agent asks nothing of you is quiet, not a task.
-    const settled = a.kind === "stalled" && asksNothing(d.conversationSummaries[a.sessionId ?? ""]);
-    s.items.push({ ...a, info: a.info || review || idle || settled, reason, status, gist: summaryText(summary), finished, waitsOnReview: review });
-  }
-  for (const s of out.values()) s.fingerprint = s.items.map((a) => `${a.kind}${a.finished ? ":finished" : ""}${a.waitsOnReview ? ":review" : ""}@${a.updatedAt}`).join("|");
-  return out;
-}
-
-/** The ticket is Done in its tracker. */
-function isDone(s: Subject): boolean {
-  return s.ticket?.ticket.statusCategory === "done";
-}
-
-/** Something here needs you, not only someone else. */
-function actionable(s: Subject): boolean {
-  return s.items.some((a) => !a.info);
-}
-
-/** Only agents that finished and need nothing: not your move, and not someone else's either. */
-function onlyFinished(s: Subject): boolean {
-  return s.items.length > 0 && s.items.every((a) => a.finished && a.info);
-}
-
-/** The item that leads: the most urgent one that needs you, else the first. */
-function lead(s: Subject): Item | undefined {
-  return s.items.find((a) => !a.info) ?? s.items[0];
-}
-
 /** One tag per label: two runs that both wait make one tag. */
 function otherTags(s: Subject): { short: string; tone: string }[] {
   const top = lead(s);
@@ -188,31 +113,7 @@ function OtherTags({ s }: { s: Subject }) {
 }
 
 function subjectTitle(s: Subject): string {
-  if (s.ticket) return s.ticket.ticket.summary;
-  if (s.run) return runTitle(s.run);
-  return s.prUrl ? prName(s.prUrl) : s.id;
-}
-
-/** Live agents first (waiting before working), then the newest. */
-/** You marked this thread as no longer relevant to the subject's ticket. */
-function isResolved(s: Subject, run: Run): boolean {
-  return s.ticket?.threads[run.sessionId]?.status === "resolved";
-}
-
-/** The ticket's threads that still matter: everything you have not marked resolved. */
-function relevantRuns(s: Subject): Run[] {
-  return s.ticket ? s.ticket.runs.filter((r) => !isResolved(s, r)) : s.run ? [s.run] : [];
-}
-
-function liveRuns(s: Subject): Run[] {
-  const runs = relevantRuns(s);
-  const rank = (r: Run) => (r.status === "awaiting_input" ? 0 : r.status === "working" ? 1 : 2);
-  return runs.filter((r) => r.status !== "finished").sort((a, b) => rank(a) - rank(b) || b.lastActivityAt.localeCompare(a.lastActivityAt));
-}
-
-/** The run that "open in iTerm" and the reply box act on. */
-function primaryRun(s: Subject): Run | undefined {
-  return s.items.find((a) => a.run?.status === "awaiting_input")?.run ?? liveRuns(s)[0] ?? s.items.find((a) => a.run)?.run;
+  return sharedSubjectTitle(s, prName);
 }
 
 // ---- snooze until something changes ------------------------------------------------
@@ -1552,20 +1453,6 @@ function PrsView({ data, now }: { data: Dashboard; now: number }) {
 // ---- queue entry: the next step ------------------------------------------------------
 
 /** The first step of the ticket's newest finished next-steps draft. */
-function firstStep(data: Dashboard, s: Subject): NextStep | null {
-  const state = s.ticket ? data.summaries[s.ticket.ticket.key] : undefined;
-  const shown = state?.latest.status === "done" ? state.latest : state?.lastDone;
-  return shown?.steps[0] ?? null;
-}
-
-/** What the lead agent needs from you, from its summary: the "Needs from you" line of a queue entry. */
-function needLine(s: Subject, data: Dashboard): string | null {
-  const a = lead(s);
-  if (!a || a.info || !a.sessionId || (a.kind !== "awaiting_input" && a.kind !== "run_error")) return null;
-  const ready = readySummary(data.conversationSummaries[a.sessionId]);
-  return ready && !needsNothing(ready.needs) ? ready.needs : null;
-}
-
 /** The queue entry's one next step: the place in agent-dash where you act on its lead signal. */
 function NextStepLink({ s, data }: { s: Subject; data: Dashboard }) {
   const a = lead(s);
@@ -1698,6 +1585,33 @@ function NotifyButton({ state, onEnable, onMute }: { state: NotifyState; onEnabl
 }
 
 // ---- conversations ------------------------------------------------------------------
+
+/** Starts an agent on the agent-dash skill, which reads the board through `/api/agent` and says what to do next. */
+function WhatsNextButton() {
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const start = async () => {
+    if (starting) return;
+    setStarting(true);
+    setError(null);
+    try {
+      const id = await api.newConversation("", "~", "agent-dash");
+      location.hash = `#/c:${encodeURIComponent(id)}`;
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setStarting(false);
+    }
+  };
+  return (
+    <>
+      <button className="btn whats-next" data-usage="whats-next" onClick={start} disabled={starting} title={`Start a ${agentLabel()} on the agent-dash skill: it reads this board and tells you what to do next, with a link to each entry. You talk to it on its own page.`}>
+        {starting ? "Starting…" : "✦ Ask an agent what's next"}
+      </button>
+      {error && <div className="new-conversation-error">{error}</div>}
+    </>
+  );
+}
 
 /** A plain pi with no ticket context, run headless: this page is where you talk to it. */
 function NewConversationForm() {
@@ -1968,38 +1882,15 @@ export function App() {
   const subjects = useMemo(() => (data ? buildSubjects(data) : new Map<string, Subject>()), [data]);
   const until = (s: Subject) => (s.ticket ? data?.snoozedUntil[s.ticket.ticket.key] : undefined);
   const ticketSnoozed = (s: Subject) => isSnoozed(until(s), now);
-  // A snoozed ticket leaves every other section until its time comes, whatever its signals say.
-  const snoozedList = [...subjects.values()].filter(ticketSnoozed).sort((a, b) => until(a)!.localeCompare(until(b)!));
-  const all = [...subjects.values()].filter((s) => !ticketSnoozed(s));
   const starredKeys = useMemo(() => new Set(data?.starred ?? []), [data]);
   const isStarred = (s: Subject) => !!s.ticket && starredKeys.has(s.ticket.ticket.key);
-  const ranked = all.filter(actionable).sort((a, b) => lead(b)!.score - lead(a)!.score);
-  // Starred entries lead the queue, so their ranks are the first ones.
-  const queue = starredFirst(ranked.filter((s) => !untilChange.isMarked(s)), isStarred);
-  const done = ranked.filter((s) => untilChange.isMarked(s));
-  // Only context left, such as a PR out for review: the ball is with someone else.
-  const othersTurn = all.filter((s) => s.items.length && !actionable(s) && !isDone(s) && !onlyFinished(s)).sort((a, b) => lead(b)!.score - lead(a)!.score);
-  const finishedList = all.filter((s) => !actionable(s) && !isDone(s) && onlyFinished(s)).sort((a, b) => lead(b)!.score - lead(a)!.score);
-  const working = all.filter((s) => !s.items.length && liveRuns(s).length && !isDone(s));
-  // Closed in its tracker, but agents still open on it: worth a glance to close the tabs, never a task.
-  const doneTickets = all.filter((s) => isDone(s) && (s.items.length || liveRuns(s).length));
-  const quiet = data ? data.myTickets.map((g) => subjects.get(`t:${g.ticket.key}`)!).filter((s) => !ticketSnoozed(s) && !s.items.length && !liveRuns(s).length) : [];
-  // A starred ticket shows once, in the Starred section at the top of the rail; a snooze still hides it.
-  const unsnoozed = [...queue, ...othersTurn, ...working, ...finishedList, ...done, ...doneTickets, ...quiet];
-  const starredList = unsnoozed.filter(isStarred);
   const unstarred = (list: Subject[]) => list.filter((s) => !isStarred(s));
-  // The rail's Snoozed section shows the entries snoozed until something changes, then the ones snoozed to a time.
-  const order = [...starredList, ...unstarred(unsnoozed.filter((s) => !done.includes(s))), ...unstarred(done), ...snoozedList];
+  const sections = data ? boardSections(data, subjects, now, untilChange.isMarked) : null;
+  const { queue = [], untilChange: done = [], othersTurn = [], finished: finishedList = [], working = [], doneTickets = [], quiet = [], snoozed: snoozedList = [], starred: starredList = [], order = [], parkedNeeds = [], needsYou = 0 } = sections ?? {};
+  const asks = sections?.asks ?? { inQueue: new Map(), groups: [], entries: 0 };
   // The search keeps only the matching cards, best match first, and J/K walk them in that order.
   const kanbanOrder = boardMode === "kanban" && data ? searchCards(order, kanbanQuery, (s) => searchFields(s, data)) : order;
 
-  // The parked asks that could need you: each one shows in its ticket's "why" list when the ticket is in Up next, else under Parked asks.
-  const parkedNeeds = useMemo(() => (data ? splitParked(data).needsYou : []), [data]);
-  const queueTickets = new Set(queue.flatMap((s) => (s.ticket ? [s.ticket.ticket.key] : [])));
-  const snoozedTickets = new Set(Object.entries(data?.snoozedUntil ?? {}).flatMap(([k, u]) => (isSnoozed(u, now) ? [k] : [])));
-  const asks = parkedAsks(parkedNeeds, queueTickets, snoozedTickets);
-  // The one count of work: the top bar, the tab title, and the board agree on it.
-  const needsYou = needsYouCount(queue.length, asks);
   const askSel = askKey(boardRef);
   const asksOf = (key: string) => parkedNeeds.filter((p) => p.ticket === key);
 
@@ -2270,6 +2161,7 @@ export function App() {
         <div className="kanban-view" ref={kanbanRef}>
           <div className="kanban-bar">
             {newConversation}
+            <WhatsNextButton />
             <BoardModeToggle mode={boardMode} setMode={setBoardMode} />
             <input
               ref={searchRef}
@@ -2332,6 +2224,9 @@ export function App() {
             <div className="new-conversation">
               {newConversation}
               <BoardModeToggle mode={boardMode} setMode={setBoardMode} />
+            </div>
+            <div className="new-conversation">
+              <WhatsNextButton />
             </div>
             <RailSection title="Starred" count={starredList.length} hint="Tickets you starred, pinned to the top">
               {starredList.map((s) => (
