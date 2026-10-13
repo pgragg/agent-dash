@@ -66,7 +66,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   };
   // Same CSRF guard as the other POST routes: this approves writes and starts a pi process.
   if (req.headers["x-agent-dash"] !== "1") return json(403, { error: "missing X-Agent-Dash header" });
-  let body: { plannedAt?: string; cwd?: string };
+  let body: { plannedAt?: string; cwd?: string; note?: string };
   try {
     body = JSON.parse((await readBody(req, 16_000)) || "{}");
   } catch (err) {
@@ -99,7 +99,10 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   }
   let executionId: number | null = null;
   try {
-    const { execution, message } = startExecution(plan, target.sessionId, deps.script);
+    const { execution, message: run } = startExecution(plan, target.sessionId, deps.script);
+    // An agent that runs plans for Piper adds the limits that the run must keep.
+    const note = typeof body.note === "string" ? body.note.trim() : "";
+    const message = note ? `${run}\n\n${note}` : run;
     executionId = execution.id;
     const key = plan.tickets[0];
     if (target.kind === "inbox") await deliver(target.sessionId, "txt", message);

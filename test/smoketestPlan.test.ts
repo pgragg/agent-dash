@@ -73,3 +73,14 @@ test("a plan whose agent is gone, on a ticket the dash does not show, stays unco
   assert.equal(db.sdlcEventsByTicket()["FSDK-81"].length, 1);
   assert.equal((await run(999_999, {})).code, 404);
 });
+
+test("a note goes to the agent that runs the plan, after the run message", async () => {
+  writeFileSync(join(process.env.AGENT_DASH_STATUS_DIR!, "plan-live-2.json"), JSON.stringify({ sessionId: "plan-live-2", pid: process.pid, inbox: true, mode: "rpc", state: "awaiting_input", since: new Date().toISOString(), version: 2 }));
+  const p = newPlan("plan-live-2", "FSDK-82");
+  db.recordPlan(p.id, { plan: "1. Open the page", stateChanges: null, plannedAt: "2026-10-05T11:00:00.000Z" });
+  assert.equal((await run(p.id, { plannedAt: "2026-10-05T11:00:00.000Z", note: "  Hard limits: do not post to Slack.  " })).code, 201);
+  const inbox = join(process.env.AGENT_DASH_INBOX_DIR!, "plan-live-2");
+  const message = readFileSync(join(inbox, readdirSync(inbox).find((f) => f.endsWith(".txt"))!), "utf8");
+  assert.match(message, /smoketest plan of FSDK-82 on Postman Beta/);
+  assert.ok(message.endsWith("\n\nHard limits: do not post to Slack."));
+});

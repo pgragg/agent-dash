@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agentBoard, agentRoot, agentTicket, skillMessage, DEFAULT_SKILL_ASK, type Origin } from "../shared/agentView.ts";
+import { agentBoard, agentRoot, agentTicket, MOVE_ALONG_ASK, SKILL_LIMITS, skillMessage, type Origin } from "../shared/agentView.ts";
 import { boardSections, buildSubjects } from "../shared/board.ts";
-import type { AttentionItem, Dashboard, TicketGroup } from "../shared/types.ts";
+import type { AttentionItem, Dashboard, SdlcEnvironment, SdlcEvent, TicketGroup } from "../shared/types.ts";
 import { minutesAgo, NOW, pr, run, ticket } from "./helpers.ts";
 
 const o: Origin = { base: "http://127.0.0.1:7777", full: false };
@@ -106,10 +106,25 @@ test("long texts are cut, and full=1 sends them whole", () => {
   assert.equal(whole.latest, long);
 });
 
-test("the button's agent reads the skill by its path, with the default ask or the one given", () => {
+test("the button's agent reads the skill by its path, and the hard limits hold whatever the ask", () => {
   const m = skillMessage("/repo/skills/agent-dash/SKILL.md", "http://127.0.0.1:7777");
   assert.ok(m.startsWith("Read the agent-dash skill at `/repo/skills/agent-dash/SKILL.md`"));
-  assert.ok(m.includes("http://127.0.0.1:7777") && m.endsWith(DEFAULT_SKILL_ASK));
-  assert.ok(skillMessage("/s.md", "http://x", "Keep FSDK-1 moving").endsWith("Keep FSDK-1 moving"));
-  assert.ok(skillMessage("/s.md", "http://x", "  ").endsWith(DEFAULT_SKILL_ASK));
+  assert.ok(m.includes("http://127.0.0.1:7777") && m.includes(MOVE_ALONG_ASK) && m.endsWith(SKILL_LIMITS));
+  const asked = skillMessage("/s.md", "http://x", "Keep FSDK-1 moving");
+  assert.ok(asked.includes("Keep FSDK-1 moving") && !asked.includes(MOVE_ALONG_ASK) && asked.endsWith(SKILL_LIMITS));
+  assert.ok(skillMessage("/s.md", "http://x", "  ").includes(MOVE_ALONG_ASK));
+  for (const limit of ["Slack", "AWS", "Vault", "Jira", "prod"]) assert.ok(SKILL_LIMITS.includes(limit), limit);
+});
+
+test("a smoketest plan offers its run; a run on an environment past Beta asks first", () => {
+  const plan = (id: number, environments: SdlcEnvironment[], confirmedAt: string | null): SdlcEvent =>
+    ({ id, eventType: "smoketest_plan", startedAt: minutesAgo(60), finishedAt: null, outcome: null, testDetails: "1. x", testResults: null, sessionId: null, skippedAt: null, plannedAt: minutesAgo(50), stateChanges: null, writesSummary: null, confirmedAt, confirmedBy: confirmedAt && "octocat", planId: null, summary: null, prUrl: null, channel: null, message: null, messageUrl: null, environments, tickets: ["FSDK-1"], createdAt: minutesAgo(60) }) as SdlcEvent;
+  const d = dashboard({ sdlcEvents: { "FSDK-1": [plan(1, ["postman_beta"], null), plan(2, ["postman_beta"], minutesAgo(40)), plan(3, ["postman_prod"], minutesAgo(40))] } });
+  const { subjects, sections } = sectionsOf(d);
+  const [waiting, beta, prod] = agentTicket(d, sections, subjects.get("t:FSDK-1")!, o).smoketests;
+  const confirm = waiting.actions[0];
+  assert.deepEqual([confirm.rel, confirm.askFirst, confirm.href], ["confirm_and_run", true, "/api/sdlc-events/run?id=1"]);
+  assert.ok("note" in confirm.body!, "the runner can pass on its limits");
+  assert.deepEqual(beta.actions.map((a) => [a.rel, a.askFirst]), [["run_again", false]]);
+  assert.deepEqual(prod.actions.map((a) => [a.rel, a.askFirst]), [["run_again", true]]);
 });

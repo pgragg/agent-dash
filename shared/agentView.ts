@@ -256,8 +256,13 @@ function agentPr(d: Dashboard, p: PullRequest, o: Origin) {
 
 function smoketest(e: SdlcEvent, o: Origin) {
   const actions: AgentAction[] = [];
+  // A note goes to the agent that runs the plan, after the run message: for example the limits that it must keep.
+  const body = { plannedAt: e.plannedAt, cwd: "~", note: "<what the agent that runs it must also know, or leave out>" };
+  const prod = e.environments.some((env) => env !== "localhost" && env !== "postman_beta");
   if (isPlanWaiting(e)) {
-    actions.push(action(o, "confirm_and_run", "Approve the plan's Beta and Prod writes, then run it. The person confirms a plan: never do it for them.", `/api/sdlc-events/run?id=${e.id}`, { body: { plannedAt: e.plannedAt, cwd: "~" }, askFirst: true }));
+    actions.push(action(o, "confirm_and_run", "Approve the plan's state changes, then run it. Only the person confirms a plan, unless they allowed it for this environment.", `/api/sdlc-events/run?id=${e.id}`, { body, askFirst: true }));
+  } else if (e.eventType === "smoketest_plan" && e.plannedAt && e.confirmedAt) {
+    actions.push(action(o, "run_again", "Run the accepted plan again (409 while a run is still going)", `/api/sdlc-events/run?id=${e.id}`, { body, askFirst: prod }));
   }
   return {
     id: e.id,
@@ -361,17 +366,42 @@ export function agentTicket(d: Dashboard, sections: BoardSections, s: Subject, o
   };
 }
 
-// ---- the "What's next?" button ----------------------------------------------------------
+// ---- the "Move things along" button ----------------------------------------------------
 
 /** The conversation name of a run that the button starts. */
-export const SKILL_RUN_NAME = "What's next (agent-dash skill)";
+export const SKILL_RUN_NAME = "Move things along (agent-dash skill)";
 
-export const DEFAULT_SKILL_ASK = "Use agent-dash to find what I should do next. Give me a numbered list, most urgent first, with the ui link of each entry.";
+export const MOVE_ALONG_ASK = `Use agent-dash to move my work along. Go through Starred, then Up next, most urgent first. For each entry, do the next step that you can do yourself inside the limits below, or start an agent on it:
+
+- Reply to a waiting agent (or send a parked ask its answer) when you can answer from the ticket, its notes, the wiki or the code. If it asks for my decision, leave it for me.
+- Start an agent on a drafted next step, or on red CI, a merge conflict or review feedback on my own PR. Use the ticket's start_agent action with your own message (the step, plus the limits), not start_step, because a stored step message does not carry the limits.
+- Start an agent that plans a smoketest when the ticket's next SDLC stage is a smoketest plan.
+- Run smoketests on localhost and Postman Beta: use a plan's confirm_and_run or run_again action when every environment of the plan is localhost or postman_beta, and put the hard limits in its note. Never run, or confirm, a plan on any other environment (Fern Dev, Fern Prod, Postman Prod): leave it for me.
+- Add a note to the ticket when you learn something that the next draft needs.
+
+Do not start a second agent on an entry that already has an agent at work. Start at most 5 agents in this run. Do not wait more than 10 minutes in total for agents that you started: leave them running.
+
+When you are done, give me a numbered list: what you did on each entry (with its ui link), the agents that you started (with their links), and what still needs me, and why.`;
+
+/**
+ * Hard limits for the button's agent, and for every agent that it starts or replies to. They hold
+ * whatever the ask says, because the agent works with no person watching each step.
+ */
+export const SKILL_LIMITS = `Hard limits. They hold for you, and for every agent that you start or reply to: put them in each message that you send to an agent.
+
+- Do not post to Slack, and do not send anything else that other people read (for example a comment or review on someone else's PR).
+- Do not write to AWS: no create, update, delete or put, in any account.
+- Do not create or change Vault secrets.
+- Do not write to Jira: no comments, field edits, links, status moves or due dates.
+- Do not change prod: no prod deploys, Argo syncs or rollbacks, and no writes to prod systems or data.
+- In agent-dash, use only actions with effect "local" and askFirst false. One exception: confirm_and_run and run_again on a smoketest plan whose environments are only localhost or postman_beta. Put these limits in its note. If that plan needs a write that these limits forbid (AWS, Vault, Slack, Jira), do not run it.
+
+Branches, commits, pushes to feature branches, draft or open PRs, notes and local ticket files are fine. When a step needs something past these limits, stop on that entry, and tell me what it needs.`;
 
 /**
  * The first message of the button's agent. It names the skill file by its path, so it works for
  * pi, Claude Code and OpenCode, also where the skill is not installed.
  */
-export function skillMessage(skillFile: string, base: string, ask = DEFAULT_SKILL_ASK): string {
-  return `Read the agent-dash skill at \`${skillFile}\`, and follow it. This agent-dash runs at ${base}.\n\n${ask.trim() || DEFAULT_SKILL_ASK}`;
+export function skillMessage(skillFile: string, base: string, ask = MOVE_ALONG_ASK): string {
+  return `Read the agent-dash skill at \`${skillFile}\`, and follow it. This agent-dash runs at ${base}.\n\n${ask.trim() || MOVE_ALONG_ASK}\n\n${SKILL_LIMITS}`;
 }

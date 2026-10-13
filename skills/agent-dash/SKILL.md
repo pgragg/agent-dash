@@ -15,7 +15,7 @@ agent-dash runs on this machine at `http://127.0.0.1:7777`. Its **agent mode** a
 
 1. **Start at `GET /api/agent`.** It gives the counts, the health of the sources, and every other route. Do not guess routes.
 2. **Use the `curl` line of an action.** Replace each `<placeholder>`, and change nothing else. Every POST needs the header `X-Agent-Dash: 1`; the curl line has it.
-3. **`askFirst: true` means: ask the person first.** Show the exact change (for example the Slack text, or the new due date), and wait for a yes. A smoketest plan's `confirm_and_run` is always the person's click.
+3. **`askFirst: true` means: ask the person first.** Show the exact change (for example the Slack text, or the new due date), and wait for a yes. A smoketest plan's `confirm_and_run` is the person's click, unless they allowed it for that environment in their message.
 4. **Long texts are cut** at about 240 characters. Add `full=1` to a GET to read them whole. `GET /api/agent/run?session=<id>` gives an agent's whole last message.
 5. **Do not poll status files with `sleep`.** `GET /api/agent/wait?session=<id>&for=stop&timeout=600` returns when the agent stops (it waits for you, or it ended), with its last message.
 6. **Do not use `agent-browser` on the dash** to start agents or press buttons. Every button that an agent needs is an action here.
@@ -53,5 +53,7 @@ agent-dash runs on this machine at `http://127.0.0.1:7777`. Its **agent mode** a
 2. Look at `signals`, `sdlc.next`, `nextSteps.steps` and `agents[].needs`.
 3. To act, use an action: `start_step` starts an agent on a drafted step, `plan_smoketest` starts an agent that plans a smoketest (pick `env` from the list in its title), and `reply` answers a waiting agent.
 4. After you start or reply to an agent, call its `wait` action. Then read `run.lastMessage`, and decide the next step.
+
+**"Move things along."** The person's message gives the steps and the hard limits. Keep the limits, and put them in each message that you send to an agent: in `start_agent`'s `message`, in a `reply`, in a parked ask's `send`, and in a smoketest run's `note`. Use `start_agent` with your own message, not `start_step`, because a stored step message does not carry the limits.
 
 **Answer a waiting agent.** Read the agent's whole message with `GET /api/agent/run?session=ID`. If you can answer it from what you know, use its `reply` action. If it asks for a decision of the person, put the question in your answer, with the agent's `ui` link.
