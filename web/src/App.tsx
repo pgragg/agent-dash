@@ -1586,8 +1586,8 @@ function NotifyButton({ state, onEnable, onMute }: { state: NotifyState; onEnabl
 
 // ---- conversations ------------------------------------------------------------------
 
-/** Starts an agent on the agent-dash skill, which reads the board through `/api/agent` and says what to do next. */
-function WhatsNextButton() {
+/** Starts an agent on the agent-dash skill that moves the board's entries along, inside hard limits (see `SKILL_LIMITS`). */
+function MoveAlongButton() {
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const start = async () => {
@@ -1605,8 +1605,8 @@ function WhatsNextButton() {
   };
   return (
     <>
-      <button className="btn whats-next" data-usage="whats-next" onClick={start} disabled={starting} title={`Start a ${agentLabel()} on the agent-dash skill: it reads this board and tells you what to do next, with a link to each entry. You talk to it on its own page.`}>
-        {starting ? "Starting…" : "✦ Ask an agent what's next"}
+      <button className="btn move-along" data-usage="move-along" onClick={start} disabled={starting} title={`Start a ${agentLabel()} that works through Starred and Up next: it answers waiting agents, starts agents on next steps, red CI and smoketest plans, and runs smoketests on localhost and Postman Beta. It never posts to Slack, writes to AWS, Vault or Jira, or changes prod. You talk to it on its own page.`}>
+        {starting ? "Starting…" : "✦ Move things along"}
       </button>
       {error && <div className="new-conversation-error">{error}</div>}
     </>
@@ -2161,7 +2161,7 @@ export function App() {
         <div className="kanban-view" ref={kanbanRef}>
           <div className="kanban-bar">
             {newConversation}
-            <WhatsNextButton />
+            <MoveAlongButton />
             <BoardModeToggle mode={boardMode} setMode={setBoardMode} />
             <input
               ref={searchRef}
@@ -2226,7 +2226,7 @@ export function App() {
               <BoardModeToggle mode={boardMode} setMode={setBoardMode} />
             </div>
             <div className="new-conversation">
-              <WhatsNextButton />
+              <MoveAlongButton />
             </div>
             <RailSection title="Starred" count={starredList.length} hint="Tickets you starred, pinned to the top">
               {starredList.map((s) => (
