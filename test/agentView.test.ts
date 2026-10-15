@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agentBoard, agentRoot, agentTicket, MOVE_ALONG_ASK, SKILL_LIMITS, skillMessage, type Origin } from "../shared/agentView.ts";
+import { agentBoard, agentRoot, agentRun, agentTicket, MOVE_ALONG_ASK, SKILL_LIMITS, skillMessage, type Origin } from "../shared/agentView.ts";
 import { boardSections, buildSubjects } from "../shared/board.ts";
 import type { AttentionItem, Dashboard, SdlcEnvironment, SdlcEvent, TicketGroup } from "../shared/types.ts";
 import { minutesAgo, NOW, pr, run, ticket } from "./helpers.ts";
@@ -114,6 +114,19 @@ test("the button's agent reads the skill by its path, and the hard limits hold w
   assert.ok(asked.includes("Keep FSDK-1 moving") && !asked.includes(MOVE_ALONG_ASK) && asked.endsWith(SKILL_LIMITS));
   assert.ok(skillMessage("/s.md", "http://x", "  ").includes(MOVE_ALONG_ASK));
   for (const limit of ["Slack", "AWS", "Vault", "Jira", "prod"]) assert.ok(SKILL_LIMITS.includes(limit), limit);
+});
+
+test("the button's agent first closes the agents whose ask is already done", () => {
+  const close = MOVE_ALONG_ASK.indexOf("First, close the agents");
+  assert.ok(close >= 0 && close < MOVE_ALONG_ASK.indexOf("Then go through Starred"));
+  for (const rel of ["`resolve`", "`dismiss`", "`end`", "Slack search"]) assert.ok(MOVE_ALONG_ASK.includes(rel), rel);
+});
+
+test("only a headless run that waits for input can be ended", () => {
+  const rels = (over: Parameters<typeof run>[0]) => agentRun(dashboard(), run(over), o, null).actions.map((a) => a.rel);
+  const end = (over: Parameters<typeof run>[0]) => agentRun(dashboard(), run(over), o, null).actions.find((a) => a.rel === "end");
+  assert.deepEqual([end({ status: "awaiting_input", headless: true, canReply: true })?.href, end({ status: "awaiting_input", headless: true })?.askFirst], ["/api/conversations/end?session=s1", false]);
+  for (const over of [{ status: "working" as const, headless: true }, { status: "finished" as const, headless: true }, { status: "awaiting_input" as const, headless: false }]) assert.ok(!rels(over).includes("end"), JSON.stringify(over));
 });
 
 test("a smoketest plan offers its run; a run on an environment past Beta asks first", () => {

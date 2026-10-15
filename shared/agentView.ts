@@ -196,6 +196,8 @@ export function agentRun(d: Dashboard, r: Run, o: Origin, ticket: string | null,
     if (r.status === "working" && r.canSteer) actions.push(action(o, "steer", "Interrupt its turn with a message", `/api/reply?session=${id}`, { body: { text: "<message>", steer: true } }));
     if (r.status === "working" && r.canControl) actions.push(action(o, "stop", "Stop its turn", `/api/stop?session=${id}`));
   }
+  // Only a headless run: a terminal pi is closed from its own tab. It can be resumed later.
+  if (r.status === "awaiting_input" && r.headless) actions.push(action(o, "end", "End it: it needs nothing more. It stays in History, and resume continues it", `/api/conversations/end?session=${id}`));
   if (r.status === "finished") actions.push(action(o, "resume", "Continue it headless, with an optional first message", `/api/conversations/resume?session=${id}`, { body: { message: "<message, or leave out>" } }));
   if (ticket) {
     actions.push(action(o, "resolve", `It no longer matters to ${ticket}`, `/api/threads?ticket=${q(ticket)}&session=${id}`, { body: { status: "resolved" } }));
@@ -371,7 +373,11 @@ export function agentTicket(d: Dashboard, sections: BoardSections, s: Subject, o
 /** The conversation name of a run that the button starts. */
 export const SKILL_RUN_NAME = "Move things along (agent-dash skill)";
 
-export const MOVE_ALONG_ASK = `Use agent-dash to move my work along. Go through Starred, then Up next, most urgent first. For each entry, do the next step that you can do yourself inside the limits below, or start an agent on it:
+export const MOVE_ALONG_ASK = `Use agent-dash to move my work along.
+
+First, close the agents that wait for me on something that I already did. Read every waiting agent and every parked ask on the board (Up next, parked asks, until-change, snoozed and done tickets). For each one, find out if its ask was done after the agent asked it. Use read-only sources: Slack search (for example, I sent the message that it drafted, or the approval that it waits for came), the PR state (merged or closed), the Jira status, the ticket's notes, and git. If you find proof, close it: use \`resolve\` for an agent on a ticket, \`dismiss\` for a parked ask, and \`end\` for a headless run with no ticket. If the proof is not clear, or part of the ask is still open, leave it open. Never close an agent that is working.
+
+Then go through Starred, then Up next, most urgent first. For each entry, do the next step that you can do yourself inside the limits below, or start an agent on it:
 
 - Reply to a waiting agent (or send a parked ask its answer) when you can answer from the ticket, its notes, the wiki or the code. If it asks for my decision, leave it for me.
 - Start an agent on a drafted next step, or on red CI, a merge conflict or review feedback on my own PR. Use the ticket's start_agent action with your own message (the step, plus the limits), not start_step, because a stored step message does not carry the limits.
@@ -381,7 +387,7 @@ export const MOVE_ALONG_ASK = `Use agent-dash to move my work along. Go through 
 
 Do not start a second agent on an entry that already has an agent at work. Start at most 5 agents in this run. Do not wait more than 10 minutes in total for agents that you started: leave them running.
 
-When you are done, give me a numbered list: what you did on each entry (with its ui link), the agents that you started (with their links), and what still needs me, and why.`;
+When you are done, give me a numbered list: the agents that you closed (each with its ui link and the proof, for example a Slack message link or a merged PR), what you did on each entry (with its ui link), the agents that you started (with their links), and what still needs me, and why.`;
 
 /**
  * Hard limits for the button's agent, and for every agent that it starts or replies to. They hold
