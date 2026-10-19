@@ -182,13 +182,13 @@ test("team settings: no name says the user, no channel turns review requests off
   try {
     setTeam({ ...DEFAULT_TEAM, deployRepoBeta: "acme/deploy-beta" });
     assert.match(gistPrompt("awaiting_input", "…"), /between the user \(USER\).*waits for the user\./s);
-    assert.equal(wantsReviewRequest({ repo: "a/b", state: "open" }), false);
+    assert.equal(wantsReviewRequest({ repo: "a/b", state: "open", tickets: [] }), false);
     assert.equal(sharedEnvs(), "Postman Beta and Postman Prod");
     assert.deepEqual(enabledEnvironments().map((e) => e.id), ["localhost", "postman_beta", "postman_prod"]);
     assert.equal(deployStageOf({ repo: "acme/deploy-beta" } as never), "beta");
     setTeam({ ...DEFAULT_TEAM, userName: "Sam", reviewChannelId: "C0123ABCD", reviewChannelName: "reviews" });
     assert.match(gistPrompt("awaiting_input", "…"), /between Sam \(USER\)/);
-    assert.equal(wantsReviewRequest({ repo: "a/b", state: "open" }), true);
+    assert.equal(wantsReviewRequest({ repo: "a/b", state: "open", tickets: [] }), true);
   } finally {
     setTeam(saved);
   }

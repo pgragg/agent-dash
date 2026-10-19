@@ -1,14 +1,11 @@
 import { useEffect, useState } from "react";
-import { fallbackMessage, reviewChannel, wantsReviewRequest } from "../../shared/reviewRequest.ts";
+import { channelLabel, fallbackMessage, reviewChannelFor, wantsReviewRequest } from "../../shared/reviewRequest.ts";
 import type { PullRequest, ReviewDraft, SdlcEvent } from "../../shared/types.ts";
 import { age, post } from "./lib.tsx";
 
-/** The channel is set whenever a review request shows: wantsReviewRequest needs it. */
-const channelName = () => reviewChannel()?.name ?? "";
-
 /**
  * The drafted Slack review request under a PR on the PRs view. Post sends it to the review
- * channel as Piper; the click is the approval. The server records it as a review_request event.
+ * channel of the PR's ticket as Piper; the click is the approval. The server records it as a review_request event.
  */
 
 /** Asks the server to draft every open PR that has no draft yet. It runs the drafts in the background. */
@@ -32,6 +29,9 @@ export function ReviewRequest({ pr, draft, sent, now }: { pr: PullRequest; draft
   const [again, setAgain] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const last = sent?.[0];
+  // Set whenever a review request shows: wantsReviewRequest needs it.
+  const channel = reviewChannelFor(pr.tickets);
+  const name = channel ? `#${channel.name}` : "";
   // A new draft replaces an edit that started from the old one.
   useEffect(() => setEdited(null), [draft?.text]);
 
@@ -40,7 +40,7 @@ export function ReviewRequest({ pr, draft, sent, now }: { pr: PullRequest; draft
       <div className="review-req sent">
         <span className="tone-text-good">✓</span>
         <span>
-          Review requested in #{channelName()} <span className="meta">· {age(last.startedAt, now)} ago</span>
+          Review requested in {name} <span className="meta">· {age(last.startedAt, now)} ago</span>
         </span>
         {last.messageUrl && (
           <a href={last.messageUrl} target="_blank" rel="noreferrer">
@@ -83,7 +83,7 @@ export function ReviewRequest({ pr, draft, sent, now }: { pr: PullRequest; draft
       )}
       <span className="meta">
         {draft?.status === "failed" && edited === null ? <span title={draft.error ?? ""}>The draft failed, so this is the PR title. </span> : null}
-        Slack draft for #{channelName()}, posted as you
+        Slack draft for {channel ? channelLabel(channel) : ""}, posted as you
       </span>
       {error && <span className="tone-text-bad">{error}</span>}
       <span className="grow" />
@@ -104,7 +104,7 @@ export function ReviewRequest({ pr, draft, sent, now }: { pr: PullRequest; draft
           Redraft
         </button>
       )}
-      <button className="btn small" disabled={posting || !text.trim()} onClick={send} title={`Post this message to #${channelName()} as you, and record a review request on the ticket.`}>
+      <button className="btn small" disabled={posting || !text.trim()} onClick={send} title={`Post this message to ${name}${channel?.group ? ` with a tag of @${channel.group.handle}` : ""} as you, and record a review request on the ticket.`}>
         {posting ? "Posting…" : "Post to Slack"}
       </button>
     </div>

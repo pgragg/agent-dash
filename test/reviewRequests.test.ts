@@ -8,7 +8,9 @@ import { test } from "node:test";
 import { requestReviewDrafts } from "../server/reviewDrafts.ts";
 import { handle } from "../server/routes/reviewRequests.ts";
 import * as db from "../server/summaries/db.ts";
-import { cleanSummary, draftPrompt, fallbackMessage, reviewChannel, reviewMessage } from "../shared/reviewRequest.ts";
+import { channelLabel, cleanSummary, draftPrompt, fallbackMessage, reviewChannel, reviewChannelFor, reviewMessage } from "../shared/reviewRequest.ts";
+import { validateSettings } from "../shared/settings.ts";
+import { team } from "../shared/team.ts";
 import type { PullRequest } from "../shared/types.ts";
 import { pr } from "./helpers.ts";
 
@@ -100,6 +102,38 @@ test("Post sends the text to the review channel as Piper, then records a review_
   assert.match(e.messageUrl, /p1791213047219629$/);
   assert.equal(changes, 1);
   assert.equal(db.sdlcEventsByTicket()["FSDK-2101"][0].id, e.id);
+});
+
+test("a route sends a prefix's PRs to its own channel and tags its group; other PRs keep the review channel", async () => {
+  const route = "FERNDOC:doc-gen=C05E0S0A9SN:docs-eng=S07LA27DLQK";
+  assert.deepEqual(validateSettings({ reviewRoutes: [route, "AD:tools=C0123ABCD"] }).errors, {});
+  assert.ok(validateSettings({ reviewRoutes: ["FERNDOC:#doc-gen=C05E0S0A9SN"] }).errors.reviewRoutes);
+  const saved = team.reviewRoutes;
+  team.reviewRoutes = [route];
+  try {
+    const docs = reviewChannelFor(["FERNDOC-12"])!;
+    assert.deepEqual(docs, { id: "C05E0S0A9SN", name: "doc-gen", group: { id: "S07LA27DLQK", handle: "docs-eng" } });
+    assert.equal(channelLabel(docs), "#doc-gen, tags @docs-eng");
+    assert.deepEqual(reviewChannelFor(["FSDK-3"]), reviewChannel());
+    assert.deepEqual(reviewChannelFor(["FERNDOCS-3"]), reviewChannel());
+
+    const mine = pr({ url: "https://github.com/o/r/pull/30", tickets: ["FERNDOC-12"] });
+    const posted: [string, string][] = [];
+    const deps = { prs: async () => [mine], onChange: () => {}, post: async (channel: string, text: string) => (posted.push([channel, text]), { ts: null, permalink: null }) };
+    for (const text of ["PR: fix the sidebar", "<!subteam^S07LA27DLQK> PR: fix the sidebar"]) {
+      const c = call("/api/review-requests", { prUrl: mine.url, text });
+      await handle(c.req, c.res, c.url, deps);
+      assert.equal(c.out.code, 201);
+      assert.equal(JSON.parse(c.out.body).channel, "C05E0S0A9SN");
+    }
+    // The tag goes in front once, also when the text already has it.
+    assert.deepEqual(posted, [
+      ["C05E0S0A9SN", "<!subteam^S07LA27DLQK> PR: fix the sidebar"],
+      ["C05E0S0A9SN", "<!subteam^S07LA27DLQK> PR: fix the sidebar"],
+    ]);
+  } finally {
+    team.reviewRoutes = saved;
+  }
 });
 
 test("a failed post records nothing and shows Slack's reason", async () => {

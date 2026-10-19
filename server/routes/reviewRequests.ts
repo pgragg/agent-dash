@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { reviewChannel } from "../../shared/reviewRequest.ts";
+import { reviewChannelFor, slackText } from "../../shared/reviewRequest.ts";
 import type { PullRequest } from "../../shared/types.ts";
 import { requestReviewDrafts } from "../reviewDrafts.ts";
 import * as db from "../summaries/db.ts";
@@ -56,7 +56,7 @@ export interface Deps {
 /**
  * `POST /api/review-drafts`: draft a Slack review request for each open PR that has none, in the
  * background. `?pr=<url>` drafts that PR again.
- * `POST /api/review-requests` with `{prUrl, text}`: post the text to the review channel as Piper,
+ * `POST /api/review-requests` with `{prUrl, text}`: post the text to the PR's review channel as Piper,
  * and record it as a review_request SDLC event on the PR's tickets.
  */
 export async function handle(req: IncomingMessage, res: ServerResponse, url: URL, deps: Deps): Promise<boolean> {
@@ -95,12 +95,13 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
 async function sendReviewRequest(req: IncomingMessage, prs: PullRequest[], deps: Deps, json: (code: number, body: unknown) => void): Promise<void> {
   try {
     const body = JSON.parse((await readBody(req, 16_000)) || "{}") as { prUrl?: unknown; text?: unknown };
-    const channel = reviewChannel();
-    if (!channel) return json(409, { error: "review requests are off: set the review channel on the Settings page" });
     const pr = prs.find((p) => p.url === body.prUrl);
     if (!pr) return json(404, { error: "not one of your PRs" });
-    const text = typeof body.text === "string" ? body.text.trim() : "";
-    if (!text) return json(400, { error: "write the message" });
+    const channel = reviewChannelFor(pr.tickets);
+    if (!channel) return json(409, { error: "review requests are off: set the review channel on the Settings page" });
+    const typed = typeof body.text === "string" ? body.text.trim() : "";
+    if (!typed) return json(400, { error: "write the message" });
+    const text = slackText(channel, typed);
     if (text.length > TEXT_MAX) return json(400, { error: `the message is longer than ${TEXT_MAX} characters` });
     if (sending.has(pr.url)) return json(409, { error: "this review request is already being posted" });
     let posted: Posted;

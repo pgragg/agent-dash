@@ -1,3 +1,4 @@
+import { REVIEW_ROUTE } from "./reviewRequest.ts";
 import { AGENT_LABEL, DEFAULT_TEAM, type Team } from "./team.ts";
 
 /**
@@ -220,6 +221,12 @@ export const SETTING_FIELDS: SettingField[] = [
     help: "Its name without the #, as the page shows it.",
     example: "my-team-reviews",
     find: "The name of the review channel, as Slack shows it, without the #.",
+  },
+  {
+    key: "reviewRoutes", group: "Reviews", label: "Review channels per ticket prefix", kind: "list", pattern: REVIEW_ROUTE,
+    help: "PREFIX:channel-name=CHANNELID, and optionally :group-handle=SUBTEAMID to tag a Slack user group. A PR whose ticket has the prefix asks for review there; the other PRs use the review channel.",
+    example: "FERNDOC:doc-gen=C05E0S0A9SN:docs-eng=S07LA27DLQK",
+    find: "Usually empty. Ask the user which ticket prefixes another team reviews, and where. The channel id is at the bottom of the channel's About tab. The group id is the S… in `<!subteam^S…>` of a message that tags the group: search the channel for the handle with the Slack MCP.",
   },
   {
     key: "noReviewRepos", group: "Reviews", label: "Repos with no review request", kind: "list", pattern: REPO,
