@@ -1,4 +1,4 @@
-import { reviewChannel } from "./reviewRequest.ts";
+import { channelLabel, reviewChannelFor } from "./reviewRequest.ts";
 import { team, User, user } from "./team.ts";
 import type { PullRequest, SdlcEnvironment, SdlcEvent, Ticket } from "./types.ts";
 
@@ -86,12 +86,12 @@ export function deployStageOf(pr: PullRequest): "beta" | "prod" | null {
 const AUTO_ACCEPT = "A plan that changes no Beta or Prod state is accepted at once.";
 
 /** A function, not a constant: the review channel comes from the settings after this module loads. */
-const hints = (): Record<StageId, string> => ({
+const hints = (ticket: string): Record<StageId, string> => ({
   ideation: "",
   pr: "Open a PR for the change.",
   local_smoketest_plan: `Plan a smoketest on localhost before you ask for a PR review. ${AUTO_ACCEPT}`,
   local_smoketest: "Run the confirmed plan of the local smoketest.",
-  review_requested: reviewChannel() ? `Ask for a review in #${reviewChannel()!.name}: the PRs view has a drafted message for each open PR.` : "Ask for a review of each open PR.",
+  review_requested: reviewChannelFor([ticket]) ? `Ask for a review in ${channelLabel(reviewChannelFor([ticket])!)}: the PRs view has a drafted message for each open PR.` : "Ask for a review of each open PR.",
   in_beta: "Deploy to Postman Beta (merge the PR, then the us-beta deploy PR), and confirm the deploy in Argo.",
   beta_smoketest_plan: `Plan a smoketest on Postman Beta before you open the prod chart version update PR. ${AUTO_ACCEPT}`,
   beta_smoketest: "Run the confirmed plan of the Beta smoketest.",
@@ -182,10 +182,10 @@ function prLabel(url: string): string {
 }
 
 /** Done once agent-dash posted a Slack review request for any of the ticket's PRs. */
-function reviewStage(events: SdlcEvent[]): Omit<Stage, "label"> {
+function reviewStage(ticket: string, events: SdlcEvent[]): Omit<Stage, "label"> {
   const found = newestFirst(events.filter((e) => e.eventType === "review_request"));
   const last = found[0];
-  if (!last) return { id: "review_requested", state: "todo", detail: reviewChannel() ? `No review request posted to #${reviewChannel()!.name} yet` : "No review request posted from agent-dash", events: [] };
+  if (!last) return { id: "review_requested", state: "todo", detail: reviewChannelFor([ticket]) ? `No review request posted to #${reviewChannelFor([ticket])!.name} yet` : "No review request posted from agent-dash", events: [] };
   const prs = [...new Set(found.map((e) => e.prUrl).filter((u): u is string => !!u))];
   const more = prs.length > 1 ? ` and ${prs.length - 1} more PR${prs.length > 2 ? "s" : ""}` : "";
   return { id: "review_requested", state: "done", detail: `Review requested for ${last.prUrl ? prLabel(last.prUrl) : "a PR"}${more} on ${last.startedAt.slice(0, 10)}`, events: found };
@@ -212,7 +212,7 @@ export function sdlcProgress({ ticket, prs, events }: { ticket: Ticket; prs: Pul
     },
     planStage("local_smoketest_plan", events, STAGE_ENVS.local),
     smoketestStage("local_smoketest", events, STAGE_ENVS.local),
-    reviewStage(events),
+    reviewStage(ticket.key, events),
     deployStage("in_beta", events, prs, "beta"),
     planStage("beta_smoketest_plan", events, STAGE_ENVS.beta),
     smoketestStage("beta_smoketest", events, STAGE_ENVS.beta),
@@ -226,7 +226,7 @@ export function sdlcProgress({ ticket, prs, events }: { ticket: Ticket; prs: Pul
   const current = stages.reduce((at, s, i) => (s.state === "done" || s.state === "unhealthy" || s.state === "skipped" ? i : at), 0);
   for (const s of stages.slice(0, current)) if (s.state === "todo") s.state = "skipped";
   const next = stages[current + 1] ?? null;
-  let hint = next ? hints()[next.id] : null;
+  let hint = next ? hints(ticket.key)[next.id] : null;
   if (next?.state === "failed") hint = `The newest ${next.label.toLowerCase()} failed. Fix it, then run it again.`;
   if (next?.state === "blocked") hint = `The newest ${next.label.toLowerCase()} was blocked. Remove the blocker, then run it again, or skip it.`;
   if (next?.state === "waiting") hint = isPlanStage(next.id) ? `${next.detail}. Read it, refine it in its conversation, then confirm it.` : `${next.detail}.`;

@@ -18,6 +18,11 @@ export interface Team {
   /** The Slack channel for PR review requests. Empty id: no review requests. */
   reviewChannelId: string;
   reviewChannelName: string;
+  /**
+   * Review channels per ticket prefix, as `PREFIX:channel-name=CHANNELID[:group-handle=SUBTEAMID]`.
+   * The first match wins; a PR with no match uses the review channel.
+   */
+  reviewRoutes: string[];
   /** Repos whose PRs need no Slack review request, such as your own tools. */
   noReviewRepos: string[];
   /** A merged PR in one of these deploys a chart version to Beta or Prod. */
@@ -32,6 +37,7 @@ export const DEFAULT_TEAM: Team = {
   userName: "",
   reviewChannelId: "",
   reviewChannelName: "",
+  reviewRoutes: [],
   noReviewRepos: [],
   deployRepoBeta: "postman-eng/cloud9-parcels-deployments",
   deployRepoProd: "postman-eng/cloud9-parcels-production-deployments",
