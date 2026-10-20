@@ -212,7 +212,7 @@ export async function requestSummary(input: SummaryInput, opts: { force?: boolea
   const prompt = buildPrompt(key, rec.id, workDir);
   writeFileSync(join(workDir, "prompt.md"), prompt);
 
-  const { cmd, args, env } = summaryCommand(config.agent, prompt, { name: `agent-dash summary ${key}`, sessionDir: SESSION_DIR });
+  const { cmd, args, env } = summaryCommand(config.agent, prompt, { name: `agent-dash summary ${key}`, sessionDir: SESSION_DIR, model: config.settings.model });
   const out = openSync(join(workDir, "out.log"), "w");
   const err = openSync(join(workDir, "err.log"), "w");
   const child = spawn(cmd, args, {

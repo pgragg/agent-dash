@@ -83,6 +83,8 @@ export interface HeadlessOptions {
   allowedTools?: string[];
   /** Claude Code's `--permission-mode`. Omitted: Claude Code's own default. */
   permissionMode?: string;
+  /** The agent's `--model`. Omitted: the agent's own default. */
+  model?: string;
 }
 
 /**
@@ -94,12 +96,14 @@ export function headlessCommand(agent: Exclude<AgentKind, "opencode">, sessionId
   if (agent === "pi") {
     const args = ["--mode", "rpc", ...(opts.resume ? ["--session", opts.resume.sessionFile] : ["--session-id", sessionId])];
     if (opts.name && !opts.resume) args.push("--name", opts.name);
+    if (opts.model) args.push("--model", opts.model);
     return { cmd: "pi", args };
   }
   const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio", ...hookFlag()];
   args.push(...(opts.resume ? ["--resume", opts.resume.sessionId] : ["--session-id", sessionId]));
   if (opts.name && !opts.resume) args.push("--name", opts.name);
   if (opts.permissionMode) args.push("--permission-mode", opts.permissionMode);
+  if (opts.model) args.push("--model", opts.model);
   if (opts.allowedTools?.length) args.push("--allowedTools", opts.allowedTools.join(","));
   return { cmd: "claude", args };
 }
@@ -110,7 +114,7 @@ export const claudeUserLine = (text: string): string => JSON.stringify({ type: "
 export const claudeInterruptLine = (): string => JSON.stringify({ type: "control_request", request_id: randomUUID(), request: { subtype: "interrupt" } });
 
 /** The default cheap model of a one-turn draft. */
-export const draftModel = (agent: AgentKind): string => process.env.AGENT_DASH_DRAFT_MODEL ?? (agent === "claude" ? "haiku" : "anthropic/claude-haiku-4-5");
+export const draftModel = (agent: AgentKind): string => process.env.AGENT_DASH_DRAFT_MODEL ?? (agent === "claude" ? "haiku" : "amazon-bedrock/us.anthropic.claude-haiku-5-5");
 
 const OPENCODE_ONESHOT = new URL("./opencode-oneshot.ts", import.meta.url).pathname;
 
@@ -136,8 +140,8 @@ export function draftCommand(agent: AgentKind, prompt: string): { cmd: string; a
 }
 
 /** A ticket summary run: read and bash only, and its session stays off the board. */
-export function summaryCommand(agent: AgentKind, prompt: string, opts: { name: string; sessionDir: string }): { cmd: string; args: string[]; env: NodeJS.ProcessEnv } {
-  const model = process.env.AGENT_DASH_SUMMARY_MODEL;
+export function summaryCommand(agent: AgentKind, prompt: string, opts: { name: string; sessionDir: string; model?: string }): { cmd: string; args: string[]; env: NodeJS.ProcessEnv } {
+  const model = process.env.AGENT_DASH_SUMMARY_MODEL || opts.model;
   if (agent === "opencode") return { cmd: process.execPath, args: [OPENCODE_ONESHOT, "summary", "--title", opts.name, ...(model ? ["--model", model] : []), "--prompt-file", promptFile(prompt)], env: agentEnv() };
   if (agent === "pi") {
     const args = ["-p", "--no-extensions", "--tools", "read,bash", "--session-dir", opts.sessionDir, "--name", opts.name];
@@ -155,9 +159,10 @@ export function summaryCommand(agent: AgentKind, prompt: string, opts: { name: s
  * The command that a new iTerm tab runs: the agent in `dir`, named, with the context file and the
  * first message. pi attaches the context file; Claude Code and OpenCode get it inline, as a headless run does.
  */
-export function terminalCommand(agent: AgentKind, dir: string, name: string, contextFile: string, messageFile: string, sessionId: string): string {
+export function terminalCommand(agent: AgentKind, dir: string, name: string, contextFile: string, messageFile: string, sessionId: string, model = ""): string {
   const cd = `cd ${shellQuote(dir)} && `;
-  if (agent === "pi") return `${cd}pi --session-id ${shellQuote(sessionId)} --name ${shellQuote(name)} @${shellQuote(contextFile)} "$(cat ${shellQuote(messageFile)})"`;
+  const modelFlag = model ? ` --model ${shellQuote(model)}` : "";
+  if (agent === "pi") return `${cd}pi --session-id ${shellQuote(sessionId)} --name ${shellQuote(name)}${modelFlag} @${shellQuote(contextFile)} "$(cat ${shellQuote(messageFile)})"`;
   const inline = `"$(cat ${shellQuote(contextFile)}; printf '\\n\\n'; cat ${shellQuote(messageFile)})"`;
   if (agent === "opencode") {
     // The TUI has no title flag, so the session is made first, with its name and folder; the TUI then continues it.
@@ -165,5 +170,5 @@ export function terminalCommand(agent: AgentKind, dir: string, name: string, con
     return `${cd}opencode api session.create -d ${shellQuote(create)} >/dev/null; opencode --session ${shellQuote(sessionId)} --prompt ${inline}`;
   }
   const hooks = hookFlag().map(shellQuote).join(" ");
-  return `${cd}claude --session-id ${shellQuote(sessionId)} --name ${shellQuote(name)}${hooks ? ` ${hooks}` : ""} ${inline}`;
+  return `${cd}claude --session-id ${shellQuote(sessionId)} --name ${shellQuote(name)}${modelFlag}${hooks ? ` ${hooks}` : ""} ${inline}`;
 }

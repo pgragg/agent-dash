@@ -580,7 +580,7 @@ const server = createServer(async (req, res) => {
         }
         // A leading "-" would read as an option; the space keeps it a message.
         writeFileSync(`${base}.txt`, message.trim().startsWith("-") ? ` ${message.trim()}` : message.trim());
-        const command = terminalCommand(config.agent, dir, name, `${base}.md`, `${base}.txt`, sessionId);
+        const command = terminalCommand(config.agent, dir, name, `${base}.md`, `${base}.txt`, sessionId, config.settings.model);
         const out = await runInNewItermTab(command);
         if (out.result !== "ok") {
           dropRunning();

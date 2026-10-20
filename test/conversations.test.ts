@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
-import { headlessCommand } from "../server/agent.ts";
+import { headlessCommand, summaryCommand, terminalCommand } from "../server/agent.ts";
 import { agentMessage, agentName, HANDOFF_END, HANDOFF_START } from "../server/handoff.ts";
 import { resumeBlocker } from "../server/routes/resume.ts";
 import { parseSession, transcriptTurns } from "../server/sources/sessions.ts";
@@ -14,6 +14,18 @@ test("a new headless run gets the server's id and its name; a resumed one opens 
   assert.deepEqual(rpcArgs("id-1", { name: "FSDK-5: say hi" }), ["--mode", "rpc", "--session-id", "id-1", "--name", "FSDK-5: say hi"]);
   assert.deepEqual(rpcArgs("id-1", {}), ["--mode", "rpc", "--session-id", "id-1"]);
   assert.deepEqual(rpcArgs("id-1", { resume: { sessionId: "id-1", sessionFile: "/s/a.jsonl" } }), ["--mode", "rpc", "--session", "/s/a.jsonl"]);
+});
+
+test("a run that the dash starts uses the model setting, and the agent's default without one", () => {
+  const m = "amazon-bedrock/us.anthropic.claude-opus-5-5";
+  assert.deepEqual(rpcArgs("id-1", { model: m }).slice(-2), ["--model", m]);
+  assert.ok(!rpcArgs("id-1", {}).includes("--model"));
+  const claude = headlessCommand("claude", "id-1", { model: "opus" }).args;
+  assert.equal(claude[claude.indexOf("--model") + 1], "opus");
+  assert.match(terminalCommand("pi", "/repo", "n", "/h/c.md", "/h/m.txt", "id-1", m), / --model 'amazon-bedrock\/us\.anthropic\.claude-opus-5-5' @/);
+  assert.ok(!terminalCommand("pi", "/repo", "n", "/h/c.md", "/h/m.txt", "id-1").includes("--model"));
+  const summary = summaryCommand("pi", "p", { name: "n", sessionDir: "/x", model: m }).args;
+  assert.equal(summary[summary.indexOf("--model") + 1], m);
 });
 
 test("the name carries the key and the first line of the task, without markdown", () => {
