@@ -381,6 +381,8 @@ ${plan.testDetails ?? ""}
 </plan>` : "";
   return `${approval}
 
+Before you change any state, check the context for another agent that works on this smoketest of ${key} on ${label}. If one does, do not run the plan: tell ${user()}, and stop.
+
 Run the plan now.${planText}
 
 agent-dash shows this smoketest as running (SDLC event ${executionId}) until you record the result:
@@ -396,6 +398,8 @@ export function confirmDeployMessage(key: string, stage: "beta" | "prod", prUrls
   return `Confirm that the change for ${key} is deployed to ${label}.
 
 ${prs} Use Argo CD, read-only (the argocd CLI, or an argocd skill if you have one): find the Argo app that the deploy PR changes, and check that it is Synced and Healthy and runs the chart version or image from the PR. Do not sync, roll back, or change anything.
+
+A deploy can have no PR: a build bot can commit the new chart version straight to ${deployRepo(stage)}. Look for that commit too. When the new version is committed but Argo does not run it yet, wait: check again for up to 15 minutes before you report that it is not deployed.
 
 If the deploy is confirmed, record it:
 ${recordCommand(script, key, "deploy", env)} --details "<Argo app>: Synced, Healthy, <version>"

@@ -279,6 +279,10 @@ node scripts/sdlc-event.ts deploy --ticket ABC-123 --env postman_beta --details 
 node scripts/sdlc-event.ts plan --id 11 --summary "Publish a docs site locally and load it" --plan-file plan.md --state-changes none
 node scripts/sdlc-event.ts plan --id 11 --summary "Publish a docs site on Beta and load it" \
   --writes-summary "Postman Beta: create one test project, then delete it" --plan-file plan.md --state-changes-file writes.md
+# An agent that agent-dash did not start has no plan id: it names one ticket and one environment,
+# and the script makes the plan, linked to the agent's pi session ($PI_SESSION_ID).
+node scripts/sdlc-event.ts plan --ticket ABC-123 --env postman_beta --summary "Publish a docs site on Beta and load it" \
+  --writes-summary "Postman Beta: create one test project, then delete it" --plan-file plan.md --state-changes-file writes.md
 # Then record the result on the running execution that the accepted plan started.
 node scripts/sdlc-event.ts finish --id 12 --outcome passed --summary "Publish flow works end to end" --details-file details.md --results-file results.md
 ```

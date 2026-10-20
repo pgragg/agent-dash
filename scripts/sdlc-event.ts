@@ -17,6 +17,11 @@
  *     --plan-file plan.md --state-changes-file writes.md
  *   node scripts/sdlc-event.ts finish --id 12 --outcome passed --summary "Publish flow works end to end" --details-file details.md --results-file results.md
  *
+ * An agent that agent-dash did not start has no plan id. It names the ticket and the environment
+ * instead, and the script makes the plan, linked to the agent's pi session (`PI_SESSION_ID`):
+ *
+ *   node scripts/sdlc-event.ts plan --ticket ABC-123 --env postman_beta --summary "…" --plan-file plan.md --state-changes none
+ *
  * A plan with `--state-changes none` changes no Beta or Prod state, so it is accepted at once, and
  * the script prints how to run it. Any other plan waits for Piper's Confirm in agent-dash.
  *
@@ -31,7 +36,7 @@ import * as db from "../server/summaries/db.ts";
 import { user } from "../shared/team.ts";
 
 const USAGE = `usage: node scripts/sdlc-event.ts smoketest|deploy --ticket KEY [--ticket KEY] --env ENV [--env ENV] [--started ISO] [--finished ISO] [--outcome passed|failed|blocked (smoketest) | unhealthy (deploy)] [--summary TEXT] [--details TEXT | --details-file F] [--results TEXT | --results-file F]
-       node scripts/sdlc-event.ts plan --id N --summary TEXT (--plan TEXT | --plan-file F) (--state-changes none | (--state-changes TEXT | --state-changes-file F) --writes-summary TEXT)
+       node scripts/sdlc-event.ts plan (--id N | --ticket KEY --env ENV) --summary TEXT (--plan TEXT | --plan-file F) (--state-changes none | (--state-changes TEXT | --state-changes-file F) --writes-summary TEXT)
        node scripts/sdlc-event.ts finish --id N --outcome passed|failed|blocked [--finished ISO] [--summary TEXT] [--details TEXT | --details-file F] [--results TEXT | --results-file F]`;
 
 try {
@@ -58,7 +63,7 @@ try {
   });
   const read = (f: string | undefined, v: string | undefined) => (f ? readFileSync(f, "utf8") : v);
   if (positionals[0] === "plan") {
-    const id = Number(values.id);
+    const id = values.id === undefined ? newPlan(values.ticket, values.env) : Number(values.id);
     const planned = db.recordPlan(id, validateSdlcPlan({ plan: read(values["plan-file"], values.plan), stateChanges: read(values["state-changes-file"], values["state-changes"]), summary: values.summary, writesSummary: values["writes-summary"] }));
     if (!planned) throw new Error(`no plan with --id ${values.id ?? ""} that is still open: a confirmed plan cannot change. Ask ${user()} to start a new plan.`);
     if (!planned.confirmedAt) {
@@ -96,4 +101,12 @@ try {
 } catch (err) {
   console.error(`${(err as Error).message}\n${USAGE}`);
   process.exit(2);
+}
+
+/** A plan for an agent that agent-dash did not start: the stage then shows that the plan exists. */
+function newPlan(tickets: string[] | undefined, envs: string[] | undefined): number {
+  if (tickets?.length !== 1 || envs?.length !== 1) throw new Error("a plan with no --id needs one --ticket and one --env");
+  // Checks the key and the environment as for a result; the plan itself is made as the server makes it.
+  const { tickets: [ticket], environments: [env] } = validateSdlcEvent({ eventType: "smoketest_execution", tickets, environments: envs }, config.ticketPattern);
+  return db.addSdlcEvent({ eventType: "smoketest_plan", startedAt: new Date().toISOString(), environments: [env], tickets: [ticket], sessionId: process.env.PI_SESSION_ID || null }).id;
 }

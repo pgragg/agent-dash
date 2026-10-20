@@ -333,7 +333,7 @@ const onTicketChange: ticketRoute.OnTicketChange = (key, patch) => {
 async function ticketContext(key: string): Promise<string | null> {
   const d = await dashboard(false);
   const group = [...d.myTickets, ...d.otherTickets].find((g) => g.ticket.key === key);
-  return group ? buildHandoff({ group, notes: d.notes[key] ?? [], summary: d.summaries[key], events: d.sdlcEvents[key] ?? [], parked: d.parked.filter((p) => p.ticket === key), now: new Date() }) : null;
+  return group ? buildHandoff({ group, notes: d.notes[key] ?? [], summary: d.summaries[key], events: d.sdlcEvents[key] ?? [], parked: d.parked.filter((p) => p.ticket === key), now: new Date(), script: SDLC_SCRIPT }) : null;
 }
 
 // ---- live updates -------------------------------------------------------------------
@@ -533,7 +533,7 @@ const server = createServer(async (req, res) => {
       const d = await dashboard(false);
       const group = [...d.myTickets, ...d.otherTickets].find((g) => g.ticket.key === key);
       if (!group) return json(404, { error: `unknown ticket ${key}` });
-      const context = buildHandoff({ group, notes: d.notes[key] ?? [], summary: d.summaries[key], events: d.sdlcEvents[key] ?? [], parked: d.parked.filter((p) => p.ticket === key), now: new Date() });
+      const context = buildHandoff({ group, notes: d.notes[key] ?? [], summary: d.summaries[key], events: d.sdlcEvents[key] ?? [], parked: d.parked.filter((p) => p.ticket === key), now: new Date(), script: SDLC_SCRIPT });
       if (url.pathname === "/api/agents/context") return void res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8" }).end(context);
 
       const body = JSON.parse((await readBody(req, 64_000)) || "{}") as { message?: string; step?: number; cwd?: string; terminal?: boolean; sdlc?: { kind?: string; env?: string; stage?: string } };

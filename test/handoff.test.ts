@@ -33,6 +33,19 @@ test("the handoff carries notes, drafted next steps with their date, PRs, live m
   // Every run is in the history, with prompts, status and resolution.
   assert.match(ctx, /Dropped approach · started .* · 4 prompts · finished · resolved by Piper 2026-10-02T09:00:00.000Z: wrong direction/);
   assert.match(ctx, /Current fix · started .* · 7 prompts · waiting for input · relevant/);
+  // With no script, no line about recording SDLC work.
+  assert.doesNotMatch(ctx, /record it, so that/);
+});
+
+test("the handoff tells a free-form agent to record its SDLC work, and to stop when another agent does the same stage", () => {
+  const g = group();
+  g.runs[1] = run({ sessionId: "live", name: "FSDK-5: Watch https://github.com/o/r/pull/246 build", status: "working", lastMessage: "planning", userMessageCount: 1 });
+  const ctx = buildHandoff({ group: g, notes: [], summary: undefined, now: new Date(NOW), script: "/dash/scripts/sdlc-event.ts" });
+  assert.match(ctx, /`node \/dash\/scripts\/sdlc-event\.ts plan --ticket FSDK-5 --env <env> …` for a plan/);
+  assert.match(ctx, /do not start it again and change no shared state: tell Piper first/);
+  // Run names show URLs as their host, in the latest messages and in the history.
+  assert.match(ctx, /### FSDK-5: Watch \[github\.com\] build \(working/);
+  assert.doesNotMatch(ctx, /pull\/246/);
 });
 
 test("a run started from a handoff links to its ticket, not to the tickets the context mentions", () => {

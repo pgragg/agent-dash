@@ -1,5 +1,6 @@
 import { progressLines, sdlcProgress } from "../shared/sdlc.ts";
 import { type Note, PARKED_ASK_CHARS, type ParkedRun, type PullRequest, type Run, type SdlcEvent, type TicketGroup, type TicketSummaryState } from "../shared/types.ts";
+import { hideUrls } from "../shared/runTitle.ts";
 import { User, user } from "../shared/team.ts";
 
 /**
@@ -30,9 +31,17 @@ export function agentMessage(context: string, message: string): string {
   return `${context}\n\n${message.trim()}`;
 }
 
-/** The session name carries the key, so the new run links to the ticket at once. */
+/**
+ * The session name carries the key, so the new run links to the ticket at once. URLs show as
+ * their host: a cut URL (`…/pull/24`) names the wrong PR to the next agent that reads it.
+ */
 export function agentName(key: string, text: string): string {
-  return `${key}: ${text.replace(/[*`]/g, "").trim().split("\n")[0].slice(0, 60)}`;
+  return `${key}: ${hideUrls(text.replace(/[*`]/g, "").trim().split("\n")[0]).slice(0, 60)}`;
+}
+
+/** A run's name in the context: as on the page, with URLs as their host. */
+function runLabel(r: Run): string {
+  return hideUrls(r.name ?? r.firstPrompt.slice(0, 80));
 }
 
 export interface HandoffInput {
@@ -44,6 +53,8 @@ export interface HandoffInput {
   /** Agents on the ticket that agent-dash parked, with what each one needed. */
   parked?: ParkedRun[];
   now: Date;
+  /** The absolute path of scripts/sdlc-event.ts, so the agent records its SDLC work in this dash. */
+  script?: string;
 }
 
 const MESSAGE_MAX = 4_000;
@@ -65,7 +76,7 @@ export function featuredRuns(group: TicketGroup): Run[] {
   return live.length ? live : relevant.slice(-1);
 }
 
-export function buildHandoff({ group, notes, summary, events = [], parked = [], now }: HandoffInput): string {
+export function buildHandoff({ group, notes, summary, events = [], parked = [], now, script }: HandoffInput): string {
   const t = group.ticket;
   const out: string[] = [
     HANDOFF_START(t.key),
@@ -88,13 +99,21 @@ export function buildHandoff({ group, notes, summary, events = [], parked = [], 
   out.push("", "## Pull requests");
   out.push(...(group.prs.length ? group.prs.map(prLine) : ["- none"]));
   out.push("", "## SDLC progress (stages can be skipped)", ...progressLines(sdlcProgress({ ticket: t, prs: group.prs, events })));
+  if (script) {
+    // Work that is not recorded does not show, so a second agent starts the same stage again.
+    out.push(
+      "",
+      `If you plan or run a smoketest, or confirm a deploy, record it, so that ${user()} and the next agent see it: \`node ${script} plan --ticket ${t.key} --env <env> …\` for a plan, \`smoketest\` for a result, \`deploy\` for a deploy. Run \`node ${script}\` for the usage.`,
+    );
+  }
 
   const featured = featuredRuns(group);
   if (featured.length) {
     out.push("", "## Latest message from each agent conversation that is still relevant");
+    out.push(`If one of these agents is working on the same stage (the same smoketest, deploy or environment), do not start it again and change no shared state: tell ${user()} first.`);
     for (const r of featured) {
       const msg = r.lastMessage.length > MESSAGE_MAX ? `…${r.lastMessage.slice(-MESSAGE_MAX)}` : r.lastMessage;
-      out.push("", `### ${r.name ?? r.firstPrompt.slice(0, 80)} (${status(r)}, last active ${r.lastActivityAt})`, "", msg || "(no reply yet)");
+      out.push("", `### ${runLabel(r)} (${status(r)}, last active ${r.lastActivityAt})`, "", msg || "(no reply yet)");
     }
   }
 
@@ -108,7 +127,7 @@ export function buildHandoff({ group, notes, summary, events = [], parked = [], 
   for (const r of group.runs) {
     const th = group.threads[r.sessionId];
     const resolution = th?.status === "resolved" ? `resolved by ${user()} ${th.createdAt}${th.reason ? `: ${th.reason}` : ""}` : "relevant";
-    out.push(`- ${r.name ?? r.firstPrompt.slice(0, 80)} · started ${r.startedAt} · ${r.userMessageCount} prompts · ${status(r)} · ${resolution} · log ${r.sessionFile}`);
+    out.push(`- ${runLabel(r)} · started ${r.startedAt} · ${r.userMessageCount} prompts · ${status(r)} · ${resolution} · log ${r.sessionFile}`);
   }
   out.push("", HANDOFF_END);
   return out.join("\n");
