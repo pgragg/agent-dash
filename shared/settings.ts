@@ -37,6 +37,8 @@ export interface Settings extends Team {
   claudeProjectsDir: string;
   /** The `--permission-mode` of the Claude Code runs that the dash starts. */
   claudePermissionMode: "auto" | "acceptEdits" | "default";
+  /** The `--model` of the runs and summaries that the dash starts. Empty: the agent's own default. */
+  model: string;
   opencodeDb: string;
   recentDays: number;
   jiraServer: string;
@@ -92,6 +94,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sessionsDir: "~/.pi/agent/sessions",
   claudeProjectsDir: "~/.claude/projects",
   claudePermissionMode: "auto",
+  model: "",
   opencodeDb: "~/.local/share/opencode/opencode.db",
   recentDays: 14,
   jiraServer: "https://postmanlabs.atlassian.net",
@@ -131,6 +134,12 @@ export const SETTING_FIELDS: SettingField[] = [
     help: "When a Claude Code run on the page asks before a tool call. Used when the agent is Claude Code; a run in iTerm uses your own Claude Code settings.",
     example: "auto",
     find: "Keep auto. Pick acceptEdits when `claude --permission-mode auto` says that auto mode is not available.",
+  },
+  {
+    key: "model", group: "Agent", label: "Model", kind: "text", pattern: /^[\w.:/-]+$/, env: "AGENT_DASH_MODEL",
+    help: "The model of the pi and Claude Code runs and summaries that agent-dash starts. Empty: the agent's own default model.",
+    example: "amazon-bedrock/us.anthropic.claude-opus-5-5",
+    find: "For pi, a `provider/model` pair from `pi --list-models`. For Claude Code, a name that `claude --model` takes.",
   },
   {
     key: "userName", group: "You", label: "Your first name", kind: "text", pattern: /^[^\s"'`]{1,40}$/,

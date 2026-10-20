@@ -140,7 +140,7 @@ test("drafts and summaries are one-shot OpenCode sessions; a terminal run makes 
   const draft = draftCommand("opencode", "write it");
   assert.equal(draft.cmd, process.execPath);
   const d = oneshotArgs(draft.args.slice(1));
-  assert.deepEqual([d.mode, d.model, d.title, readFileSync(d.promptFile, "utf8")], ["draft", "anthropic/claude-haiku-4-5", "draft", "write it"]);
+  assert.deepEqual([d.mode, d.model, d.title, readFileSync(d.promptFile, "utf8")], ["draft", "amazon-bedrock/us.anthropic.claude-haiku-5-5", "draft", "write it"]);
   rmSync(d.promptFile);
   // The prompt stays off argv.
   assert.ok(!draft.args.includes("write it"));
