@@ -304,6 +304,18 @@ test("the script that agents call writes into the same database", () => {
   assert.throws(() => execFileSync("node", [script, "smoketest", "--ticket", "FSDK-30"], { env, stdio: "pipe" }));
 });
 
+test("an agent that agent-dash did not start records a plan with a ticket and an environment", () => {
+  const script = new URL("../scripts/sdlc-event.ts", import.meta.url).pathname;
+  const env = { ...process.env, AGENT_DASH_DB: dbPath, PI_SESSION_ID: "free-1" };
+  const out = execFileSync("node", [script, "plan", "--ticket", "FSDK-33", "--env", "Postman Beta", "--summary", "Publish on Beta", "--plan", "1. Publish.", "--state-changes", "POST /publish on Postman Beta", "--writes-summary", "Postman Beta: one site"], { env }).toString();
+  assert.match(out, /waits for Piper's confirmation/);
+  const plan = db.sdlcEventsByTicket()["FSDK-33"][0];
+  assert.deepEqual([plan.eventType, plan.environments, plan.sessionId, plan.summary, plan.confirmedAt], ["smoketest_plan", ["postman_beta"], "free-1", "Publish on Beta", null]);
+  // One ticket and one environment, and a real key.
+  assert.throws(() => execFileSync("node", [script, "plan", "--ticket", "FSDK-33", "--summary", "x", "--plan", "y", "--state-changes", "none"], { env, stdio: "pipe" }));
+  assert.throws(() => execFileSync("node", [script, "plan", "--ticket", "NOPE", "--env", "localhost", "--summary", "x", "--plan", "y", "--state-changes", "none"], { env, stdio: "pipe" }));
+});
+
 test("the agent finishes its running event once, with the script", () => {
   const script = new URL("../scripts/sdlc-event.ts", import.meta.url).pathname;
   const env = { ...process.env, AGENT_DASH_DB: dbPath };
@@ -347,11 +359,16 @@ test("verb messages name the environment and the record command; the summary pro
   const auto = executeMessage("FSDK-1", "localhost", "/s", 42, plan({ id: 39 }));
   assert.match(auto, /accepted the smoketest plan of FSDK-1 on localhost \(SDLC event 39\), because it changes no state/);
   assert.doesNotMatch(auto, /<plan>/);
+  // Two agents once ran the same plan on shared Beta at the same time.
+  assert.match(run, /check the context for another agent that works on this smoketest of FSDK-1 on Postman Beta\. If one does, do not run the plan/);
   assert.match(run, /--summary "<one line>"/);
   const c = confirmDeployMessage("FSDK-1", "beta", ["https://github.com/postman-eng/cloud9-parcels-deployments/pull/7"], "/s");
   assert.match(c, /Do not sync, roll back, or change anything/);
   assert.match(c, /deploy --ticket FSDK-1 --env postman_beta/);
   assert.match(c, /--outcome unhealthy/);
+  // A bot commit with no PR is a deploy too, and a render takes minutes.
+  assert.match(c, /A deploy can have no PR/);
+  assert.match(c, /check again for up to 15 minutes before you report that it is not deployed/);
 
   assert.match(buildPrompt("FSDK-1", 1, "/w"), /local smoketest comes before a PR review request/);
   assert.match(buildPrompt("FSDK-1", 1, "/w"), /Each smoketest starts with a plan/);

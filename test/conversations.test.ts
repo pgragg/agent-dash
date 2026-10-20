@@ -19,6 +19,8 @@ test("a new headless run gets the server's id and its name; a resumed one opens 
 test("the name carries the key and the first line of the task, without markdown", () => {
   assert.equal(agentName("FSDK-5", "**Piper:** ping `Arie`\nsecond line"), "FSDK-5: Piper: ping Arie");
   assert.equal(agentName("FSDK-5", "x".repeat(100)).length, "FSDK-5: ".length + 60);
+  // A URL cut at 60 characters named the wrong PR (…/pull/24 for /pull/246).
+  assert.equal(agentName("FERNDOC-462", "Watch https://github.com/postman-eng/sdk-gen-fern-platform/pull/246 build"), "FERNDOC-462: Watch [github.com] build");
 });
 
 test("a headless ticket agent links to its ticket only, with the context inline in the first message", () => {
