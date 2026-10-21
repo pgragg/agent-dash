@@ -403,19 +403,57 @@ a.pr-group-title:hover { text-decoration: underline; text-underline-offset: 3px;
 .md table { border-collapse: collapse; font-size: 13px; }
 .md th, .md td { text-align: left; padding: 5px 12px 5px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
 .md th { color: var(--ink); font-weight: 600; }
-/* Domain terms: a glyph as well as a color, so the kind also reads without color. */
-.term { --term: var(--ink); color: var(--term); background: color-mix(in srgb, var(--term) 11%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--term) 28%, transparent); overflow-wrap: break-word; }
+/* Domain marks: each kind has a hue and a glyph, so the kind also reads without color. */
+.term { --term: var(--ink); color: var(--term); background: color-mix(in srgb, var(--term) 11%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--term) 28%, transparent); overflow-wrap: break-word; cursor: help; }
+.term:focus-visible { outline: 2px solid var(--term); outline-offset: 1px; }
 .term::before { margin-right: 3px; opacity: .7; font-size: 10.5px; }
-.term-db { --term: #1f5f99; }
-.term-db::before { content: "▦"; }
+.term-rec { --term: #1f5f99; }
+.term-rec::before { content: "▦"; }
 .term-fn { --term: #8a5a00; }
 .term-fn::before { content: "ƒ"; font-style: italic; }
 .term-obj { --term: #0b7d6e; }
 .term-obj::before { content: "{}"; }
+.term-rule { --term: #b4235a; font-weight: 600; }
+.term-rule::before { content: "⚖"; }
+.term-svc { --term: var(--ink); background: none; font-family: var(--sans); font-weight: 600; }
+.term-svc::before { content: "⬡"; }
+.term-ext { --term: #6b6b70; background: none; box-shadow: none; outline: 1px dotted var(--term); outline-offset: -1px; }
+.term-ext::before { content: "◌"; }
+.term-ctx { --term: var(--ctx, var(--ink)); font-family: var(--sans); font-weight: 600; }
+.term-ctx::before { content: "◧"; }
+.term-copy { box-shadow: none; outline: 1px dashed var(--term); outline-offset: -1px; background: color-mix(in srgb, var(--term) 6%, transparent); }
+.term-key::after { content: "🔑"; margin-left: 3px; font-size: 10px; }
+.term-ns { color: var(--muted); font-size: 10.5px; margin-right: 4px; }
+.ctx-violet { --ctx: #6d4bd8; }
+.ctx-olive { --ctx: #5c7a1f; }
+.ctx-sienna { --ctx: #9a4a1c; }
+.ctx-slate { --ctx: #4b5f7a; }
+.ctx-plum { --ctx: #8e3b8e; }
+.ctx-moss { --ctx: #2f7a52; }
+.ctx-chip { display: inline-block; font: 600 11px var(--sans); color: var(--ctx, var(--muted)); background: color-mix(in srgb, var(--ctx, var(--muted)) 12%, transparent); border-radius: 999px; padding: 0 8px; margin-left: 6px; }
+.ctx-region { border-left: 3px solid var(--ctx, var(--line-2)); padding: 2px 0 2px 14px; margin: 0 0 12px; }
+.term-card { position: fixed; z-index: 1000; width: 340px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--surface); box-shadow: var(--shadow); font-size: 12.5px; line-height: 1.5; color: var(--ink-2); pointer-events: none; }
+.term-card p { margin: 4px 0 0; }
+.term-card-kind { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.term-card-kind .ctx-chip { text-transform: none; letter-spacing: 0; }
+.term-card-name { font: 600 13px var(--mono); color: var(--ink); margin-top: 2px; overflow-wrap: anywhere; }
+.term-card-copy { color: var(--warn); }
+.term-card-code { font: 11.5px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.domain-legend { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin: 0 0 14px; background: var(--surface); }
+.domain-legend-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.domain-legend ul { padding-left: 18px; }
 @media (prefers-color-scheme: dark) {
-  .term-db { --term: #79b8ff; }
+  .term-rec { --term: #79b8ff; }
   .term-fn { --term: #e6c07b; }
   .term-obj { --term: #4ec9b0; }
+  .term-rule { --term: #f48fb1; }
+  .term-ext { --term: #a1a1aa; }
+  .ctx-violet { --ctx: #a78bfa; }
+  .ctx-olive { --ctx: #a3c45a; }
+  .ctx-sienna { --ctx: #e3936a; }
+  .ctx-slate { --ctx: #94a8c7; }
+  .ctx-plum { --ctx: #d78ad7; }
+  .ctx-moss { --ctx: #6fcf97; }
 }
 
 /* misc */

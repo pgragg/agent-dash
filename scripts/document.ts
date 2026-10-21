@@ -6,6 +6,9 @@
  *   node scripts/document.ts save --id 7 --file doc.md [--title "New title"]
  *   node scripts/document.ts create --ticket ABC-123 --title "Rollout plan" --file doc.md [--type document|ticket-summary]
  *
+ *   node scripts/document.ts lint --file doc.md
+ *
+ * `lint` checks a document's domain marks against its ```domain registry (see skills/domain-doc).
  * `save` replaces the whole document, and keeps its id. Each `![alt](path)` to a local image goes
  * into the database, and becomes `![alt](image:N)`. A ticket has at most one ticket-summary.
  */
@@ -15,12 +18,14 @@ import { parseArgs } from "node:util";
 import { config } from "../server/config.ts";
 import { DOCUMENT_TYPES, storeImages, validateTitle } from "../server/documents.ts";
 import * as db from "../server/summaries/db.ts";
+import { lintDomain } from "../shared/terms.ts";
 import type { DocumentType } from "../shared/types.ts";
 
 const USAGE = `usage: node scripts/document.ts list --ticket KEY
        node scripts/document.ts show --id N
        node scripts/document.ts save --id N --file F [--title TEXT]
-       node scripts/document.ts create --ticket KEY --title TEXT --file F [--type ${DOCUMENT_TYPES.join("|")}]`;
+       node scripts/document.ts create --ticket KEY --title TEXT --file F [--type ${DOCUMENT_TYPES.join("|")}]
+       node scripts/document.ts lint --file F`;
 
 try {
   const { values, positionals } = parseArgs({
@@ -48,6 +53,12 @@ try {
       db.saveDocument(doc.id, { body: await storeImages(doc.id, readFileSync(path, "utf8"), dirname(path)), title: validateTitle(values.title) });
       console.log(`Saved document ${doc.id}. agent-dash shows the new version on ${doc.ticket ?? "its page"}.`);
     }
+  } else if (command === "lint") {
+    const issues = lintDomain(readFileSync(file(), "utf8"));
+    for (const i of issues) console.log(`${i.level}\t${i.line ? `line ${i.line}` : "registry"}\t${i.message}`);
+    const errors = issues.filter((i) => i.level === "error").length;
+    console.log(`${errors} errors, ${issues.length - errors} warnings`);
+    if (errors) process.exit(1);
   } else if (command === "create") {
     const type = (values.type ?? "document") as DocumentType;
     if (!DOCUMENT_TYPES.includes(type)) throw new Error(`--type must be one of ${DOCUMENT_TYPES.join(", ")}`);
