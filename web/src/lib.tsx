@@ -3,6 +3,7 @@ import { runTitle } from "../../shared/runTitle.ts";
 import type { Dashboard, HistoryRun, Run, TicketDocumentWithBody, PrDetail, ThreadStatus, Transcript } from "../../shared/types.ts";
 import { setTeam } from "../../shared/team.ts";
 import { IMAGE_EXT, wikiLinkParts } from "../../shared/wiki.ts";
+import { domainTerm, TERM_KINDS } from "../../shared/terms.ts";
 import { href } from "./routes.ts";
 import { dashClick, internalHref, JIRA_BROWSE, splitTrailing } from "./links.ts";
 import { EmbeddedImage, MermaidFence, setKnownDiagrams } from "./mermaid.tsx";
@@ -516,13 +517,21 @@ function WikiLink({ token }: { token: string }) {
   );
 }
 
+/** A long `table.column` name may wrap after a dot, an underscore or a slash, and nowhere else. */
+function breakable(name: string): ReactNode[] {
+  return name.split(/(?<=[._/])/).flatMap((part, i) => (i ? [<wbr key={i} />, part] : [part]));
+}
+
 export function inline(text: string): ReactNode[] {
   const out: ReactNode[] = [];
   let last = 0;
   for (const m of text.matchAll(INLINE)) {
     if (m.index > last) out.push(text.slice(last, m.index));
     const [tok] = m;
-    if (m[1]) out.push(<code key={m.index}>{tok.slice(1, -1)}</code>);
+    if (m[1]) {
+      const term = domainTerm(tok.slice(1, -1));
+      out.push(term ? <code key={m.index} className={`term term-${term.kind}`} title={TERM_KINDS[term.kind]}>{breakable(term.name)}</code> : <code key={m.index}>{tok.slice(1, -1)}</code>);
+    }
     else if (m[2]) out.push(<strong key={m.index}>{inline(tok.slice(2, -2))}</strong>);
     else if (m[7]) out.push(<em key={m.index}>{inline(tok.slice(1, -1))}</em>);
     else if (m[8]) out.push(<WikiLink key={m.index} token={tok} />);
