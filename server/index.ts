@@ -162,12 +162,16 @@ export const refreshGitHub = () => prs.get(true);
 const slackPost = new Cached<Half>({ off: "not checked yet" }, postLogin);
 /** When a Fix Slack login last worked: a draft's login gap from before it no longer counts. */
 let slackFixedAt: string | null = null;
-loginRoute.setOnLogin((source) => {
-  if (source === "github") void refreshGitHub();
+loginRoute.setOnLogin(async (source) => {
+  if (source === "github") {
+    await refreshGitHub();
+    return prs.health.ok ? null : (prs.health.error ?? "unknown error");
+  }
   if (source === "slack") {
     slackFixedAt = new Date().toISOString();
     void slackPost.get(true);
   }
+  return null;
 });
 loginRoute.setSlackCheck(async () => {
   const post = await slackPost.get(true);

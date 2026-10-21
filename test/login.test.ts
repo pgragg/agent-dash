@@ -122,3 +122,14 @@ test("slack never runs pi-auth, and gives the steps for only the half that faile
   assert.equal((await call("slack")).code, 200);
   assert.doesNotMatch(readFileSync(piAuthCalls, "utf8"), /slack/);
 });
+
+test("a github login that works still fails when the PR read fails, so the button stays", async () => {
+  const { setOnLogin } = await import("../server/routes/login.ts");
+  writeFileSync(join(dir, "gh-logged"), "");
+  setOnLogin(async () => "gh api graphql failed: gh: HTTP 502");
+  const out = await call("github");
+  assert.equal(out.code, 502);
+  assert.match(out.body.error, /login works, but the github read still fails: gh api graphql failed: gh: HTTP 502/);
+  setOnLogin(async () => null);
+  assert.equal((await call("github")).code, 200);
+});
