@@ -1,6 +1,6 @@
 ---
 name: agent-dash
-description: Drive agent-dash (the local dashboard of tickets, agents, PRs and smoketests at http://127.0.0.1:7777) through its agent mode, a small JSON API with the next actions on each object. Use when the user says "use agent-dash to find what I should do next", "what needs me", "look at agent-dash", "keep FSDK-123 moving", "plan and run the smoketest for X", "reply to the waiting agents", or any task that reads or acts on the dashboard. Do not read the README, grep the server, take screenshots, or read /api/dashboard (2 MB): start at GET /api/agent.
+description: Drive agent-dash (the local dashboard of tickets, agents, PRs and smoketests at http://127.0.0.1:7777) through its agent mode, a small JSON API with the next actions on each object. Use when the user says "use agent-dash to find what I should do next", "what needs me", "look at agent-dash", "keep ABC-123 moving", "plan and run the smoketest for X", "reply to the waiting agents", or any task that reads or acts on the dashboard. Do not read the README, grep the server, take screenshots, or read /api/dashboard (2 MB): start at GET /api/agent.
 ---
 
 # agent-dash

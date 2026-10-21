@@ -14,8 +14,8 @@ exits.open(join(mkdtempSync(join(tmpdir(), "agent-dash-exits-")), "test.db"));
 
 test("an href gives the exit kind, host, and the Jira key when it has one", () => {
   assert.deepEqual(classifyHref("https://github.com/postman-eng/repo/pull/12/files"), { kind: "github_pr", host: "github.com", ticket: null });
-  assert.deepEqual(classifyHref("https://postmanlabs.atlassian.net/browse/FSDK-7"), { kind: "jira", host: "postmanlabs.atlassian.net", ticket: "FSDK-7" });
-  assert.deepEqual(classifyHref("https://postman.enterprise.slack.com/archives/C1/p2"), { kind: "slack", host: "postman.enterprise.slack.com", ticket: null });
+  assert.deepEqual(classifyHref("https://acme.atlassian.net/browse/FSDK-7"), { kind: "jira", host: "acme.atlassian.net", ticket: "FSDK-7" });
+  assert.deepEqual(classifyHref("https://acme.enterprise.slack.com/archives/C1/p2"), { kind: "slack", host: "acme.enterprise.slack.com", ticket: null });
   // A GitHub page that is not a PR is a plain link out.
   assert.equal(classifyHref("https://github.com/postman-eng/repo/actions/runs/1").kind, "other_url");
   assert.equal(classifyHref("https://notslack.com/x").kind, "other_url");

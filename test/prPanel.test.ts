@@ -11,8 +11,8 @@ test("a PR link opens the PR panel, a known Jira key opens the ticket, anything 
   const known = new Set(["FSDK-1"]);
   assert.equal(internalHref(url, known), "#/pr:o/r/7");
   assert.equal(internalHref(`${url}/files#diff-1`, known), "#/pr:o/r/7");
-  assert.equal(internalHref("https://postmanlabs.atlassian.net/browse/FSDK-1", known), "#/t:FSDK-1");
-  assert.equal(internalHref("https://postmanlabs.atlassian.net/browse/FSDK-2", known), null);
+  assert.equal(internalHref("https://acme.atlassian.net/browse/FSDK-1", known), "#/t:FSDK-1");
+  assert.equal(internalHref("https://acme.atlassian.net/browse/FSDK-2", known), null);
   assert.equal(internalHref("https://github.com/o/r/issues/7", known), null);
   assert.equal(internalHref("https://example.com/?u=github.com/o/r/pull/7", known), null);
   // Any Jira host: JIRA_SERVER can point anywhere.

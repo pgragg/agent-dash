@@ -4,8 +4,7 @@
  *   node scripts/demo/shoot.ts [name…]     # writes docs/images/<name>.png
  *
  * Before each capture it checks the page text for company names, people and real ticket keys,
- * and refuses to save a screenshot that has one. agent-dash's own labels for the Postman and
- * Fern environments are product text, so they show as "Staging" and "Acme" first.
+ * and refuses to save a screenshot that has one.
  */
 import { execFileSync } from "node:child_process";
 import { renameSync } from "node:fs";
@@ -18,17 +17,6 @@ const OUT = new URL("../../docs/images/", import.meta.url).pathname;
 const ab = (...args: string[]) => execFileSync("agent-browser", ["--session", SESSION, ...args], { encoding: "utf8" }).trim();
 const evalJs = (js: string) => ab("eval", js);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/** agent-dash's own words for the two companies' environments, and the defaults that name them. */
-const SANITIZE = `(() => {
-  const map = [[/postmanlabs\\.atlassian\\.net/g, "acme.atlassian.net"], [/postman\\.enterprise\\.slack\\.com/g, "acme.slack.com"], [/postman-eng\\/cloud9-parcels-production-deployments/g, "acme/deploy-prod"], [/postman-eng\\/cloud9-parcels-deployments/g, "acme/deploy-staging"], [/sam@postman\\.com/g, "sam@acme.example"], [/postman_beta/g, "staging"], [/postman_prod/g, "prod"], [/fern_dev/g, "staging"], [/fern_prod/g, "prod"], [/Postman Beta/g, "Staging"], [/Postman Prod/g, "Production"], [/Fern Dev/g, "Staging"], [/Fern Prod/g, "Production"], [/\\bPostman\\b/g, "Acme"], [/\\bFern\\b/g, "Acme"]];
-  const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-  for (let n; (n = walk.nextNode()); ) {
-    let t = n.nodeValue;
-    for (const [re, to] of map) t = t.replace(re, to);
-    if (t !== n.nodeValue) n.nodeValue = t;
-  }
-})()`;
 
 /**
  * What must never be in a screenshot: company names, real people, and real ticket projects. Only
@@ -95,7 +83,6 @@ async function open(hash: string, height = 1000) {
 /** A shot is the viewport, or one element when `selector` is set. */
 async function capture(name: string, selector?: string) {
   for (let attempt = 0; attempt < 3; attempt++) {
-    evalJs(SANITIZE);
     const before = JSON.parse(evalJs(guard(selector)));
     if (before) throw new Error(`${name}: the page shows "${before}"`);
     const tmp = `${ROOT}/${name}.png`;

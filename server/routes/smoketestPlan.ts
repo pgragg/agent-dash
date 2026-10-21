@@ -1,7 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { homedir } from "node:os";
-import { ENV_LABEL, isSmoketestRunning } from "../../shared/sdlc.ts";
+import { envLabel, isSmoketestRunning } from "../../shared/sdlc.ts";
 import type { AgentKind } from "../../shared/team.ts";
 import { config } from "../config.ts";
 import { isRunning, newSessionId, startConversation } from "../conversations.ts";
@@ -107,7 +107,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
     const key = plan.tickets[0];
     if (target.kind === "inbox") await deliver(target.sessionId, "txt", message);
     else if (target.kind === "resume") startConversation({ cwd: target.cwd, message, resume: { sessionId: target.sessionId, sessionFile: target.sessionFile }, agent: target.agent });
-    else startConversation({ cwd: dir, message: agentMessage(context!, message), name: agentName(key, `Run the smoketest plan on ${ENV_LABEL[plan.environments[0]]}`), sessionId: target.sessionId });
+    else startConversation({ cwd: dir, message: agentMessage(context!, message), name: agentName(key, `Run the smoketest plan on ${envLabel(plan.environments[0])}`), sessionId: target.sessionId });
     deps.onChange();
     return json(201, { ok: true, sessionId: target.sessionId, execution });
   } catch (err) {

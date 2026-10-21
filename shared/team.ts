@@ -1,5 +1,3 @@
-import type { SdlcEnvironment } from "./types.ts";
-
 /** The coding agent that the dash starts, and whose session logs it reads. */
 export type AgentKind = "pi" | "claude" | "opencode";
 export const AGENT_LABEL: Record<AgentKind, string> = { pi: "pi", claude: "Claude Code", opencode: "OpenCode" };
@@ -25,11 +23,16 @@ export interface Team {
   reviewRoutes: string[];
   /** Repos whose PRs need no Slack review request, such as your own tools. */
   noReviewRepos: string[];
-  /** A merged PR in one of these deploys a chart version to Beta or Prod. */
+  /** A merged PR in one of these deploys a chart version to Beta or Prod. Empty: no repo deploys. */
   deployRepoBeta: string;
   deployRepoProd: string;
-  /** The environments that a smoketest can run on. Old events keep their other environments. */
-  environments: SdlcEnvironment[];
+  /**
+   * The shared environments that a smoketest can run on, as `stage:id`, for example `beta:staging`.
+   * localhost is always there. A stage with no environment here gets one named after it.
+   */
+  environments: string[];
+  /** The shared environments where the Move things along agent may confirm and run a smoketest plan. */
+  autoRunEnvironments: string[];
 }
 
 export const DEFAULT_TEAM: Team = {
@@ -39,9 +42,10 @@ export const DEFAULT_TEAM: Team = {
   reviewChannelName: "",
   reviewRoutes: [],
   noReviewRepos: [],
-  deployRepoBeta: "postman-eng/cloud9-parcels-deployments",
-  deployRepoProd: "postman-eng/cloud9-parcels-production-deployments",
-  environments: ["localhost", "postman_beta", "postman_prod"],
+  deployRepoBeta: "",
+  deployRepoProd: "",
+  environments: [],
+  autoRunEnvironments: ["beta"],
 };
 
 export const team: Team = { ...DEFAULT_TEAM };

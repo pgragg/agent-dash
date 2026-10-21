@@ -1605,7 +1605,7 @@ function MoveAlongButton() {
   };
   return (
     <>
-      <button className="btn move-along" data-usage="move-along" onClick={start} disabled={starting} title={`Start a ${agentLabel()} that first closes waiting agents whose ask you already did (it checks Slack, PRs, Jira and notes for proof), then works through Starred and Up next: it answers waiting agents, starts agents on next steps, red CI and smoketest plans, and runs smoketests on localhost and Postman Beta. It never posts to Slack, writes to AWS, Vault or Jira, or changes prod. You talk to it on its own page.`}>
+      <button className="btn move-along" data-usage="move-along" onClick={start} disabled={starting} title={`Start a ${agentLabel()} that first closes waiting agents whose ask you already did (it checks Slack, PRs, Jira and notes for proof), then works through Starred and Up next: it answers waiting agents, starts agents on next steps, red CI and smoketest plans, and runs the smoketest plans that your settings let it run. It never posts to Slack, writes to AWS, Vault or Jira, or changes prod. You talk to it on its own page.`}>
         {starting ? "Starting…" : "✦ Move things along"}
       </button>
       {error && <div className="new-conversation-error">{error}</div>}

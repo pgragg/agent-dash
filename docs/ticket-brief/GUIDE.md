@@ -18,7 +18,7 @@ After reading it, the engineer can:
 
 **You are an editor, not an archivist.** The research finds much more than a reader needs. The page holds what the reader needs. The rest goes in the evidence ledger, where a reader can check it but does not read it by default. The old ticket summaries put everything on the page: a dozen diagrams, ten decisions, seventeen user stories, "I tested…" stories. Readers could not tell which three things mattered. A five-minute page forces you to rank.
 
-You write a JSON spec. The renderer owns the layout, and the lint refuses a spec that a reader would trip over. Do not write HTML, SVG or mermaid. Every field is in [SPEC.md](SPEC.md). A full L-size example is [examples/FSDK-2073.brief.json](examples/FSDK-2073.brief.json).
+You write a JSON spec. The renderer owns the layout, and the lint refuses a spec that a reader would trip over. Do not write HTML, SVG or mermaid. Every field is in [SPEC.md](SPEC.md). A full L-size example is [examples/ACME-2073.brief.json](examples/ACME-2073.brief.json).
 
 ## The page
 
@@ -142,16 +142,16 @@ Start from `node scripts/brief.ts skeleton`. The fields are in [SPEC.md](SPEC.md
 - **Headings are claims.** "Released CLIs call a URL we cannot move" beats "Current architecture". The lint warns on a topic heading.
 - **One map, several views, the same canvas.** Each box has fixed grid cells in every view, so the eye sees what moves. A view hides what is not there yet or any more; the renderer marks boxes NEW, CHANGED and REMOVED by itself. Pin the problems on the first view: the pins are the reader's list of what is wrong.
 - **Numbers, not adjectives**, each with a fact. "231k of 390k calls return nothing" beats "most traffic is wasted".
-- **A decision is on the page only if the ticket forces it**: the engineer cannot finish without an answer. Zero decisions is a good result. A decision gets a matrix only if its options trade off. Choose criteria that separate the options, not "cost" or "effort". Exactly one option is recommended; prefer the one with less work that still meets the ask. The decider is a name. Settled or low-stakes calls go in `minor`, as one-line answers, not as new work ("Use the model FSDK-2072 uses", not "Measure p95, then consider Haiku").
+- **A decision is on the page only if the ticket forces it**: the engineer cannot finish without an answer. Zero decisions is a good result. A decision gets a matrix only if its options trade off. Choose criteria that separate the options, not "cost" or "effort". Exactly one option is recommended; prefer the one with less work that still meets the ask. The decider is a name. Settled or low-stakes calls go in `minor`, as one-line answers, not as new work ("Use the model ACME-2072 uses", not "Measure p95, then consider Haiku").
 - **Every done item is observable and has a `verify`**: a command, a test or a dashboard.
 - **Say what only a human can do** (prod writes, a cloud console, merges), so nobody loses a day to find out.
 - **Do not tell the story of the investigation.** State the result with its badge: "I tested X and Y happened" becomes "Y happens" with `how: verified`.
 - **Do not copy the ticket.** Link it. Include only what the ticket gets wrong or leaves out.
 - **A person is a person.** A `people` row is someone whose experience changes. "As a platform engineer I want to deploy" is a task: put it in `done`.
 - **Write every text field in ASD-STE100** (Simplified Technical English), so that a reader, also one whose first language is not English, reads each line once and gets it:
-  - One topic in a sentence. One instruction in a sentence. Put the verb first in an instruction: "Set `FDR_ORIGIN` on the prod Lambda."
+  - One topic in a sentence. One instruction in a sentence. Put the verb first in an instruction: "Set `HUB_ORIGIN` on the prod Lambda."
   - At most 20 words in an instruction and 25 words in a description. Split a longer sentence.
-  - Active voice: "FDR caches the answer", not "the answer is cached". Say who does it.
+  - Active voice: "Hub caches the answer", not "the answer is cached". Say who does it.
   - Simple tenses only: present, past, future. No "-ing" word as a noun or an adjective ("the deploy", not "the deploying").
   - Use simple, common words, and use each word with one meaning. Use one term for one thing on the whole page: if it is the "proxy", do not also call it the "forwarder".
   - Keep "the", "a" and "is". Do not stack more than three nouns ("skip-cache row", not "Lambda docs skip cache row cleanup").

@@ -52,7 +52,8 @@ write(
       slackStateFile: join(ROOT, "slack-state.json"),
       slackOrgId: "E0ACME0001",
       slackWorkspaceUrl: "https://acme.slack.com",
-      environments: ["localhost", "postman_beta", "postman_prod"],
+      environments: ["beta:staging", "prod:production"],
+      autoRunEnvironments: ["staging"],
       wikiDir: join(ROOT, "wiki"),
     },
     null,
@@ -124,25 +125,25 @@ for (const p of PARKED) {
 
 const release = PRS.find((p) => p.number === 239)!;
 const search = PRS.find((p) => p.number === 77)!;
-const plan = (ticket: string, env: "localhost" | "postman_beta", minAgo: number, summary: string, writes: { list: string; summary: string } | null, by = "sam") => {
+const plan = (ticket: string, env: "localhost" | "staging", minAgo: number, summary: string, writes: { list: string; summary: string } | null, by = "sam") => {
   const e = db.addSdlcEvent({ eventType: "smoketest_plan", startedAt: ago(now, minAgo + 5), environments: [env], tickets: [ticket] }, at(minAgo + 5));
   db.recordPlan(e.id, { plan: `1. ${summary}\n2. Check the result.\n3. Clean up.`, stateChanges: writes?.list ?? null, plannedAt: ago(now, minAgo), summary, writesSummary: writes?.summary ?? null });
   if (writes) db.confirmPlan(e.id, ago(now, minAgo), by, at(minAgo - 2));
   return e.id;
 };
-const run = (ticket: string, env: "localhost" | "postman_beta", planId: number, minAgo: number, outcome: "passed" | "blocked" | "failed", summary: string, sessionId?: string) =>
+const run = (ticket: string, env: "localhost" | "staging", planId: number, minAgo: number, outcome: "passed" | "blocked" | "failed", summary: string, sessionId?: string) =>
   db.addSdlcEvent({ eventType: "smoketest_execution", startedAt: ago(now, minAgo + 15), finishedAt: ago(now, minAgo), outcome, planId, summary, sessionId, testDetails: "Steps from the plan.", testResults: summary, environments: [env], tickets: [ticket] }, at(minAgo));
 
 const local412 = plan("ACME-412", "localhost", 2 * 24 * 60 + 30, "Build a release locally from a repo with release.yml, then from one with legacy.yml", null);
 run("ACME-412", "localhost", local412, 3 * 24 * 60, "failed", "Repos with release.yml got no release: the bot still read legacy.yml");
 run("ACME-412", "localhost", local412, 2 * 24 * 60, "passed", "Migrated repos now build from release.yml; old repos still use legacy.yml");
 db.addSdlcEvent({ eventType: "review_request", startedAt: ago(now, 30 * 60), finishedAt: ago(now, 30 * 60), prUrl: prUrl(release), channel: "C0ACME0001", message: `PR: build release targets from release.yml ${prUrl(release)}`, messageUrl: "https://acme.slack.com/archives/C0ACME0001/p1", environments: [], tickets: ["ACME-412"] }, at(30 * 60));
-db.addSdlcEvent({ eventType: "deploy", startedAt: ago(now, 20 * 60), finishedAt: ago(now, 20 * 60), testDetails: "release-bot: Synced, Healthy, 4.9.20", environments: ["postman_beta"], tickets: ["ACME-412"] }, at(20 * 60));
-const beta412 = plan("ACME-412", "postman_beta", 3 * 60, "Merge a test change in acme-demo/release-smoke and check that the bot builds a release from release.yml", {
+db.addSdlcEvent({ eventType: "deploy", startedAt: ago(now, 20 * 60), finishedAt: ago(now, 20 * 60), testDetails: "release-bot: Synced, Healthy, 4.9.20", environments: ["staging"], tickets: ["ACME-412"] }, at(20 * 60));
+const beta412 = plan("ACME-412", "staging", 3 * 60, "Merge a test change in acme-demo/release-smoke and check that the bot builds a release from release.yml", {
   list: "Staging: create one draft release in acme-demo/release-smoke, then delete it.",
   summary: "Staging: one draft release in acme-demo/release-smoke, deleted after the test",
 });
-run("ACME-412", "postman_beta", beta412, 62, "blocked", "Blocked: the Staging release bot app is private to acme-demo, and the gh token has no access", RUNS[0].id);
+run("ACME-412", "staging", beta412, 62, "blocked", "Blocked: the Staging release bot app is private to acme-demo, and the gh token has no access", RUNS[0].id);
 
 const local398 = plan("ACME-398", "localhost", 9 * 60, "Fill the local queue with 5,000 jobs and watch the indexer scale out", null);
 run("ACME-398", "localhost", local398, 8 * 60, "passed", "The indexer scaled from 2 to 6 pods at 5,000 queued jobs, and back to 2");

@@ -8,7 +8,7 @@ import { NOW, minutesAgo, pr, run, ticket } from "./helpers.ts";
 const summary = (about: string | null): ConversationSummary => ({ sessionId: "s1", status: "done", about, latest: "x", needs: "Nothing", generatedAt: null, error: null, stale: false });
 
 test("a cut name ends on a whole word, with an ellipsis", () => {
-  const name = "FSDK-2090: Plan a smoketest of FSDK-2090 on Postman Prod. Write the plan to the ticket";
+  const name = "FSDK-2090: Plan a smoketest of FSDK-2090 on Prod. Write the plan to the ticket";
   const cut = cutWords(name, 60);
   assert.ok(cut.endsWith("…"));
   assert.ok(name.startsWith(cut.slice(0, -1)), "the cut is a prefix of the name");
@@ -17,12 +17,12 @@ test("a cut name ends on a whole word, with an ellipsis", () => {
 });
 
 test("the page's ticket key leaves the name, with its 'of'", () => {
-  assert.equal(withoutKey("FSDK-2090: Plan a smoketest of FSDK-2090 on Postman Prod.", "FSDK-2090"), "Plan a smoketest on Postman Prod.");
+  assert.equal(withoutKey("FSDK-2090: Plan a smoketest of FSDK-2090 on Prod.", "FSDK-2090"), "Plan a smoketest on Prod.");
   assert.equal(withoutKey("FSDK-1: Fix FSDK-2 too", "FSDK-1"), "Fix FSDK-2 too");
 });
 
 test("an agent row names the summary's about, links to the agent, and does not repeat the ticket", () => {
-  const [item] = rankAttention([run({ status: "awaiting_input", name: "FSDK-2090: Plan a smoketest of FSDK-2090 on Postman Prod. Write the plan", tickets: ["FSDK-2090"], statusSince: minutesAgo(13 * 60) })], [], [], NOW);
+  const [item] = rankAttention([run({ status: "awaiting_input", name: "FSDK-2090: Plan a smoketest of FSDK-2090 on Prod. Write the plan", tickets: ["FSDK-2090"], statusSince: minutesAgo(13 * 60) })], [], [], NOW);
   assert.equal(rowType(item.kind), "Agent");
   assert.equal(item.status, "waiting 13h");
   const fromName = rowName(item, undefined, "FSDK-2090")!;

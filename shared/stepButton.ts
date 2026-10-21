@@ -33,7 +33,7 @@ Rules: 3 to 7 words, plain text, sentence case, start with "Agent", no ticket ke
 
 Examples of good labels:
 - Agent starts work on the ticket
-- Agent opens prod parcel bump PR
+- Agent opens the prod deploy PR
 - Agent re-runs the Beta smoketest
 - Agent checks PR for an approval
 - Agent drafts the reviewer nudge

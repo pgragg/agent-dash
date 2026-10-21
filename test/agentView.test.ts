@@ -132,7 +132,7 @@ test("only a headless run that waits for input can be ended", () => {
 test("a smoketest plan offers its run; a run on an environment past Beta asks first", () => {
   const plan = (id: number, environments: SdlcEnvironment[], confirmedAt: string | null): SdlcEvent =>
     ({ id, eventType: "smoketest_plan", startedAt: minutesAgo(60), finishedAt: null, outcome: null, testDetails: "1. x", testResults: null, sessionId: null, skippedAt: null, plannedAt: minutesAgo(50), stateChanges: null, writesSummary: null, confirmedAt, confirmedBy: confirmedAt && "octocat", planId: null, summary: null, prUrl: null, channel: null, message: null, messageUrl: null, environments, tickets: ["FSDK-1"], createdAt: minutesAgo(60) }) as SdlcEvent;
-  const d = dashboard({ sdlcEvents: { "FSDK-1": [plan(1, ["postman_beta"], null), plan(2, ["postman_beta"], minutesAgo(40)), plan(3, ["postman_prod"], minutesAgo(40))] } });
+  const d = dashboard({ sdlcEvents: { "FSDK-1": [plan(1, ["beta"], null), plan(2, ["beta"], minutesAgo(40)), plan(3, ["prod"], minutesAgo(40))] } });
   const { subjects, sections } = sectionsOf(d);
   const [waiting, beta, prod] = agentTicket(d, sections, subjects.get("t:FSDK-1")!, o).smoketests;
   const confirm = waiting.actions[0];

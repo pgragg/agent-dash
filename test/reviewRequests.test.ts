@@ -16,7 +16,7 @@ import { pr } from "./helpers.ts";
 
 db.open(join(mkdtempSync(join(tmpdir(), "agent-dash-review-")), "test.db"));
 
-const URL1 = "https://github.com/postman-eng/cloud9-parcels-production-deployments/pull/13612";
+const URL1 = "https://github.com/acme/deploy-prod/pull/13612";
 
 test("the message is the team's format, and the model's phrase is cleaned to one short line", () => {
   assert.equal(reviewMessage("bind slack token env vars", URL1), `PR: bind slack token env vars ${URL1}`);
@@ -76,7 +76,7 @@ test("Post sends the text to the review channel as Piper, then records a review_
   const deps = {
     prs: async () => [mine],
     onChange: () => changes++,
-    post: async (channel: string, text: string) => (posted.push([channel, text]), { ts: "1791213047.219629", permalink: "https://postman.enterprise.slack.com/archives/C0BFE2ABFA9/p1791213047219629" }),
+    post: async (channel: string, text: string) => (posted.push([channel, text]), { ts: "1791213047.219629", permalink: "https://acme.enterprise.slack.com/archives/C0123ABCD/p1791213047219629" }),
   };
   const text = `PR: bind slack token env vars ${URL1}`;
 
@@ -105,31 +105,31 @@ test("Post sends the text to the review channel as Piper, then records a review_
 });
 
 test("a route sends a prefix's PRs to its own channel and tags its group; other PRs keep the review channel", async () => {
-  const route = "FERNDOC:doc-gen=C05E0S0A9SN:docs-eng=S07LA27DLQK";
+  const route = "DOCS:docs-review=C0123456789:docs-team=S0123456789";
   assert.deepEqual(validateSettings({ reviewRoutes: [route, "AD:tools=C0123ABCD"] }).errors, {});
-  assert.ok(validateSettings({ reviewRoutes: ["FERNDOC:#doc-gen=C05E0S0A9SN"] }).errors.reviewRoutes);
+  assert.ok(validateSettings({ reviewRoutes: ["DOCS:#docs-review=C0123456789"] }).errors.reviewRoutes);
   const saved = team.reviewRoutes;
   team.reviewRoutes = [route];
   try {
-    const docs = reviewChannelFor(["FERNDOC-12"])!;
-    assert.deepEqual(docs, { id: "C05E0S0A9SN", name: "doc-gen", group: { id: "S07LA27DLQK", handle: "docs-eng" } });
-    assert.equal(channelLabel(docs), "#doc-gen, tags @docs-eng");
+    const docs = reviewChannelFor(["DOCS-12"])!;
+    assert.deepEqual(docs, { id: "C0123456789", name: "docs-review", group: { id: "S0123456789", handle: "docs-team" } });
+    assert.equal(channelLabel(docs), "#docs-review, tags @docs-team");
     assert.deepEqual(reviewChannelFor(["FSDK-3"]), reviewChannel());
-    assert.deepEqual(reviewChannelFor(["FERNDOCS-3"]), reviewChannel());
+    assert.deepEqual(reviewChannelFor(["DOCSS-3"]), reviewChannel());
 
-    const mine = pr({ url: "https://github.com/o/r/pull/30", tickets: ["FERNDOC-12"] });
+    const mine = pr({ url: "https://github.com/o/r/pull/30", tickets: ["DOCS-12"] });
     const posted: [string, string][] = [];
     const deps = { prs: async () => [mine], onChange: () => {}, post: async (channel: string, text: string) => (posted.push([channel, text]), { ts: null, permalink: null }) };
-    for (const text of ["PR: fix the sidebar", "<!subteam^S07LA27DLQK> PR: fix the sidebar"]) {
+    for (const text of ["PR: fix the sidebar", "<!subteam^S0123456789> PR: fix the sidebar"]) {
       const c = call("/api/review-requests", { prUrl: mine.url, text });
       await handle(c.req, c.res, c.url, deps);
       assert.equal(c.out.code, 201);
-      assert.equal(JSON.parse(c.out.body).channel, "C05E0S0A9SN");
+      assert.equal(JSON.parse(c.out.body).channel, "C0123456789");
     }
     // The tag goes in front once, also when the text already has it.
     assert.deepEqual(posted, [
-      ["C05E0S0A9SN", "<!subteam^S07LA27DLQK> PR: fix the sidebar"],
-      ["C05E0S0A9SN", "<!subteam^S07LA27DLQK> PR: fix the sidebar"],
+      ["C0123456789", "<!subteam^S0123456789> PR: fix the sidebar"],
+      ["C0123456789", "<!subteam^S0123456789> PR: fix the sidebar"],
     ]);
   } finally {
     team.reviewRoutes = saved;

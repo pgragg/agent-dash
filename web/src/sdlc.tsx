@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { prRef } from "../../shared/refs.ts";
-import { ENV_LABEL, enabledEnvironments, isPlanRunning, isPlanStage, isPlanWaiting, isSmoketestRunning, mergePrs, newestPlan, sharedEnvs, SMOKETEST_ENV, type SmoketestLane, sdlcProgress, smoketestLanes, type Stage, type StageState } from "../../shared/sdlc.ts";
+import { enabledEnvironments, envLabel, isPlanRunning, isPlanStage, isPlanWaiting, isSmoketestRunning, mergePrs, newestPlan, sharedEnvs, type SmoketestLane, smoketestEnv, stageEnvironments, sdlcProgress, smoketestLanes, type Stage, type StageState } from "../../shared/sdlc.ts";
 import type { PullRequest, Run, SdlcEnvironment, SdlcEvent, SdlcOutcome, SmoketestOutcome, TicketGroup } from "../../shared/types.ts";
 import { conversationHash, launchAgent, type LaunchBody, ResumeHere } from "./agents.tsx";
 import { Chat } from "./chat.tsx";
@@ -81,8 +81,8 @@ function PlanVerb({ ticket, env, cwd, onError, again = false }: { ticket: string
     <AgentVerb
       ticket={ticket}
       body={{ cwd, sdlc: { kind: "smoketest_plan", env } }}
-      label={again ? "Plan again" : `Plan smoketest on ${ENV_LABEL[env]}`}
-      title={`Start an agent in ${cwd} that plans a smoketest of ${ticket} on ${ENV_LABEL[env]}. A plan that changes no Beta or Prod state runs at once; any other plan waits for your Confirm.`}
+      label={again ? "Plan again" : `Plan smoketest on ${envLabel(env)}`}
+      title={`Start an agent in ${cwd} that plans a smoketest of ${ticket} on ${envLabel(env)}. A plan that changes no Beta or Prod state runs at once; any other plan waits for your Confirm.`}
       onError={onError}
     />
   );
@@ -136,7 +136,7 @@ function SkipSmoketest({ ticket, env, onError }: { ticket: string; env: SdlcEnvi
   return (
     <button
       className="btn ghost small"
-      title={`Record that you skip the ${ENV_LABEL[env]} smoketest of ${ticket}. Delete it on the Smoketests card to undo.`}
+      title={`Record that you skip the ${envLabel(env)} smoketest of ${ticket}. Delete it on the Smoketests card to undo.`}
       onClick={async () => {
         const now = new Date().toISOString();
         onError(await post("/api/sdlc-events", { eventType: "smoketest_execution", tickets: [ticket], environments: [env], startedAt: now, skippedAt: now }));
@@ -229,11 +229,11 @@ function SmoketestActions({ stage, group, env, events, cwd, onError, links = tru
 
 function StageActions({ stage, group, events, cwd, onError }: { stage: Stage; group: TicketGroup; events: SdlcEvent[]; cwd: string; onError: (m: string | null) => void }) {
   const key = group.ticket.key;
-  const env = SMOKETEST_ENV[stage.id];
+  const env = smoketestEnv(stage.id);
   if (env) return <SmoketestActions stage={stage} group={group} env={env} events={events} cwd={cwd} onError={onError} />;
   if (stage.id === "in_beta" || stage.id === "in_prod") {
     const where = stage.id === "in_beta" ? "beta" : "prod";
-    const envId: SdlcEnvironment = where === "beta" ? "postman_beta" : "postman_prod";
+    const envId = stageEnvironments(where)[0];
     if (stage.state === "done") {
       const last = stage.events[0];
       return last ? (
@@ -255,7 +255,7 @@ function StageActions({ stage, group, events, cwd, onError }: { stage: Stage; gr
           ticket={key}
           body={{ cwd, sdlc: { kind: "confirm_deploy", stage: where } }}
           label="Confirm in Argo"
-          title={`Start an agent that checks the ${ENV_LABEL[envId]} deploy in Argo, read-only, and records it here.`}
+          title={`Start an agent that checks the ${envLabel(envId)} deploy in Argo, read-only, and records it here.`}
           onError={onError}
         />
         <button
@@ -460,7 +460,7 @@ function SmoketestRow({ e, now, runs, onError }: { e: SdlcEvent; now: number; ru
         {ran !== null && <span>· ran {ran < 1 ? "<1" : ran} min</span>}
         {e.environments.map((x) => (
           <span key={x} className="tag tone-working">
-            {ENV_LABEL[x]}
+            {envLabel(x)}
           </span>
         ))}
         {running && <span className="tag tone-running">running</span>}
@@ -500,7 +500,7 @@ function SmoketestRow({ e, now, runs, onError }: { e: SdlcEvent; now: number; ru
           <span className={`tag ${OUTCOME_TONE[e.outcome]}`}>{e.outcome}</span>
           <span className="smoke-summary">{summaryLine(e)}</span>
           <span className="meta" title={e.startedAt}>
-            {e.environments.map((x) => ENV_LABEL[x]).join(", ")} · {age(e.startedAt, now)} ago
+            {e.environments.map((x) => envLabel(x)).join(", ")} · {age(e.startedAt, now)} ago
           </span>
         </summary>
         <div className="smoke-full">{full}</div>
@@ -586,7 +586,7 @@ function PlanRow({ e, now, runs, cwd, onError }: { e: SdlcEvent; now: number; ru
         <span className="tag">plan</span>
         {e.environments.map((x) => (
           <span key={x} className="tag tone-working">
-            {ENV_LABEL[x]}
+            {envLabel(x)}
           </span>
         ))}
         <span className={`tag ${status.tone}`}>{status.text}</span>
@@ -626,7 +626,7 @@ function PlanRow({ e, now, runs, cwd, onError }: { e: SdlcEvent; now: number; ru
           <span className={`tag ${status.tone}`}>plan</span>
           <span className="smoke-summary">{e.summary ?? firstLine(e.testDetails) ?? "No summary"}</span>
           <span className="meta" title={e.startedAt}>
-            {e.environments.map((x) => ENV_LABEL[x]).join(", ")} · {age(e.startedAt, now)} ago
+            {e.environments.map((x) => envLabel(x)).join(", ")} · {age(e.startedAt, now)} ago
           </span>
         </summary>
         <div className="smoke-full">{full}</div>
@@ -653,7 +653,7 @@ function LaneLatest({ lane, now, after }: { lane: SmoketestLane; now: number; af
   const when = (
     <span className="meta">
       {" "}
-      · {e.environments.map((x) => ENV_LABEL[x]).join(", ")} · {age(e.startedAt, now)} ago
+      · {e.environments.map((x) => envLabel(x)).join(", ")} · {age(e.startedAt, now)} ago
     </span>
   );
   if (e.eventType === "smoketest_execution") {
@@ -691,7 +691,7 @@ function Lane({ lane, group, events, now, cwd, open, onToggle, after, onError }:
         <select value={env} onChange={(e) => setEnv(e.target.value as SdlcEnvironment)} aria-label={`Environment of the ${lane.label} smoketest`}>
           {lane.envs.map((x) => (
             <option key={x} value={x}>
-              {ENV_LABEL[x]}
+              {envLabel(x)}
             </option>
           ))}
         </select>
@@ -712,14 +712,14 @@ function Lane({ lane, group, events, now, cwd, open, onToggle, after, onError }:
           <span className="lane-history">
             {lane.runs.length > shown.length && <span className="meta">+{lane.runs.length - shown.length}</span>}
             {shown.map((e) => (
-              <span key={e.id} className={`run-dot run-${runTone(e)}`} title={`${runTone(e)} · ${ENV_LABEL[e.environments[0]]} · ${age(e.startedAt, now)} ago · ${summaryLine(e)}`} />
+              <span key={e.id} className={`run-dot run-${runTone(e)}`} title={`${runTone(e)} · ${envLabel(e.environments[0])} · ${age(e.startedAt, now)} ago · ${summaryLine(e)}`} />
             ))}
           </span>
           <LaneLatest lane={lane} now={now} after={after} />
         </button>
         {(urgent || open) && actions}
       </div>
-      {open && !lane.events.length && <p className="meta lane-drawer">No plan or smoketest on {lane.envs.map((x) => ENV_LABEL[x]).join(" or ")} yet.</p>}
+      {open && !lane.events.length && <p className="meta lane-drawer">No plan or smoketest on {lane.envs.map((x) => envLabel(x)).join(" or ")} yet.</p>}
       {open && lane.events.length > 0 && (
         <ol className="note-list lane-drawer">
           {lane.events.map((e) => (e.eventType === "smoketest_plan" ? <PlanRow key={e.id} e={e} now={now} runs={group.runs} cwd={cwd} onError={onError} /> : <SmoketestRow key={e.id} e={e} now={now} runs={group.runs} onError={onError} />))}

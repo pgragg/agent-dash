@@ -13,14 +13,15 @@ import { providerOf, rowOf, rowsFromFlat } from "../web/src/providerRows.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "agent-dash-settings-"));
 
-test("a fresh clone has the company's Jira and Slack, but no login, paths, review channel or ticket keys", () => {
+test("a fresh clone has no company defaults: no Jira, Slack, deploy repos, login, paths, review channel or ticket keys", () => {
   const { settings, exists } = readSettingsFile(join(dir, "missing.json"));
   assert.equal(exists, false);
   assert.deepEqual(settings, DEFAULT_SETTINGS);
   const c = buildConfig(settings);
-  assert.deepEqual(c.ticketProviders, [{ type: "jira", id: "jira", server: "https://postmanlabs.atlassian.net", login: "", tokenFile: "", excludeProjects: [], projects: [] }]);
+  assert.deepEqual(c.ticketProviders, []);
   assert.equal(c.settings.reviewChannelId, "");
-  assert.deepEqual(c.settings.environments, ["localhost", "postman_beta", "postman_prod"]);
+  assert.deepEqual(c.settings.environments, []);
+  assert.deepEqual([c.settings.deployRepoBeta, c.settings.deployRepoProd, c.slack.orgId, c.slack.workspaceUrl], ["", "", "", ""]);
   assert.equal(c.slack.stateFile, "");
   assert.equal("FSDK-12 ABC-1".match(c.ticketPattern), null);
 });
@@ -47,7 +48,7 @@ test("a bad value is refused with a reason, and a bad value in the file keeps it
 });
 
 test("with no ticketProviders list, the flat fields make a Jira and an AD provider, and AD links with no ticket project", () => {
-  const c = buildConfig({ ...DEFAULT_SETTINGS, jiraLogin: "me@x.com", jiraExcludeProjects: ["FSM"], localTicketsDir: "~/tickets", ticketProjects: ["FSDK"] });
+  const c = buildConfig({ ...DEFAULT_SETTINGS, jiraServer: "https://x.atlassian.net", jiraLogin: "me@x.com", jiraExcludeProjects: ["FSM"], localTicketsDir: "~/tickets", ticketProjects: ["FSDK"] });
   assert.deepEqual(
     c.ticketProviders.map((p) => [p.id, p.type]),
     [["jira", "jira"], ["local-AD", "local"]],
@@ -111,10 +112,10 @@ test("ticket patterns escape nothing surprising and skip ignored keys in any pos
 
 test("the setup banner names what a new user still has to set", () => {
   const set = (over: object) => buildConfig({ ...DEFAULT_SETTINGS, ...over });
-  assert.deepEqual(setupNeeded(set({ jiraServer: "" }), {}), ["the Jira server", "your ticket projects", "your first name"]);
-  assert.deepEqual(setupNeeded(set({}), {}), ["your Jira login", "a Jira token file", "your ticket projects", "your first name"]);
+  assert.deepEqual(setupNeeded(set({}), {}), ["the Jira server", "your ticket projects", "your first name"]);
+  assert.deepEqual(setupNeeded(set({ jiraServer: "https://x.atlassian.net" }), {}), ["your Jira login", "a Jira token file", "your ticket projects", "your first name"]);
   // The token can come from the env instead of a file.
-  assert.deepEqual(setupNeeded(set({ jiraLogin: "me@x.com", ticketProjects: ["ABC"], userName: "Sam" }), { JIRA_API_TOKEN: "t" }), []);
+  assert.deepEqual(setupNeeded(set({ jiraServer: "https://x.atlassian.net", jiraLogin: "me@x.com", ticketProjects: ["ABC"], userName: "Sam" }), { JIRA_API_TOKEN: "t" }), []);
   // A local folder alone is enough: no Jira, and its prefix is a ticket project.
   assert.deepEqual(setupNeeded(set({ jiraServer: "", localTicketsDir: "/t", userName: "Sam" }), {}), []);
 });
@@ -183,9 +184,14 @@ test("team settings: no name says the user, no channel turns review requests off
     setTeam({ ...DEFAULT_TEAM, deployRepoBeta: "acme/deploy-beta" });
     assert.match(gistPrompt("awaiting_input", "…"), /between the user \(USER\).*waits for the user\./s);
     assert.equal(wantsReviewRequest({ repo: "a/b", state: "open", tickets: [] }), false);
-    assert.equal(sharedEnvs(), "Postman Beta and Postman Prod");
-    assert.deepEqual(enabledEnvironments().map((e) => e.id), ["localhost", "postman_beta", "postman_prod"]);
+    assert.equal(sharedEnvs(), "Beta and Prod");
+    assert.deepEqual(enabledEnvironments().map((e) => e.id), ["localhost", "beta", "prod"]);
     assert.equal(deployStageOf({ repo: "acme/deploy-beta" } as never), "beta");
+    setTeam({ ...DEFAULT_TEAM, environments: ["beta:staging", "beta:eu_staging", "prod:production", "localhost"] });
+    assert.deepEqual(enabledEnvironments().map((e) => [e.id, e.label, e.stage]), [["localhost", "localhost", "local"], ["staging", "Staging", "beta"], ["eu_staging", "Eu Staging", "beta"], ["production", "Production", "prod"]]);
+    assert.equal(sharedEnvs(), "Staging, Eu Staging and Production");
+    setTeam({ ...DEFAULT_TEAM, environments: ["beta:staging"] });
+    assert.deepEqual(enabledEnvironments().map((e) => e.id), ["localhost", "staging", "prod"]);
     setTeam({ ...DEFAULT_TEAM, userName: "Sam", reviewChannelId: "C0123ABCD", reviewChannelName: "reviews" });
     assert.match(gistPrompt("awaiting_input", "…"), /between Sam \(USER\)/);
     assert.equal(wantsReviewRequest({ repo: "a/b", state: "open", tickets: [] }), true);

@@ -94,7 +94,8 @@ CREATE TABLE IF NOT EXISTS SDLC_Event (
 -- The environments under test, usually one.
 CREATE TABLE IF NOT EXISTS SDLC_Event_Environment (
   sdlc_event_id INTEGER NOT NULL REFERENCES SDLC_Event (id),
-  environment   TEXT NOT NULL CHECK (environment IN ('localhost', 'fern_dev', 'fern_prod', 'postman_beta', 'postman_prod')),
+  -- 'localhost', or the id of a shared environment from the settings.
+  environment   TEXT NOT NULL CHECK (environment <> ''),
   PRIMARY KEY (sdlc_event_id, environment)
 );
 
@@ -321,6 +322,24 @@ COMMIT;`);
   }
 }
 
+/** An older SDLC_Event_Environment table allows only a fixed list of environments; the copy allows any id. */
+function upgradeSdlcEnvironmentCheck(d: DatabaseSync): void {
+  const row = d.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'SDLC_Event_Environment'").get() as { sql: string } | undefined;
+  if (!row || !row.sql.includes("environment IN (")) return;
+  const create = SCHEMA.slice(SCHEMA.indexOf("CREATE TABLE IF NOT EXISTS SDLC_Event_Environment ("), SCHEMA.indexOf("CREATE TABLE IF NOT EXISTS SDLC_Event_Ticket ("));
+  try {
+    d.exec(`BEGIN;
+${create.replace("SDLC_Event_Environment (", "SDLC_Event_Environment_new (")}
+INSERT INTO SDLC_Event_Environment_new (sdlc_event_id, environment) SELECT sdlc_event_id, environment FROM SDLC_Event_Environment;
+DROP TABLE SDLC_Event_Environment;
+ALTER TABLE SDLC_Event_Environment_new RENAME TO SDLC_Event_Environment;
+COMMIT;`);
+  } catch (e) {
+    d.exec("ROLLBACK");
+    throw e;
+  }
+}
+
 export function open(path = DB_PATH): DatabaseSync {
   if (db) return db;
   mkdirSync(dirname(path), { recursive: true });
@@ -338,6 +357,7 @@ export function open(path = DB_PATH): DatabaseSync {
   if (!db.prepare("SELECT 1 FROM pragma_table_info('tickets') WHERE name = 'starred_at'").get()) db.exec("ALTER TABLE tickets ADD COLUMN starred_at TEXT");
   // Before the trigger below: copying the table drops the triggers on it.
   upgradeSdlcEventChecks(db);
+  upgradeSdlcEnvironmentCheck(db);
   // SQLite cannot change a CHECK, so an older table is copied into one that allows 'unlinked'.
   const threadTable = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'PiConversationStatusChange'").get() as { sql: string };
   if (!threadTable.sql.includes("'unlinked'")) {

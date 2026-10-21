@@ -23,7 +23,7 @@ export interface ScreenField {
 }
 
 /**
- * The `fields` of a transition request. FSDK screens reject a transition with an empty field,
+ * The `fields` of a transition request. Some Jira screens reject a transition with an empty field,
  * even when Jira calls the field optional, so echo each value the issue holds and fill an empty
  * date: the due date two weeks out, any other date with today. Same rule as jira-ticket.sh.
  */
@@ -44,8 +44,8 @@ export interface MoveTarget {
 }
 
 /**
- * The statuses a move can reach from `current`. FSDK's Backlog cannot reach In Progress in one
- * transition, but its "Prioritized" lands in To Do, which can, so offer that walk too.
+ * The statuses a move can reach from `current`. In some workflows Backlog cannot reach In Progress
+ * in one transition, but a "Prioritized" transition lands in To Do, which can, so offer that walk too.
  */
 export function moveTargets(transitions: { to: string }[], current: string): MoveTarget[] {
   const out: MoveTarget[] = transitions.filter((t) => t.to !== current).map((t) => ({ to: t.to, via: null }));

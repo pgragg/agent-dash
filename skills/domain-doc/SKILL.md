@@ -9,8 +9,8 @@ A domain doc teaches a newcomer a part of the system by inspection. The reader s
 
 agent-dash renders this. Other markdown viewers show the marks as plain code, so the source stays readable.
 
-Example: agent-dash document 64 (FERNDOC-504 RBAC). Read it before your first doc:
-`node ~/02_programming/agent-dash/scripts/document.ts show --id 64`
+Example: the registry below comes from a domain doc on docs-site RBAC. If your dashboard already has a domain doc, read it before your first doc:
+`node ~/02_programming/agent-dash/scripts/document.ts show --id N`
 
 ## The marks
 
@@ -20,7 +20,7 @@ Write a mark as an inline code span with a prefix. Every name must be in the reg
 |---|---|---|---|
 | `` `rec:Table.column` `` | Stored record (blue ▦) | A table, column, KV key, Edge Config item, or file in a bucket. The page shows `service›store` in front of it | `` `rec:UserRolesPerResource.role` `` |
 | `` `fn:name` `` | Code method (amber ƒ) | A function, server action, route handler, or a component that does a check | `` `fn:matchRoles` ``, `` `fn:site-auth/set` `` |
-| `` `obj:Type.field` `` | Data object (teal {}) | A type, schema, token, cookie, config entry, or a file shape. Not a stored row | `` `obj:FernUser.email` `` |
+| `` `obj:Type.field` `` | Data object (teal {}) | A type, schema, token, cookie, config entry, or a file shape. Not a stored row | `` `obj:SiteUser.email` `` |
 | `` `rule:R1` `` | Rule (rose ⚖) | An invariant. Give each rule an ID and a short name. Mark it where a sentence relies on it | `` `rule:R5` `` |
 | `` `svc:id` `` | Service (⬡) | A deployable unit, or a build job, that owns its stores. Shows the service's name | `` `svc:worker` `` |
 | `` `ctx:id` `` | Bounded context (◧ chip) | Put one in a heading to give that section a rail. Use it inline when a word is in more than one context | `` ## 2a. Pages `ctx:viewer` `` |
@@ -42,12 +42,12 @@ Put one ```` ```domain ```` fence near the top, under a `## Legend` heading. It 
     "viewer": { "name": "Docs-viewer RBAC", "about": "One or two sentences: what this context decides." }
   },
   "services": {
-    "fdr": { "name": "FDR", "about": "What it is, and what it does here.", "stores": { "pg": "FDR Postgres (docs ledger)" } }
+    "registry": { "name": "Docs Registry", "about": "What it is, and what it does here.", "stores": { "pg": "Registry Postgres (docs ledger)" } }
   },
   "terms": {
-    "docs_ledger_segment_details": { "kind": "rec", "service": "fdr", "store": "pg", "context": "viewer", "about": "…", "code": "servers/fdr/prisma/schema.prisma:733" },
+    "docs_ledger_segment_details": { "kind": "rec", "service": "registry", "store": "pg", "context": "viewer", "about": "…", "code": "servers/registry/prisma/schema.prisma:733" },
     "RbacManifest": { "kind": "rec", "service": "astro", "store": "r2", "context": "viewer", "copyOf": "NavigationNode.viewers", "sync": "How it follows the source, and how late it can be.", "about": "…" },
-    "FernUser.email": { "kind": "obj", "context": "siteauth", "key": true, "about": "…" },
+    "SiteUser.email": { "kind": "obj", "context": "siteauth", "key": true, "about": "…" },
     "matchRoles": { "kind": "fn", "context": "viewer", "about": "…", "code": "path:line" },
     "Auth0": { "kind": "ext", "context": "member", "about": "…" },
     "R1": { "kind": "rule", "name": "A child narrows its parent", "context": "viewer", "about": "The full rule." }
