@@ -403,6 +403,20 @@ a.pr-group-title:hover { text-decoration: underline; text-underline-offset: 3px;
 .md table { border-collapse: collapse; font-size: 13px; }
 .md th, .md td { text-align: left; padding: 5px 12px 5px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
 .md th { color: var(--ink); font-weight: 600; }
+/* Domain terms: a glyph as well as a color, so the kind also reads without color. */
+.term { --term: var(--ink); color: var(--term); background: color-mix(in srgb, var(--term) 11%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--term) 28%, transparent); overflow-wrap: break-word; }
+.term::before { margin-right: 3px; opacity: .7; font-size: 10.5px; }
+.term-db { --term: #1f5f99; }
+.term-db::before { content: "▦"; }
+.term-fn { --term: #8a5a00; }
+.term-fn::before { content: "ƒ"; font-style: italic; }
+.term-obj { --term: #0b7d6e; }
+.term-obj::before { content: "{}"; }
+@media (prefers-color-scheme: dark) {
+  .term-db { --term: #79b8ff; }
+  .term-fn { --term: #e6c07b; }
+  .term-obj { --term: #4ec9b0; }
+}
 
 /* misc */
 .toast { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-radius: 12px; background: var(--bad-bg); color: var(--bad); font-size: 13px; }
