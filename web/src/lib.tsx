@@ -3,7 +3,8 @@ import { runTitle } from "../../shared/runTitle.ts";
 import type { Dashboard, HistoryRun, Run, TicketDocumentWithBody, PrDetail, ThreadStatus, Transcript } from "../../shared/types.ts";
 import { setTeam } from "../../shared/team.ts";
 import { IMAGE_EXT, wikiLinkParts } from "../../shared/wiki.ts";
-import { domainTerm, TERM_KINDS } from "../../shared/terms.ts";
+import { domainTerm, parseRegistry, readRegistry } from "../../shared/terms.ts";
+import { ContextRegion, DomainLegend, DomainScope, TermMark } from "./domain.tsx";
 import { href } from "./routes.ts";
 import { dashClick, internalHref, JIRA_BROWSE, splitTrailing } from "./links.ts";
 import { EmbeddedImage, MermaidFence, setKnownDiagrams } from "./mermaid.tsx";
@@ -517,11 +518,6 @@ function WikiLink({ token }: { token: string }) {
   );
 }
 
-/** A long `table.column` name may wrap after a dot, an underscore or a slash, and nowhere else. */
-function breakable(name: string): ReactNode[] {
-  return name.split(/(?<=[._/])/).flatMap((part, i) => (i ? [<wbr key={i} />, part] : [part]));
-}
-
 export function inline(text: string): ReactNode[] {
   const out: ReactNode[] = [];
   let last = 0;
@@ -530,7 +526,7 @@ export function inline(text: string): ReactNode[] {
     const [tok] = m;
     if (m[1]) {
       const term = domainTerm(tok.slice(1, -1));
-      out.push(term ? <code key={m.index} className={`term term-${term.kind}`} title={TERM_KINDS[term.kind]}>{breakable(term.name)}</code> : <code key={m.index}>{tok.slice(1, -1)}</code>);
+      out.push(term ? <TermMark key={m.index} kind={term.kind} name={term.name} /> : <code key={m.index}>{tok.slice(1, -1)}</code>);
     }
     else if (m[2]) out.push(<strong key={m.index}>{inline(tok.slice(2, -2))}</strong>);
     else if (m[7]) out.push(<em key={m.index}>{inline(tok.slice(1, -1))}</em>);
@@ -571,6 +567,8 @@ const HR = /^\s*([-*_])(\s*\1){2,}\s*$/;
 export function Markdown({ text }: { text: string }) {
   const lines = text.replace(/\r/g, "").split("\n");
   const blocks: ReactNode[] = [];
+  // A heading with a `ctx:` mark opens a context's section, which ends at the next heading at its level or above.
+  const heads: { at: number; level: number; ctx?: string }[] = [];
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
@@ -581,7 +579,11 @@ export function Markdown({ text }: { text: string }) {
       const body: string[] = [];
       for (i++; i < lines.length && !lines[i].startsWith("```"); i++) body.push(lines[i]);
       i++;
-      blocks.push(lang === "mermaid" ? <MermaidFence key={i} code={body.join("\n")} /> : <pre key={i}>{body.join("\n")}</pre>);
+      blocks.push(
+        lang === "mermaid" ? <MermaidFence key={i} code={body.join("\n")} />
+        : lang === "domain" ? <DomainLegend key={i} {...parseRegistry(body.join("\n"))} />
+        : <pre key={i}>{body.join("\n")}</pre>,
+      );
     } else if (line.trim().startsWith("|")) {
       const rows: string[][] = [];
       for (; i < lines.length && lines[i].trim().startsWith("|"); i++) {
@@ -601,7 +603,9 @@ export function Markdown({ text }: { text: string }) {
       );
     } else if (/^#{1,6}\s/.test(line)) {
       // One element for every level, so a reply's heading stays small; a document's CSS sizes it by level.
-      blocks.push(<h4 key={i} data-level={line.match(/^#+/)![0].length}>{inline(line.replace(/^#+\s*/, ""))}</h4>);
+      const level = line.match(/^#+/)![0].length;
+      heads.push({ at: blocks.length, level, ctx: line.match(/`ctx:([\w-]+)`/)?.[1] });
+      blocks.push(<h4 key={i} data-level={level}>{inline(line.replace(/^#+\s*/, ""))}</h4>);
       i++;
     } else if (HR.test(line)) {
       blocks.push(<hr key={i} />);
@@ -631,5 +635,27 @@ export function Markdown({ text }: { text: string }) {
       );
     }
   }
-  return <div className="md">{blocks}</div>;
+  const registry = text.includes("```domain") ? readRegistry(text).registry : null;
+  return (
+    <DomainScope registry={registry}>
+      <div className="md">{withContexts(blocks, heads)}</div>
+    </DomainScope>
+  );
+}
+
+function withContexts(blocks: ReactNode[], heads: { at: number; level: number; ctx?: string }[]): ReactNode[] {
+  if (!heads.some((h) => h.ctx)) return blocks;
+  const out: ReactNode[] = [];
+  let i = 0;
+  while (i < blocks.length) {
+    const h = heads.find((x) => x.at === i && x.ctx);
+    if (!h) {
+      out.push(blocks[i++]);
+      continue;
+    }
+    const end = heads.find((x) => x.at > i && x.level <= h.level)?.at ?? blocks.length;
+    out.push(<ContextRegion key={`ctx-${i}`} id={h.ctx!}>{blocks.slice(i, end)}</ContextRegion>);
+    i = end;
+  }
+  return out;
 }
