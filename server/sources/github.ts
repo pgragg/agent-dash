@@ -27,8 +27,16 @@ const FEEDBACK_FIELDS = `author { login }
         comments(last: 30) { nodes { author { login __typename } createdAt url } }
         reviewThreads(first: 50) { nodes { isResolved isOutdated comments(last: 1) { nodes { author { login __typename } createdAt url } } } }`;
 
-const searchQuery = (fields: string) => `query($q: String!) {
-  search(query: $q, type: ISSUE, first: 100) {
+/**
+ * GitHub answers an HTML 502 when a query runs for more than about 10 s. 100 PRs with feedback took
+ * longer than that, and 25 take about 5 s, so read the results in pages.
+ */
+const PAGE_SIZE = 25;
+const MAX_RESULTS = 100;
+
+const searchQuery = (fields: string) => `query($q: String!, $after: String) {
+  search(query: $q, type: ISSUE, first: ${PAGE_SIZE}, after: $after) {
+    pageInfo { hasNextPage endCursor }
     nodes {
       ... on PullRequest {
         ${fields}
@@ -97,11 +105,23 @@ export function feedbackOf(n: any): Omit<FeedbackSource, "addressed"> {
 
 async function searchPrs(q: string, ticketPattern: RegExp, withFeedback: boolean): Promise<PullWithFeedback[]> {
   const query = searchQuery(withFeedback ? `${PR_FIELDS}\n        ${FEEDBACK_FIELDS}` : PR_FIELDS);
-  const { stdout, code } = await run("gh", ["api", "graphql", "-f", `query=${query}`, "-f", `q=${q}`], { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 });
-  // gh exits 1 on partial errors (e.g. SAML) but still returns valid data; use it if present.
-  const json = stdout ? JSON.parse(stdout) : null;
-  if (!json?.data?.search?.nodes && code !== 0) throw new Error(`gh api graphql exited ${code}`);
-  const nodes: any[] = json?.data?.search?.nodes ?? [];
+  const nodes: any[] = [];
+  let after: string | null = null;
+  do {
+    const cursor: string[] = after ? ["-f", `after=${after}`] : [];
+    const { stdout, stderr, code } = await run("gh", ["api", "graphql", "-f", `query=${query}`, "-f", `q=${q}`, ...cursor], { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 });
+    // gh exits 1 on partial errors (e.g. SAML) but still returns valid data; use it if present.
+    let json: any = null;
+    try {
+      json = stdout ? JSON.parse(stdout) : null;
+    } catch {
+      // An HTML error page; stderr holds gh's "HTTP 502" line.
+    }
+    const search = json?.data?.search;
+    if (!search?.nodes) throw new Error(`gh api graphql failed: ${stderr.trim().split("\n").at(-1) || `exit ${code}`}`);
+    nodes.push(...search.nodes);
+    after = search.pageInfo?.hasNextPage ? search.pageInfo.endCursor : null;
+  } while (after && nodes.length < MAX_RESULTS);
   return nodes
     .filter((n) => n?.url)
     .map((n) => ({

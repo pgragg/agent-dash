@@ -39,9 +39,13 @@ function run(cmd: string, args: string[], timeout: number): Promise<{ code: numb
 
 const running = new Set<string>();
 
-/** Callback to refresh a source after a successful login. Set by index.ts to avoid circular imports. */
-let onLogin: ((source: string) => void) | null = null;
-export function setOnLogin(cb: (source: string) => void) { onLogin = cb; }
+/**
+ * Refreshes a source after a successful login, and answers the read's error, if any. A login can
+ * work while the read still fails, so only the read can say that the source is fixed.
+ * Set by index.ts to avoid circular imports.
+ */
+let onLogin: ((source: string) => Promise<string | null>) | null = null;
+export function setOnLogin(cb: (source: string) => Promise<string | null>) { onLogin = cb; }
 
 /** Checks both Slack logins again. Set by index.ts, which holds the draft gaps that it needs. */
 let slackCheck: (() => Promise<SourceHealth>) | null = null;
@@ -129,7 +133,8 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
   try {
     const result = handler === "gh" ? await handleGitHub() : handler === "slack" ? await handleSlack() : await handlePiAuth(source);
     if (result.code === 200) {
-      onLogin?.(source);
+      const readError = await onLogin?.(source);
+      if (readError) return json(502, { error: `The login works, but the ${source} read still fails: ${readError}`, output: result.output });
       return json(200, { ok: true, output: result.output });
     }
     return json(result.code, { error: MANUAL[source] ? `${result.error} ${MANUAL[source]}` : result.error, output: result.output });
