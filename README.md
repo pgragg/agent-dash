@@ -729,3 +729,7 @@ node scripts/demo/shoot.ts                 # all images, or name some: node scri
 - **The data** is in `scripts/demo/world.ts`: the tickets, sessions, PRs and drafts of a made-up company (Acme, with Sam, Alex and Jordan).
 - **Nothing real reaches the demo.** `start.ts` sets `HOME` to `/tmp/agent-dash-demo`, writes a demo config, serves a fake Jira on port 7791, and puts fake `gh` and `pi` first on `PATH` (`scripts/demo/bin`). The server gets no other env var. The fake `pi` prints the drafts from `world.ts`, so no model runs.
 - **A check before each capture.** `shoot.ts` reads the text in the viewport and refuses to save an image that names a company, a real person or a real ticket project. agent-dash's own labels for the Postman and Fern environments are product text, so it shows them as "Staging" and "Acme" first.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
