@@ -35,7 +35,7 @@ Optional: `jira` ([jira-cli](https://github.com/ankitpokhrel/jira-cli)), which n
 ```bash
 git clone git@github.com:pgragg/agent-dash.git && cd agent-dash
 pnpm install
-pnpm install-extension   # once: exact run status and replies (see below)
+pnpm install-extension   # once: exact run status and replies, and the skills (see below)
 pnpm build && pnpm start # http://127.0.0.1:7777
 ```
 
@@ -303,12 +303,16 @@ The page is for people. A coding agent that drives agent-dash (for example "find
 
 Each object has a `ui` link to its place on the page, and `actions`. An action has its `method`, `href` and `body`, a `curl` line that works as printed, its `effect` (`local`, `tracker` or `slack`), and `askFirst`. `askFirst` is true for a write that other people see or that replaces what a person set: a Slack review request, a change to a due date that is already set, a smoketest plan's Confirm, and another run of a plan past Postman Beta. A plan's `confirm_and_run` and `run_again` take an optional `note`, which goes to the agent that runs it after the run message (`POST /api/sdlc-events/run` with `{plannedAt, cwd, note}`). The agent shows the person the change and waits for a yes. Texts are cut at about 240 characters (160 on the board); `full=1` sends them whole. The page and agent mode build the board with the same code (`shared/board.ts`), so they show the same queue; the JSON is in `shared/agentView.ts`.
 
-The skill [`skills/agent-dash/SKILL.md`](skills/agent-dash/SKILL.md) teaches an agent to use it. To let agents in a terminal find it too, link it into your agent's skills folder:
+The skill [`skills/agent-dash/SKILL.md`](skills/agent-dash/SKILL.md) teaches an agent to use it.
 
-```bash
-ln -s "$PWD/skills/agent-dash" ~/.pi/agent/skills/agent-dash      # pi
-ln -s "$PWD/skills/agent-dash" ~/.claude/skills/agent-dash        # Claude Code
-```
+## Skills
+
+agent-dash ships its own skills, one folder each in `skills/`:
+
+- [`agent-dash`](skills/agent-dash/SKILL.md): drive the dashboard through agent mode.
+- [`domain-doc`](skills/domain-doc/SKILL.md): write a document in the domain-driven style. Each domain noun has a mark (`rec:`, `fn:`, `obj:`, `rule:`, `svc:`, `ctx:`, `ext:`) and a hover card, the document's ```` ```domain ```` registry renders as its legend, and `node scripts/document.ts lint --file F` checks the marks. An **Edit** agent on a document with a registry gets this skill.
+
+`pnpm install-extension` links each one into your agent's skills folder (`~/.pi/agent/skills` for pi, `~/.claude/skills` for Claude Code), so agents in a terminal find them too. `scripts/ship.sh` runs `node scripts/install-extension.ts --skills` on each ship, so a new skill reaches the agent when it merges. Neither one replaces a skill folder that is not agent-dash's link.
 
 ## Addresses
 

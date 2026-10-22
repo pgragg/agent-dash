@@ -5,6 +5,7 @@ import { config } from "../config.ts";
 import { newSessionId, startConversation } from "../conversations.ts";
 import { MIME } from "../diagrams.ts";
 import { parseBrief } from "../../shared/brief.ts";
+import { DOMAIN_FENCE } from "../../shared/terms.ts";
 import { BRIEF_SCRIPT, DOCUMENT_SCRIPT, editMessage, TICKET_SUMMARY_PROMPT, ticketSummaryMessage } from "../documents.ts";
 import { agentMessage, agentName } from "../handoff.ts";
 import * as db from "../summaries/db.ts";
@@ -95,7 +96,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, url: URL
     const undo = () => {
       if (db.clearDocumentEdit(id)) deps.onChange();
     };
-    const message = editMessage({ ...doc, brief: !!parseBrief(doc.body) }, prompt, script, briefScript, pageUrl(id));
+    const message = editMessage({ ...doc, brief: !!parseBrief(doc.body), domain: doc.body.split("\n").some((l) => DOMAIN_FENCE.test(l)) }, prompt, script, briefScript, pageUrl(id));
     const label = `Edit document ${id}: ${prompt}`;
     return launch(() => start({ cwd: dir, message: context ? agentMessage(context, message) : message, name: doc.ticket ? agentName(doc.ticket, label) : label.slice(0, 70), sessionId, onSpawnError: undo }), undo);
   }
