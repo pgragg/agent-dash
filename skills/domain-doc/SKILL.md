@@ -9,8 +9,14 @@ A domain doc teaches a newcomer a part of the system by inspection. The reader s
 
 agent-dash renders this. Other markdown viewers show the marks as plain code, so the source stays readable.
 
+This skill ships with agent-dash, in its `skills/domain-doc` folder. The commands below run agent-dash's `scripts/document.ts`. Find the agent-dash folder from the real path of this file (the skills folder holds a link to it):
+
+```bash
+AD=$(cd "$(dirname "$(realpath <path of this SKILL.md>)")/../.." && pwd)
+```
+
 Example: agent-dash document 64 (FERNDOC-504 RBAC). Read it before your first doc:
-`node ~/02_programming/agent-dash/scripts/document.ts show --id 64`
+`node "$AD/scripts/document.ts" show --id 64`
 
 ## The marks
 
@@ -94,9 +100,9 @@ Put one ```` ```domain ```` fence near the top, under a `## Legend` heading. It 
    9. Not checked: what you did not verify.
 7. **Mark every mention** of a registered noun in prose and tables, not only the first. Do not put marks in fences: Mermaid shows them as text.
 8. **Lint until it is clean:**
-   `node ~/02_programming/agent-dash/scripts/document.ts lint --file <file>`
+   `node "$AD/scripts/document.ts" lint --file <file>`
    It reports a mark that is not in the registry, a kind that differs from the registry, a registered name in plain code with no mark, a term that is never marked, a context that no heading names, and a bad service or store. Fix every error and every warning.
-9. **Save:** `node ~/02_programming/agent-dash/scripts/document.ts create --ticket KEY --title "…" --file <file>`, or `save --id N --file <file>` to replace a document.
+9. **Save:** `node "$AD/scripts/document.ts" create --ticket KEY --title "…" --file <file>`, or `save --id N --file <file>` to replace a document.
 10. **Look at it**, if you have `agent-browser`: open `http://127.0.0.1:7777/#/doc:N`, check that no diagram says "does not render", and hover over one mark of each kind.
 
 Write every line in ASD-STE100: short sentences, one idea in each, active voice, one term for one thing. The registry is where "one term for one thing" is enforced.

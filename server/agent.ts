@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { AgentKind } from "../shared/team.ts";
@@ -70,6 +70,37 @@ export function installPiExtension(force = false, target = piExtensionFile()): s
   }
   symlinkSync(PI_EXTENSION, target);
   return `Installed: ${target} -> ${PI_EXTENSION}\nNew pi sessions load it at once. In a running session, type /reload.`;
+}
+
+/** agent-dash ships its skills in `skills/`: each folder there is one skill. */
+const SKILLS = new URL("../skills/", import.meta.url).pathname;
+
+/** The folder where an agent finds the skills of every session. OpenCode has none that agent-dash knows. */
+export const skillsDir = (agent: AgentKind): string | null =>
+  agent === "pi" ? (process.env.PI_SKILLS_DIR ?? join(homedir(), ".pi/agent/skills"))
+  : agent === "claude" ? join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), "skills")
+  : null;
+
+/**
+ * Links each of agent-dash's skills into the agent's skills folder, so that a terminal session finds
+ * them too. It never replaces a skill that is not its link, so a ship can run it every time.
+ */
+export function installSkills(target: string | null, source = SKILLS): string {
+  if (!target) return "No skills folder for this agent: skipped the skills.";
+  mkdirSync(target, { recursive: true });
+  const out: string[] = [];
+  for (const name of readdirSync(source, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort()) {
+    const from = join(source, name);
+    const to = join(target, name);
+    const now = lstatSync(to, { throwIfNoEntry: false });
+    if (now?.isSymbolicLink() && readlinkSync(to) === from) out.push(`Already installed: ${to}`);
+    else if (now) out.push(`Skipped: ${to} exists and is not agent-dash's link`);
+    else {
+      symlinkSync(from, to);
+      out.push(`Installed: ${to} -> ${from}`);
+    }
+  }
+  return out.join("\n");
 }
 
 /** The `pi` shell alias sets this; a spawned pi does not get the alias. */

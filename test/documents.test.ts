@@ -100,6 +100,11 @@ test("the agent's draft file adds no diagrams; its messages name the script, the
   assert.match(briefEdit, /node \/b\.ts show --id 6 > .*agent-dash-brief-6\.json/);
   assert.match(briefEdit, /verified_on to today/);
   assert.doesNotMatch(edit, /brief/);
+  // A domain doc's edit gets the domain-doc skill and its lint; another doc does not.
+  const domainEdit = editMessage({ id: 7, title: "D", ticket: "FSDK-1", domain: true }, "add a flow", "/s.ts");
+  assert.match(domainEdit, /skills\/domain-doc\/SKILL\.md/);
+  assert.match(domainEdit, /node \/s\.ts lint --file .*agent-dash-document-7\.md/);
+  assert.doesNotMatch(edit, /domain-doc/);
 });
 
 test("the script lists, shows, saves and creates documents", () => {

@@ -57,6 +57,10 @@ fi
 step "building"
 pnpm build
 
+# The skills ship with agent-dash: link a new one into the agent's skills folder.
+step "linking skills"
+node scripts/install-extension.ts --skills
+
 old_pid="$(lsof -t -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -1 || true)"
 if [[ -n "$old_pid" ]]; then
   step "stopping server pid $old_pid"
