@@ -8,12 +8,12 @@ import { type Brief, briefText, briefTldr, diffBriefs, lintBrief, nodeBox, parse
 import { briefDocument, briefHtml, briefSvgs } from "../shared/briefRender.ts";
 import * as db from "../server/summaries/db.ts";
 
-const EXAMPLE = new URL("../docs/ticket-brief/examples/FSDK-2073.brief.json", import.meta.url).pathname;
+const EXAMPLE = new URL("../docs/ticket-brief/examples/ACME-2073.brief.json", import.meta.url).pathname;
 const SKELETON = new URL("../docs/ticket-brief/skeleton.json", import.meta.url).pathname;
 const example = (): Brief => JSON.parse(readFileSync(EXAMPLE, "utf8"));
 const ON = new Date("2026-10-08T12:00:00Z");
 
-test("the FSDK-2073 example lints clean, inside the L word budget", () => {
+test("the ACME-2073 example lints clean, inside the L word budget", () => {
   const l = lintBrief(example(), ON);
   assert.deepEqual([l.errors, l.warnings], [[], []]);
   assert.ok(l.words > 800 && l.words < 1600, `${l.words} words`);
@@ -39,7 +39,7 @@ test("the lint refuses what a reader would trip over", () => {
   b.done!.items[0].verify = "";
   b.glance!.headsups!.push(...b.glance!.headsups!);
   b.system!.views[0].pins!.push({ node: "cli", text: "a fourth" });
-  b.system!.views[1].edges.push({ from: "ldb", to: "fdr" });
+  b.system!.views[1].edges.push({ from: "ldb", to: "hub" });
   b.facts.push({ ...b.facts[0] });
   b.risks!.items.push({ text: "x", fact: "nope" });
   b.facts[1].text += " ghp_abcdefghijklmnopqrstuvwxyz0123456789";
@@ -51,7 +51,7 @@ test("the lint refuses what a reader would trip over", () => {
   has(/done\.items\[0\].*has no verify/);
   has(/glance\.headsups: 8/);
   has(/view today: 4 pins; at most 3/);
-  has(/edge ldb→fdr: node ldb is hidden in this view/);
+  has(/edge ldb→hub: node ldb is hidden in this view/);
   has(/fact f1 is in the ledger twice/);
   has(/cites fact "nope"/);
   has(/looks like a GitHub token/);
@@ -75,11 +75,11 @@ test("the lint warns on topic headings, stale facts, user stories, narration and
 
 test("a map's views say what is new, changed and removed, and edges route around boxes", () => {
   const states = viewStates(example().system!);
-  assert.equal(states[0].has("fdr"), false);
-  assert.equal(states[1].get("fdr"), "new");
+  assert.equal(states[0].has("hub"), false);
+  assert.equal(states[1].get("hub"), "new");
   assert.equal(states[1].get("lambda"), "changed");
   assert.equal(states[1].get("openai"), "gone");
-  assert.equal(states[2].get("fdr"), "same");
+  assert.equal(states[2].get("hub"), "same");
   assert.equal(states[2].has("openai"), false, "a node that the view before hid is not drawn again");
   // A straight line from col 0 to col 2 would cross the box in col 1: the route bends around it.
   const [a, mid, z] = [0, 1, 2].map((col) => nodeBox({ col, row: 0 }));
@@ -116,7 +116,7 @@ test("the page has one tab per map view, the pins, and the ledger collapsed", ()
   assert.match(html, /4 smaller calls/);
   assert.match(html, /1 more risk</);
   const svgs = briefSvgs(example());
-  assert.deepEqual(svgs.map((s) => s.name), ["FSDK-2073.map-1-today.svg", "FSDK-2073.map-2-during.svg", "FSDK-2073.map-3-done.svg"]);
+  assert.deepEqual(svgs.map((s) => s.name), ["ACME-2073.map-1-today.svg", "ACME-2073.map-2-during.svg", "ACME-2073.map-3-done.svg"]);
   assert.ok(svgs.every((s) => s.svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"') && s.svg.includes("<style>")));
 });
 
@@ -133,13 +133,13 @@ test("at a glance, the page stops after the title, the ask and the At a glance s
 test("the text, the TL;DR and the diff", () => {
   const b = example();
   const text = briefText(b);
-  assert.match(text, /^FSDK-2073: Move fdr-lambda-docs/);
+  assert.match(text, /^ACME-2073: Move hub-lambda-docs/);
   assert.match(text, /\[Map view 2: During \(the bridge\)\]/);
-  assert.match(text, /box FDR on EKS \(has the route since FSDK-2072\) \[NEW\]/);
+  assert.match(text, /box Hub on EKS \(has the route since ACME-2072\) \[NEW\]/);
   assert.match(text, /Prove it: /);
   const tldr = briefTldr(b, "https://x/brief");
   assert.match(tldr, /\*\*Heads-up: the ticket and reality differ\*\*/);
-  assert.match(tldr, /Recommended: Lambda proxies to FDR\. Decider: Piper/);
+  assert.match(tldr, /Recommended: Lambda proxies to Hub\. Decider: Piper/);
   assert.match(tldr, /Full brief: https:\/\/x\/brief\n$/);
   assert.ok(tldr.split(/\s+/).length < 450);
 
@@ -151,7 +151,7 @@ test("the text, the TL;DR and the diff", () => {
   after.facts.reverse();
   const lines = diffBriefs(b, after);
   assert.ok(lines.includes("~ verified_on: 2026-10-07 → 2026-10-14"), lines.join("\n"));
-  assert.ok(lines.includes("~ work.repos[postman-eng/sdk-gen-fern-platform].pr.state: open → merged"));
+  assert.ok(lines.includes("~ work.repos[acme-example/hub-platform].pr.state: open → merged"));
   assert.ok(lines.includes("~ path.steps[M2: registry cutover].date: 2026-10-17 → 2026-10-20"));
   assert.ok(lines.some((l) => l.startsWith("- risks.items[3].text")));
   assert.ok(!lines.some((l) => l.includes("facts[")), "a reorder of facts is no change");
@@ -168,18 +168,18 @@ test("the script lints, saves with a diff, refuses errors, and exports", () => {
   assert.equal(run("lint", "--file", file).status, 0);
 
   db.open(DB);
-  const empty = db.addDocument({ ticket: "FSDK-2073", type: "ticket-summary", title: "Ticket brief", body: "", edit: { prompt: "p", sessionId: "s" } })!;
+  const empty = db.addDocument({ ticket: "ACME-2073", type: "ticket-summary", title: "Ticket brief", body: "", edit: { prompt: "p", sessionId: "s" } })!;
   const saved = run("save", "--id", String(empty.id), "--file", file);
   assert.equal(saved.status, 0, saved.stderr);
   assert.match(saved.stdout, /Saved brief/);
-  assert.equal(db.getDocument(empty.id)!.title, "FSDK-2073: Move fdr-lambda-docs into FDR on Kubernetes");
+  assert.equal(db.getDocument(empty.id)!.title, "ACME-2073: Move hub-lambda-docs into Hub on Kubernetes");
   assert.ok(parseBrief(db.getDocument(empty.id)!.body));
 
   const b = example();
   b.work!.repos[0].pr!.state = "merged";
   writeFileSync(file, JSON.stringify(b));
   const again = run("save", "--id", String(empty.id), "--file", file);
-  assert.match(again.stdout, /What changed:\n~ work\.repos\[postman-eng\/sdk-gen-fern-platform\]\.pr\.state: open → merged/);
+  assert.match(again.stdout, /What changed:\n~ work\.repos\[acme-example\/hub-platform\]\.pr\.state: open → merged/);
 
   b.done!.items[0].verify = "";
   writeFileSync(file, JSON.stringify(b));
@@ -194,8 +194,8 @@ test("the script lints, saves with a diff, refuses errors, and exports", () => {
 
   const out = join(tmp, "out");
   assert.equal(run("export", "--id", String(empty.id), "--out", out).status, 0);
-  assert.deepEqual(readdirSync(out).sort(), ["FSDK-2073.brief.html", "FSDK-2073.brief.json", "FSDK-2073.brief.txt", "FSDK-2073.tldr.md", "diagrams"]);
+  assert.deepEqual(readdirSync(out).sort(), ["ACME-2073.brief.html", "ACME-2073.brief.json", "ACME-2073.brief.txt", "ACME-2073.tldr.md", "diagrams"]);
   assert.equal(readdirSync(join(out, "diagrams")).length, 3);
-  assert.match(run("text", "--id", String(empty.id)).stdout, /^FSDK-2073/);
-  assert.match(run("tldr", "--file", EXAMPLE).stdout, /^\*\*FSDK-2073/);
+  assert.match(run("text", "--id", String(empty.id)).stdout, /^ACME-2073/);
+  assert.match(run("tldr", "--file", EXAMPLE).stdout, /^\*\*ACME-2073/);
 });

@@ -54,7 +54,7 @@ test("the setup message gives each setting its description, example, way to find
   }
   assert.ok(!msg.includes("- `agent` "));
   assert.match(msg, /- `userName` .* Now: `Sam`\./);
-  assert.match(msg, /- `jiraServer` .* Now: `https:\/\/postmanlabs.atlassian.net` \(the default\)\./);
+  assert.match(msg, /- `jiraServer` .* Now: not set \(the default\)\./);
   assert.match(msg, /picked Claude Code/);
   assert.match(msg, /Start with what is still missing: your Jira login\./);
   assert.ok(msg.includes(`node ${SAVE_SCRIPT} < that-file.json`));

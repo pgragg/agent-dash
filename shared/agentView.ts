@@ -2,7 +2,7 @@ import { type BoardSections, firstStep, lead, liveRuns, needLine, relevantRuns, 
 import { readySummary } from "./notify.ts";
 import { needStep } from "./needs.ts";
 import { prRef } from "./refs.ts";
-import { ENVIRONMENTS, isPlanWaiting, sdlcProgress } from "./sdlc.ts";
+import { autoRunAllowed, environments, isPlanWaiting, sdlcProgress } from "./sdlc.ts";
 import type { Dashboard, ParkedRun, PullRequest, Run, SdlcEvent } from "./types.ts";
 
 /**
@@ -260,16 +260,18 @@ function smoketest(e: SdlcEvent, o: Origin) {
   const actions: AgentAction[] = [];
   // A note goes to the agent that runs the plan, after the run message: for example the limits that it must keep.
   const body = { plannedAt: e.plannedAt, cwd: "~", note: "<what the agent that runs it must also know, or leave out>" };
-  const prod = e.environments.some((env) => env !== "localhost" && env !== "postman_beta");
+  // Move things along may confirm and run only a plan whose every environment the settings allow.
+  const autoRun = e.environments.length > 0 && e.environments.every(autoRunAllowed);
   if (isPlanWaiting(e)) {
     actions.push(action(o, "confirm_and_run", "Approve the plan's state changes, then run it. Only the person confirms a plan, unless they allowed it for this environment.", `/api/sdlc-events/run?id=${e.id}`, { body, askFirst: true }));
   } else if (e.eventType === "smoketest_plan" && e.plannedAt && e.confirmedAt) {
-    actions.push(action(o, "run_again", "Run the accepted plan again (409 while a run is still going)", `/api/sdlc-events/run?id=${e.id}`, { body, askFirst: prod }));
+    actions.push(action(o, "run_again", "Run the accepted plan again (409 while a run is still going)", `/api/sdlc-events/run?id=${e.id}`, { body, askFirst: !autoRun }));
   }
   return {
     id: e.id,
     type: e.eventType,
     environments: e.environments,
+    autoRun,
     outcome: e.outcome,
     startedAt: e.startedAt,
     finishedAt: e.finishedAt,
@@ -319,7 +321,7 @@ export function agentTicket(d: Dashboard, sections: BoardSections, s: Subject, o
     action(o, "snooze_until_change", "Hide the entry until one of its signals changes", "/api/until-change", { body: { id: s.id, fingerprint: s.fingerprint } }),
     action(o, starred ? "unstar" : "star", starred ? "Remove the star" : "Pin the ticket to the top of the queue", `/api/star?ticket=${key}`, { body: { starred: !starred } }),
   ];
-  const envs = d.team?.environments ?? ENVIRONMENTS.map((e) => e.id);
+  const envs = environments().map((e) => e.id);
   if (envs.length) actions.push(action(o, "plan_smoketest", `Start an agent that plans a smoketest. env is one of: ${envs.join(", ")}`, `/api/agents?ticket=${key}`, { body: { sdlc: { kind: "smoketest_plan", env: "<env>" }, cwd: "~" } }));
   if (t.source.move) actions.push(action(o, "move", `Move the ticket in ${t.source.label}. GET /api/ticket?key= lists the statuses it can reach.`, `/api/ticket/move?key=${key}`, { body: { to: "<status>", from: t.status }, effect: t.source.id === "jira" ? "tracker" : "local" }));
   if (t.source.dueDate) {
@@ -382,7 +384,7 @@ Then go through Starred, then Up next, most urgent first. For each entry, do the
 - Reply to a waiting agent (or send a parked ask its answer) when you can answer from the ticket, its notes, the wiki or the code. If it asks for my decision, leave it for me.
 - Start an agent on a drafted next step, or on red CI, a merge conflict or review feedback on my own PR. Use the ticket's start_agent action with your own message (the step, plus the limits), not start_step, because a stored step message does not carry the limits.
 - Start an agent that plans a smoketest when the ticket's next SDLC stage is a smoketest plan.
-- Run smoketests on localhost and Postman Beta: use a plan's confirm_and_run or run_again action when every environment of the plan is localhost or postman_beta, and put the hard limits in its note. Never run, or confirm, a plan on any other environment (Fern Dev, Fern Prod, Postman Prod): leave it for me.
+- Run smoketests where agent-dash allows it: use a plan's confirm_and_run or run_again action when the plan has autoRun true, and put the hard limits in its note. Never run, or confirm, a plan with autoRun false: leave it for me.
 - Add a note to the ticket when you learn something that the next draft needs.
 
 Do not start a second agent on an entry that already has an agent at work. Start at most 5 agents in this run. Do not wait more than 10 minutes in total for agents that you started: leave them running.
@@ -400,7 +402,7 @@ export const SKILL_LIMITS = `Hard limits. They hold for you, and for every agent
 - Do not create or change Vault secrets.
 - Do not write to Jira: no comments, field edits, links, status moves or due dates.
 - Do not change prod: no prod deploys, Argo syncs or rollbacks, and no writes to prod systems or data.
-- In agent-dash, use only actions with effect "local" and askFirst false. One exception: confirm_and_run and run_again on a smoketest plan whose environments are only localhost or postman_beta. Put these limits in its note. If that plan needs a write that these limits forbid (AWS, Vault, Slack, Jira), do not run it.
+- In agent-dash, use only actions with effect "local" and askFirst false. One exception: confirm_and_run and run_again on a smoketest plan with autoRun true. Put these limits in its note. If that plan needs a write that these limits forbid (AWS, Vault, Slack, Jira), do not run it.
 
 Branches, commits, pushes to feature branches, draft or open PRs, notes and local ticket files are fine. When a step needs something past these limits, stop on that entry, and tell me what it needs.`;
 

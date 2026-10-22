@@ -22,5 +22,5 @@ test("the session name wins, then the drafted title, then the cleaned prompt", (
   assert.equal(runTitle({ name: "AD-60: Short titles", title: "Other", firstPrompt: prompt }), "AD-60: Short titles");
   assert.equal(runTitle({ name: null, title: "Wiki: database sources of truth", firstPrompt: prompt }), "Wiki: database sources of truth");
   assert.equal(runTitle({ name: null, title: null, firstPrompt: prompt }), promptTitle(prompt));
-  assert.equal(runTitle({ name: "FSDK-1: move it (https://postmanlabs.atlassian.net/browse/FSDK-1)", firstPrompt: prompt }), "FSDK-1: move it ([postmanlabs.atlassian.net])");
+  assert.equal(runTitle({ name: "FSDK-1: move it (https://acme.atlassian.net/browse/FSDK-1)", firstPrompt: prompt }), "FSDK-1: move it ([acme.atlassian.net])");
 });

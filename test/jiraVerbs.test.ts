@@ -35,8 +35,8 @@ const T = moveTargets([{ to: "Review" }, { to: "In Review" }, { to: "Done" }, { 
 
 test("a step that moves the ticket to a reachable status names that status", () => {
   assert.equal(moveStepTarget("Piper moves the ticket to In Progress.", "FSDK-1909", T)?.to, "In Progress");
-  assert.equal(moveStepTarget("Piper or an agent: move [FSDK-2090](https://postmanlabs.atlassian.net/browse/FSDK-2090) to Done in Jira.", "FSDK-2090", T)?.to, "Done");
-  assert.equal(moveStepTarget("An agent moves https://postmanlabs.atlassian.net/browse/FSDK-2081 to Done after FSDK-2091 closes.", "FSDK-2081", T)?.to, "Done");
+  assert.equal(moveStepTarget("Piper or an agent: move [FSDK-2090](https://acme.atlassian.net/browse/FSDK-2090) to Done in Jira.", "FSDK-2090", T)?.to, "Done");
+  assert.equal(moveStepTarget("An agent moves https://acme.atlassian.net/browse/FSDK-2081 to Done after FSDK-2091 closes.", "FSDK-2081", T)?.to, "Done");
   assert.equal(moveStepTarget("Piper: move it to **In Review**.", "FSDK-1", T)?.to, "In Review");
 });
 

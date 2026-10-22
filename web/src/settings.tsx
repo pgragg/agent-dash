@@ -115,7 +115,7 @@ const PROVIDER_FIELDS: Record<ProviderRow["type"], { key: keyof ProviderRow; lab
     { key: "login", label: "Login", placeholder: "sam@example.com" },
     { key: "tokenFile", label: "Token file", placeholder: "~/.config/agent-dash/jira.env" },
     { key: "projects", label: "Projects", placeholder: "(empty: every key that no other provider claims)" },
-    { key: "excludeProjects", label: "Projects to leave out", placeholder: "FSM" },
+    { key: "excludeProjects", label: "Projects to leave out", placeholder: "OLD" },
   ],
   local: [
     { key: "prefix", label: "Key prefix", placeholder: "NOTE" },

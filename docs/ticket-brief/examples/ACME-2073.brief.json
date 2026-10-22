@@ -1,45 +1,45 @@
 {
   "schema": "ticket-brief/1",
-  "key": "FSDK-2073",
-  "title": "Move fdr-lambda-docs into FDR on Kubernetes",
+  "key": "ACME-2073",
+  "title": "Move hub-lambda-docs into Hub on Kubernetes",
   "size": "L",
-  "ask": "Move AI example enhancement to FDR on Kubernetes, so that it survives the 10-17 cutover and we can delete the Lambda and its database.",
+  "ask": "Move AI example enhancement to Hub on Kubernetes, so that it survives the 10-17 cutover and we can delete the Lambda and its database.",
   "verified_on": "2026-10-07",
   "links": [
     {
-      "label": "FSDK-2073",
-      "url": "https://postmanlabs.atlassian.net/browse/FSDK-2073"
+      "label": "ACME-2073",
+      "url": "https://jira.acme.example/browse/ACME-2073"
     },
     {
-      "label": "FSDK-2072 (same move for fdr-lambda)",
-      "url": "https://postmanlabs.atlassian.net/browse/FSDK-2072"
+      "label": "ACME-2072 (same move for hub-lambda)",
+      "url": "https://jira.acme.example/browse/ACME-2072"
     },
     {
       "label": "PR #185 skip cache",
-      "url": "https://github.com/postman-eng/sdk-gen-fern-platform/pull/185"
+      "url": "https://github.com/acme-example/hub-platform/pull/185"
     }
   ],
   "glance": {
     "shifts": [
       {
         "what": "Where it runs",
-        "before": "Lambda `fdr-lambda-docs`, Fern account",
-        "after": "FDR pods on Postman EKS"
+        "before": "Lambda `hub-lambda-docs`, legacy account",
+        "after": "Hub pods on the platform EKS cluster"
       },
       {
         "what": "Host new CLIs call",
         "before": "A raw Lambda Function URL (AWS-owned)",
-        "after": "`registry.buildwithfern.com`"
+        "after": "`hub.acme.example`"
       },
       {
         "what": "Released CLIs",
         "before": "Function URL → Lambda → OpenAI",
-        "after": "Same URL; the Lambda proxies to FDR until traffic drains"
+        "after": "Same URL; the Lambda proxies to Hub until traffic drains"
       },
       {
         "what": "Model and cache",
         "before": "OpenAI `gpt-4.1-mini`, `lambda-docs-db`",
-        "after": "Bedrock `claude-sonnet-4-6`, FDR Postgres"
+        "after": "Bedrock `claude-sonnet-4-6`, Hub Postgres"
       },
       {
         "what": "What customers get",
@@ -60,30 +60,30 @@
       },
       {
         "value": "10-17",
-        "label": "the registry host moves to k8s FDR (not this ticket)",
+        "label": "the registry host moves to k8s Hub (not this ticket)",
         "fact": "f8"
       }
     ],
     "headsups": [
       {
         "title": "A redirect gives every old CLI a 401",
-        "ticket_says": "AC 3.1: redirect old CLIs to FDR.",
-        "body": "Node `fetch` drops `Authorization` on a cross-origin 307/308. The Lambda must proxy: forward the body and the header, and return FDR's answer.",
+        "ticket_says": "AC 3.1: redirect old CLIs to Hub.",
+        "body": "Node `fetch` drops `Authorization` on a cross-origin 307/308. The Lambda must proxy: forward the body and the header, and return Hub's answer.",
         "facts": [
           "f2"
         ]
       },
       {
-        "title": "FDR cannot call Bedrock yet",
-        "body": "FDR's role has no `bedrock:InvokeModel`. After the cutover every cache miss fails until the parcel IAM lands. FSDK-2072 needs the same fix.",
+        "title": "Hub cannot call Bedrock yet",
+        "body": "Hub's role has no `bedrock:InvokeModel`. After the cutover every cache miss fails until the deploy-config IAM lands. ACME-2072 needs the same fix.",
         "facts": [
           "f3"
         ]
       },
       {
         "title": "The AC 4 dev test cannot reach beta",
-        "ticket_says": "AC 4: test with a dev Lambda in the Fern account, in `fern-api/fern-platform`.",
-        "body": "Beta FDR is internal (WARP only), and that repo is frozen. Run the proxy handler locally on WARP against beta FDR; the code goes to `postman-eng/sdk-gen-fern-platform`.",
+        "ticket_says": "AC 4: test with a dev Lambda in the legacy account, in `acme-legacy/hub-platform`.",
+        "body": "Beta Hub is internal (WARP only), and that repo is frozen. Run the proxy handler locally on WARP against beta Hub; the code goes to `acme-example/hub-platform`.",
         "facts": [
           "f5",
           "f8"
@@ -91,7 +91,7 @@
       },
       {
         "title": "This move is also a fix",
-        "body": "231k of 390k calls a day hit a skip row cached from an August 401. Copy only `status='success'` rows to FDR, or the stale rows keep hiding examples.",
+        "body": "231k of 390k calls a day hit a skip row cached from an August 401. Copy only `status='success'` rows to Hub, or the stale rows keep hiding examples.",
         "facts": [
           "f4"
         ]
@@ -120,7 +120,7 @@
       {
         "id": "reg",
         "label": "Registry host",
-        "sub": "registry.buildwithfern.com",
+        "sub": "hub.acme.example",
         "col": 1,
         "row": 0,
         "kind": "external"
@@ -134,16 +134,16 @@
         "kind": "external"
       },
       {
-        "id": "fdr",
-        "label": "FDR on EKS",
-        "sub": "has the route since FSDK-2072",
+        "id": "hub",
+        "label": "Hub on EKS",
+        "sub": "has the route since ACME-2072",
         "col": 2,
         "row": 0
       },
       {
         "id": "lambda",
-        "label": "fdr-lambda-docs",
-        "sub": "Lambda, Fern account",
+        "label": "hub-lambda-docs",
+        "sub": "Lambda, legacy account",
         "col": 2,
         "row": 1
       },
@@ -164,8 +164,8 @@
         "kind": "external"
       },
       {
-        "id": "fdrdb",
-        "label": "FDR Postgres",
+        "id": "hubdb",
+        "label": "Hub Postgres",
         "sub": "CachedEnhancedExample",
         "col": 3,
         "row": 1,
@@ -188,9 +188,9 @@
         "hide": [
           "cli_new",
           "reg",
-          "fdr",
+          "hub",
           "bedrock",
-          "fdrdb"
+          "hubdb"
         ],
         "edges": [
           {
@@ -226,7 +226,7 @@
           },
           {
             "node": "lambda",
-            "text": "Runs in the Fern account, which goes away after the migration.",
+            "text": "Runs in the legacy account, which goes away after the migration.",
             "fact": "f8"
           }
         ]
@@ -234,7 +234,7 @@
       {
         "id": "during",
         "label": "During (the bridge)",
-        "caption": "New CLIs go to FDR. The Lambda becomes a proxy for old CLIs, switched by one env var.",
+        "caption": "New CLIs go to Hub. The Lambda becomes a proxy for old CLIs, switched by one env var.",
         "hide": [
           "ldb",
           "openai"
@@ -243,7 +243,7 @@
           "lambda"
         ],
         "notes": {
-          "lambda": "proxy mode: FDR_ORIGIN set",
+          "lambda": "proxy mode: HUB_ORIGIN set",
           "ldb": "out of the path; delete at End",
           "openai": "no longer called"
         },
@@ -269,16 +269,16 @@
           },
           {
             "from": "reg",
-            "to": "fdr"
+            "to": "hub"
           },
           {
-            "from": "fdr",
+            "from": "hub",
             "to": "bedrock",
             "label": "on a miss"
           },
           {
-            "from": "fdr",
-            "to": "fdrdb",
+            "from": "hub",
+            "to": "hubdb",
             "label": "cache"
           }
         ],
@@ -289,8 +289,8 @@
             "fact": "f2"
           },
           {
-            "node": "fdr",
-            "text": "No `bedrock:InvokeModel` yet: every miss fails until the parcel IAM lands in M1.",
+            "node": "hub",
+            "text": "No `bedrock:InvokeModel` yet: every miss fails until the deploy-config IAM lands in M1.",
             "fact": "f3"
           }
         ]
@@ -298,7 +298,7 @@
       {
         "id": "done",
         "label": "Done",
-        "caption": "One path through FDR. The Lambda, its URL, its CDK and its database are deleted.",
+        "caption": "One path through Hub. The Lambda, its URL, its CDK and its database are deleted.",
         "hide": [
           "cli",
           "furl",
@@ -317,16 +317,16 @@
           },
           {
             "from": "reg",
-            "to": "fdr"
+            "to": "hub"
           },
           {
-            "from": "fdr",
+            "from": "hub",
             "to": "bedrock",
             "label": "on a miss"
           },
           {
-            "from": "fdr",
-            "to": "fdrdb",
+            "from": "hub",
+            "to": "hubdb",
             "label": "cache"
           }
         ]
@@ -334,15 +334,15 @@
     ]
   },
   "done": {
-    "heading": "Done means both CLI generations get examples from FDR, and nothing is left in the Fern account",
+    "heading": "Done means both CLI generations get examples from Hub, and nothing is left in the legacy account",
     "items": [
       {
-        "text": "Beta FDR answers 200 for a hit, a miss and a skip.",
-        "verify": "On WARP: `POST /v2/registry/ai/enhance-example` to beta FDR with a Venus JWT, once per case."
+        "text": "Beta Hub answers 200 for a hit, a miss and a skip.",
+        "verify": "On WARP: `POST /v2/registry/ai/enhance-example` to beta Hub with a Keyring JWT, once per case."
       },
       {
         "text": "A released CLI gets an enhanced example through the Lambda proxy.",
-        "verify": "Unit tests for `FDR_ORIGIN` set and unset; one `fern generate` with an old CLI after M4."
+        "verify": "Unit tests for `HUB_ORIGIN` set and unset; one `acme generate` with an old CLI after M4."
       },
       {
         "text": "A failed enhancement keeps the original example.",
@@ -350,33 +350,33 @@
         "fact": "f7"
       },
       {
-        "text": "FDR rejects a JWT whose `org_id` does not match the request.",
-        "verify": "Unit test in `servers/fdr/src/controllers/ai/`."
+        "text": "Hub rejects a JWT whose `org_id` does not match the request.",
+        "verify": "Unit test in `servers/hub/src/controllers/ai/`."
       },
       {
         "text": "The route shows in New Relic with alerts.",
-        "verify": "`sdk-gen-fdr` shows `/v2/registry/ai/enhance-example`; alerts on 5xx and p95 exist."
+        "verify": "`hub-prod` shows `/v2/registry/ai/enhance-example`; alerts on 5xx and p95 exist."
       },
       {
         "text": "The Lambda, its Function URL and `lambda-docs-db` are deleted, and the unused CDK code is removed.",
-        "verify": "After the exit gate, a human checks that the Function URL and the RDS instance are gone from the Fern account; `servers/fdr-lambda-docs-deploy/` is gone from `app`."
+        "verify": "After the exit gate, a human checks that the Function URL and the RDS instance are gone from the legacy account; `servers/hub-lambda-docs-deploy/` is gone from `main`."
       }
     ],
     "ac_review": [
       {
-        "ac": "AC 3.1: redirect old CLIs to FDR",
+        "ac": "AC 3.1: redirect old CLIs to Hub",
         "verdict": "change",
         "note": "Proxy: the Lambda forwards `POST enhance-example` with its body and `Authorization`."
       },
       {
-        "ac": "AC 4: test with a dev Lambda in `fern-api/fern-platform`",
+        "ac": "AC 4: test with a dev Lambda in `acme-legacy/hub-platform`",
         "verdict": "change",
-        "note": "Run the proxy handler locally on WARP against beta FDR, from `postman-eng/sdk-gen-fern-platform`."
+        "note": "Run the proxy handler locally on WARP against beta Hub, from `acme-example/hub-platform`."
       },
       {
         "ac": "No exit criteria for deleting the Lambda",
         "verdict": "add",
-        "note": "FDR p95 < 15 s and 5xx < 1% for 7 days; Lambda < 1k calls/day for 14 days."
+        "note": "Hub p95 < 15 s and 5xx < 1% for 7 days; Lambda < 1k calls/day for 14 days."
       }
     ]
   },
@@ -384,29 +384,29 @@
     "heading": "Every step before the delete undoes in minutes",
     "steps": [
       {
-        "title": "M1: FDR ready",
+        "title": "M1: Hub ready",
         "who": "agent opens PRs, Piper merges",
         "state": "now",
-        "detail": "Merge PR #185. Add Bedrock IAM to FDR (beta and prod parcels). Add proxy mode to the Lambda, deployed with `FDR_ORIGIN` unset.",
-        "gate": "Beta FDR returns 200 on WARP for a hit, a miss and a skip.",
+        "detail": "Merge PR #185. Add Bedrock IAM to Hub (beta and prod deploy configs). Add proxy mode to the Lambda, deployed with `HUB_ORIGIN` unset.",
+        "gate": "Beta Hub returns 200 on WARP for a hit, a miss and a skip.",
         "undo": "Revert PR #185 (its columns stay, unused)."
       },
       {
         "title": "M2: registry cutover",
         "who": "migration program",
         "date": "2026-10-17",
-        "detail": "`registry.buildwithfern.com` points to k8s FDR. Not owned by this ticket."
+        "detail": "`hub.acme.example` points to k8s Hub. Not owned by this ticket."
       },
       {
         "title": "Copy the cache",
         "who": "Piper",
         "human": true,
-        "detail": "After M2, before M4: copy only `status='success'` rows from `lambda-docs-db` to FDR Postgres."
+        "detail": "After M2, before M4: copy only `status='success'` rows from `lambda-docs-db` to Hub Postgres."
       },
       {
         "title": "M3: CLI release",
         "who": "agent opens the PR, Piper merges",
-        "detail": "New CLIs call `registry.buildwithfern.com`.",
+        "detail": "New CLIs call `hub.acme.example`.",
         "gate": "Merge only after M2 is verified.",
         "undo": "Release a CLI with the old URL."
       },
@@ -414,15 +414,15 @@
         "title": "M4: proxy on",
         "who": "Piper",
         "human": true,
-        "detail": "Set `FDR_ORIGIN` on the prod Lambda.",
-        "undo": "Unset `FDR_ORIGIN` (seconds)."
+        "detail": "Set `HUB_ORIGIN` on the prod Lambda.",
+        "undo": "Unset `HUB_ORIGIN` (seconds)."
       },
       {
         "title": "End: delete",
         "who": "Piper",
         "human": true,
         "detail": "Delete the Lambda, Function URL, CDK and `lambda-docs-db`.",
-        "gate": "FDR p95 < 15 s and 5xx < 1% for 7 days; Lambda < 1k calls/day for 14 days."
+        "gate": "Hub p95 < 15 s and 5xx < 1% for 7 days; Lambda < 1k calls/day for 14 days."
       }
     ]
   },
@@ -430,8 +430,8 @@
     "heading": "Two calls are open; Piper makes both",
     "major": [
       {
-        "question": "How do released CLIs reach FDR?",
-        "decider": "Piper (then Arie edits AC 3.1)",
+        "question": "How do released CLIs reach Hub?",
+        "decider": "Piper (then Dana edits AC 3.1)",
         "criteria": [
           "Old CLIs keep their auth",
           "Works with the URL compiled in",
@@ -439,7 +439,7 @@
         ],
         "options": [
           {
-            "name": "Lambda proxies to FDR",
+            "name": "Lambda proxies to Hub",
             "cells": [
               "+ forwards `Authorization`",
               "+ same URL",
@@ -458,7 +458,7 @@
           {
             "name": "Delete the Lambda now",
             "cells": [
-              "- no call reaches FDR",
+              "- no call reaches Hub",
               "- URL is gone",
               "+ nothing"
             ]
@@ -474,13 +474,13 @@
         "question": "Which origin setting do new CLIs use?",
         "decider": "Piper",
         "criteria": [
-          "Beta CLI tests beta FDR",
+          "Beta CLI tests beta Hub",
           "Settings to keep in step",
           "AI can be turned off alone"
         ],
         "options": [
           {
-            "name": "Reuse `DEFAULT_FDR_ORIGIN`",
+            "name": "Reuse `DEFAULT_HUB_ORIGIN`",
             "cells": [
               "+ yes, on WARP",
               "+ one",
@@ -489,7 +489,7 @@
             "recommended": true
           },
           {
-            "name": "Keep `DEFAULT_FDR_LAMBDA_DOCS_ORIGIN`",
+            "name": "Keep `DEFAULT_HUB_LAMBDA_DOCS_ORIGIN`",
             "cells": [
               "- stays off (`\"\"`)",
               "~ two for one host",
@@ -497,7 +497,7 @@
             ]
           }
         ],
-        "why": "One host, one setting, and the beta CLI starts to exercise the Postman path. The CLI already fails soft, so no separate off switch is needed.",
+        "why": "One host, one setting, and the beta CLI starts to exercise the new path. The CLI already fails soft, so no separate off switch is needed.",
         "facts": [
           "f6",
           "f7"
@@ -507,11 +507,11 @@
     "minor": [
       {
         "question": "Model?",
-        "call": "Keep `claude-sonnet-4-6`: FDR already calls it, and FSDK-2072 uses it. Not a choice for this ticket.",
-        "decider": "FSDK-2072"
+        "call": "Keep `claude-sonnet-4-6`: Hub already calls it, and ACME-2072 uses it. Not a choice for this ticket.",
+        "decider": "ACME-2072"
       },
       {
-        "question": "Auth in FDR?",
+        "question": "Auth in Hub?",
         "call": "`checkUserBelongsToOrg` (cached), as the route does today."
       },
       {
@@ -521,7 +521,7 @@
       },
       {
         "question": "PostHog `ai-example-enhanced` event?",
-        "call": "Drop it after asking `#proj-fern-aws-migration-devs`.",
+        "call": "Drop it after asking `#proj-aws-migration`.",
         "decider": "Piper"
       }
     ]
@@ -532,59 +532,59 @@
       {
         "who": "Customers on released CLIs",
         "before": "No AI example on 59% of calls",
-        "after": "Same URL, proxied to FDR; examples return. After the drain they fail soft"
+        "after": "Same URL, proxied to Hub; examples return. After the drain they fail soft"
       },
       {
         "who": "Customers on a new CLI",
         "before": "Call the Function URL",
-        "after": "Call `registry.buildwithfern.com`; no Lambda hop"
+        "after": "Call `hub.acme.example`; no Lambda hop"
       },
       {
-        "who": "`fern-beta` users",
+        "who": "`acme-beta` users",
         "before": "AI enhancement off",
-        "after": "Enhanced against beta FDR, on WARP (if new CLIs reuse `DEFAULT_FDR_ORIGIN`)"
+        "after": "Enhanced against beta Hub, on WARP (if new CLIs reuse `DEFAULT_HUB_ORIGIN`)"
       },
       {
         "who": "On-call",
-        "before": "Lambda in the Fern account, not in New Relic",
-        "after": "Route in `sdk-gen-fdr`, with 5xx and p95 alerts"
+        "before": "Lambda in the legacy account, not in New Relic",
+        "after": "Route in `hub-prod`, with 5xx and p95 alerts"
       }
     ]
   },
   "work": {
     "heading": "Three repos and one AWS account; every merge and AWS command is Piper's",
-    "first_move": "Read `servers/fdr/src/controllers/ai/` on `app`, then review PR #185: it is the one gap between FDR and the Lambda.",
+    "first_move": "Read `servers/hub/src/controllers/ai/` on `main`, then review PR #185: it is the one gap between Hub and the Lambda.",
     "repos": [
       {
-        "repo": "postman-eng/sdk-gen-fern-platform",
-        "url": "https://github.com/postman-eng/sdk-gen-fern-platform",
-        "why": "The FDR route and cache, and the Lambda's proxy mode. Base branch `app`.",
+        "repo": "acme-example/hub-platform",
+        "url": "https://github.com/acme-example/hub-platform",
+        "why": "The Hub route and cache, and the Lambda's proxy mode. Base branch `main`.",
         "paths": [
-          "servers/fdr/src/controllers/ai/",
-          "servers/fdr-lambda-docs/src/",
-          "servers/fdr-lambda-docs-deploy/ (delete at End)"
+          "servers/hub/src/controllers/ai/",
+          "servers/hub-lambda-docs/src/",
+          "servers/hub-lambda-docs-deploy/ (delete at End)"
         ],
         "pr": {
           "label": "#185 skip cache",
-          "url": "https://github.com/postman-eng/sdk-gen-fern-platform/pull/185",
+          "url": "https://github.com/acme-example/hub-platform/pull/185",
           "state": "open"
         },
         "who": "agent",
-        "human_only": "Merge. Ask Arie first whether the schema migration may merge during the freeze."
+        "human_only": "Merge. Ask Dana first whether the schema migration may merge during the freeze."
       },
       {
-        "repo": "postman-eng/cloud9-parcels-*-deployments",
-        "why": "Give FDR's role `bedrock:InvokeModel` on one model ARN. Beta: `cloud9-parcels-deployments`, base `us-beta`. Prod: `cloud9-parcels-production-deployments`, base `us`.",
+        "repo": "acme-example/deploy-config-*",
+        "why": "Give Hub's role `bedrock:InvokeModel` on one model ARN. Beta: `deploy-config-beta`, base `beta`. Prod: `deploy-config-prod`, base `prod`.",
         "paths": [
-          "postman/groups/sdk-gen/sdk-gen-fern-definition-registry.yml"
+          "services/hub/hub.yml"
         ],
         "who": "agent",
         "human_only": "Merge both. Prod carries customer traffic."
       },
       {
-        "repo": "fern-api/fern",
-        "url": "https://github.com/fern-api/fern",
-        "why": "The CLI's origin setting. Not frozen, and it has no `postman-eng` mirror.",
+        "repo": "acme-example/acme-cli",
+        "url": "https://github.com/acme-example/acme-cli",
+        "why": "The CLI's origin setting. Not frozen: the freeze covers only `acme-legacy/hub-platform`.",
         "paths": [
           "packages/cli/cli/build.*.mjs",
           "packages/cli/register/src/ai-example-enhancer/lambdaClient.ts"
@@ -593,10 +593,10 @@
         "human_only": "Merge only after M2 is verified."
       },
       {
-        "repo": "Fern AWS account",
+        "repo": "Legacy AWS account",
         "why": "The proxy switch, the cache copy, and the deletes.",
         "paths": [
-          "Lambda `fdr-lambda-docs`, env `FDR_ORIGIN`",
+          "Lambda `hub-lambda-docs`, env `HUB_ORIGIN`",
           "RDS `lambda-docs-db`"
         ],
         "who": "human",
@@ -607,29 +607,29 @@
   "risks": {
     "items": [
       {
-        "text": "No Bedrock IAM at the cutover: every miss fails, here and in FSDK-2072.",
-        "mitigation": "Parcel PRs in M1, before 10-17.",
+        "text": "No Bedrock IAM at the cutover: every miss fails, here and in ACME-2072.",
+        "mitigation": "Deploy-config PRs in M1, before 10-17.",
         "fact": "f3"
       },
       {
         "text": "An answer slower than the CLI's 15 s timeout: the CLI keeps the original example.",
-        "mitigation": "Soft fail, and FDR caches the answer, so the next run hits. No work in this ticket.",
+        "mitigation": "Soft fail, and Hub caches the answer, so the next run hits. No work in this ticket.",
         "fact": "f7"
       },
       {
         "text": "The code freeze forbids schema migrations, and PR #185 adds columns.",
-        "mitigation": "Ask Arie; hold the migration until after 10-17 if the freeze covers it.",
+        "mitigation": "Ask Dana; hold the migration until after 10-17 if the freeze covers it.",
         "fact": "f8"
       },
       {
-        "text": "The Fern account goes before old CLIs drain: they lose AI examples early (soft fail).",
-        "mitigation": "Agree the drain window with Arie before M4."
+        "text": "The legacy account goes before old CLIs drain: they lose AI examples early (soft fail).",
+        "mitigation": "Agree the drain window with Dana before M4."
       }
     ],
     "questions": [
       {
         "q": "Is the drain threshold \"< 1k calls/day for 14 days\"?",
-        "owner": "Piper + Arie"
+        "owner": "Piper + Dana"
       },
       {
         "q": "Does anyone read `ai-example-enhanced` in PostHog?",
@@ -641,7 +641,7 @@
     {
       "id": "f1",
       "text": "Released CLIs call the raw Function URL `…lambda-url.us-east-1.on.aws`, an AWS-owned host name, so DNS cannot move it.",
-      "source": "fern-api/fern `packages/cli/cli/build.*.mjs` at 267c2230974",
+      "source": "acme-example/acme-cli `packages/cli/cli/build.*.mjs` at 267c2230974",
       "how": "read",
       "as_of": "2026-10-07"
     },
@@ -654,8 +654,8 @@
     },
     {
       "id": "f3",
-      "text": "FDR's prod IAM role has no Bedrock permission; its policies are sqsConsumer, s3Writer, s3Reader.",
-      "source": "cloud9-parcels-production-deployments `us`: `postman/groups/sdk-gen/sdk-gen-fern-definition-registry.yml`",
+      "text": "Hub's prod IAM role has no Bedrock permission; its policies are sqsConsumer, s3Writer, s3Reader.",
+      "source": "deploy-config-prod `prod`: `services/hub/hub.yml`",
       "how": "read",
       "as_of": "2026-10-07"
     },
@@ -668,50 +668,50 @@
     },
     {
       "id": "f5",
-      "text": "Beta FDR resolves to an internal ingress (100.72.x.x): reachable on WARP only.",
-      "source": "`dig sdk-gen-fern-definition-registry.postman-beta.tech`",
+      "text": "Beta Hub resolves to an internal ingress (100.72.x.x): reachable on WARP only.",
+      "source": "`dig hub.beta.acme.internal`",
       "how": "verified",
       "as_of": "2026-10-07"
     },
     {
       "id": "f6",
-      "text": "The beta CLI has AI enhancement off: `build.beta.mjs` sets `DEFAULT_FDR_LAMBDA_DOCS_ORIGIN: \"\"`.",
-      "source": "fern-api/fern `packages/cli/cli/build.beta.mjs`",
+      "text": "The beta CLI has AI enhancement off: `build.beta.mjs` sets `DEFAULT_HUB_LAMBDA_DOCS_ORIGIN: \"\"`.",
+      "source": "acme-example/acme-cli `packages/cli/cli/build.beta.mjs`",
       "how": "read",
       "as_of": "2026-10-07"
     },
     {
       "id": "f7",
       "text": "The CLI calls with a 15 s timeout and 0 retries, and keeps the original example on any failure.",
-      "source": "fern-api/fern `packages/cli/register/src/ai-example-enhancer/lambdaClient.ts`",
+      "source": "acme-example/acme-cli `packages/cli/register/src/ai-example-enhancer/lambdaClient.ts`",
       "how": "read",
       "as_of": "2026-10-07"
     },
     {
       "id": "f8",
-      "text": "`registry.buildwithfern.com` moves to k8s FDR on 2026-10-17. Until then `fern-api/fern-platform` is frozen and schema migrations are not allowed.",
-      "source": "Wiki: Fern code freeze Oct 2 to Oct 17 2026",
+      "text": "`hub.acme.example` moves to k8s Hub on 2026-10-17. Until then `acme-legacy/hub-platform` is frozen and schema migrations are not allowed.",
+      "source": "Wiki: Acme code freeze Oct 2 to Oct 17 2026",
       "how": "said",
       "as_of": "2026-10-07"
     },
     {
       "id": "f9",
-      "text": "FDR already serves `POST /v2/registry/ai/enhance-example` with Bedrock `us.anthropic.claude-sonnet-4-6` (40 s timeout) and `checkUserBelongsToOrg`.",
-      "source": "sdk-gen-fern-platform `servers/fdr/src/controllers/ai/` at `app` 0d01c13ce0",
+      "text": "Hub already serves `POST /v2/registry/ai/enhance-example` with Bedrock `us.anthropic.claude-sonnet-4-6` (40 s timeout) and `checkUserBelongsToOrg`.",
+      "source": "hub-platform `servers/hub/src/controllers/ai/` at `main` 0d01c13ce0",
       "how": "read",
       "as_of": "2026-10-07"
     },
     {
       "id": "f10",
-      "text": "FDR's HPA scales 3–50 pods at 60% CPU.",
-      "source": "cloud9-parcels-production-deployments PR #13693, merged",
+      "text": "Hub's HPA scales 3–50 pods at 60% CPU.",
+      "source": "deploy-config-prod PR #13693, merged",
       "how": "read",
       "as_of": "2026-10-07"
     },
     {
       "id": "f11",
-      "text": "The Lambda's CDK (`docs-ai.buildwithfern.com`) was never deployed: the host does not resolve.",
-      "source": "`curl` and `servers/fdr-lambda-docs-deploy/`",
+      "text": "The Lambda's CDK (`docs-ai.acme.example`) was never deployed: the host does not resolve.",
+      "source": "`curl` and `servers/hub-lambda-docs-deploy/`",
       "how": "verified",
       "as_of": "2026-10-07"
     }
@@ -719,35 +719,35 @@
   "glossary": [
     {
       "term": "AI example enhancement",
-      "means": "During `fern generate` and `fern docs`, the CLI sends each endpoint's request and response examples to an LLM, which makes them realistic."
+      "means": "During `acme generate` and `acme docs`, the CLI sends each endpoint's request and response examples to an LLM, which makes them realistic."
     },
     {
-      "term": "FDR",
-      "means": "Fern Definition Registry: the API the CLI registers APIs and docs with."
+      "term": "Hub",
+      "means": "Acme Hub: the API the CLI registers APIs and docs with."
     },
     {
       "term": "Skip row",
       "means": "A cache row that says \"do not enhance this example\". The Lambda answers it with no example."
     },
     {
-      "term": "Venus",
-      "means": "The auth service. It turns a `fern_` org token into the short-lived JWT the CLI sends."
+      "term": "Keyring",
+      "means": "The auth service. It turns an `acme_` org token into the short-lived JWT the CLI sends."
     },
     {
       "term": "WARP",
-      "means": "The VPN that reaches Postman's internal hosts, such as beta FDR."
+      "means": "The VPN that reaches Acme's internal hosts, such as beta Hub."
     },
     {
       "term": "M2 / cutover",
-      "means": "The program-wide move of `registry.buildwithfern.com` to k8s FDR on 2026-10-17."
+      "means": "The program-wide move of `hub.acme.example` to k8s Hub on 2026-10-17."
     },
     {
-      "term": "Parcel",
-      "means": "Postman's deploy config for one service (IAM, scaling, env), in the `cloud9-parcels-*` repos."
+      "term": "Deploy config",
+      "means": "Acme's deploy settings for one service (IAM, scaling, env), in the `deploy-config-*` repos."
     },
     {
-      "term": "Arie",
-      "means": "Arie Litovsky, who filed the ticket and owns its acceptance criteria."
+      "term": "Dana",
+      "means": "Dana Reyes, who filed the ticket and owns its acceptance criteria."
     }
   ]
 }

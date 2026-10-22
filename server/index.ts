@@ -562,9 +562,9 @@ const server = createServer(async (req, res) => {
           ? step.action.message
           : stepMessage(key, step.body)
         : env && running
-          ? planMessage(key, env, SDLC_SCRIPT, running.id, config.smoketestGuide)
+          ? planMessage(key, env, SDLC_SCRIPT, running.id, config.smoketestGuide, config.teamGuide)
           : stage
-            ? confirmDeployMessage(key, stage, group.prs.filter((p) => deployStageOf(p) === stage && p.state === "merged").map((p) => p.url), SDLC_SCRIPT)
+            ? confirmDeployMessage(key, stage, group.prs.filter((p) => deployStageOf(p) === stage && p.state === "merged").map((p) => p.url), SDLC_SCRIPT, config.teamGuide)
             : (body.message ?? "");
       // A plan whose agent never started must not stay yellow.
       const dropRunning = () => {

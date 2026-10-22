@@ -1,7 +1,7 @@
 /**
  * Search Slack messages, read-only, with the saved Slack login in the config file (slackStateFile).
  *
- *   node scripts/slack-search.ts "FSDK-2046" [count]
+ *   node scripts/slack-search.ts "ABC-2046" [count]
  *
  * Clicking through Slack's search box from a headless browser is unreliable, so this opens
  * Slack once and calls Slack's own search.messages endpoint from inside the page, with the

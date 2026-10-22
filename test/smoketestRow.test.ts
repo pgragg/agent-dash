@@ -22,11 +22,11 @@ function ev(over: Partial<SdlcEvent> = {}): SdlcEvent {
     messageUrl: null,
     plannedAt: "2026-10-02T10:05:00.000Z",
     stateChanges: "deploy x",
-    writesSummary: "Postman Prod: one test event",
+    writesSummary: "Prod: one test event",
     confirmedAt: null,
     confirmedBy: null,
     planId: null,
-    environments: ["postman_prod"],
+    environments: ["prod"],
     tickets: ["FSDK-1"],
     createdAt: "2026-10-02T10:00:00.000Z",
     ...over,
@@ -44,14 +44,14 @@ test("a plan that waits for Confirm shows its writes, with Confirm", () => {
   const plan = ev();
   const row = smoketestRow("s1", [plan], idle)!;
   assert.equal(row.title, "Prod plan waits for your Confirm");
-  assert.equal(row.detail, "Postman Prod: one test event");
+  assert.equal(row.detail, "Prod: one test event");
   assert.equal(row.action, "confirm");
   assert.equal(row.plan, plan);
   assert.ok(row.needsYou);
 });
 
 test("a plan still in writing, with a question, asks for a Reply", () => {
-  const row = smoketestRow("s1", [ev({ plannedAt: null, environments: ["postman_beta"] })], { asked: true, finished: false })!;
+  const row = smoketestRow("s1", [ev({ plannedAt: null, environments: ["beta"] })], { asked: true, finished: false })!;
   assert.equal(row.title, "Beta plan: the agent asked you a question");
   assert.equal(row.action, "reply");
   assert.ok(row.needsYou);

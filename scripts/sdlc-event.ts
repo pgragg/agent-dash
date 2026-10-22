@@ -5,27 +5,27 @@
  *   node scripts/sdlc-event.ts smoketest --ticket ABC-123 --env localhost \
  *     --started 2026-10-05T10:00:00Z --finished 2026-10-05T10:20:00Z --outcome passed \
  *     --details-file details.md --results-file results.md
- *   node scripts/sdlc-event.ts deploy --ticket ABC-123 --env postman_beta --details "<app>: Synced, Healthy, 1.2.3"
+ *   node scripts/sdlc-event.ts deploy --ticket ABC-123 --env staging --details "<app>: Synced, Healthy, 1.2.3"
  *
  * A deploy that is live but does not give its benefit yet takes `--outcome unhealthy`, and shows yellow.
  *
  * `smoketest` records a smoketest_execution. A smoketest that agent-dash started has a plan first;
  * the agent records the plan, then finishes the execution that the accepted plan starts:
  *
- *   node scripts/sdlc-event.ts plan --id 11 --summary "Publish a docs site locally and load it" --plan-file plan.md --state-changes none
- *   node scripts/sdlc-event.ts plan --id 11 --summary "…" --writes-summary "Postman Beta: create one test project, then delete it" \
+ *   node scripts/sdlc-event.ts plan --id 11 --summary "Place a test order locally and load it" --plan-file plan.md --state-changes none
+ *   node scripts/sdlc-event.ts plan --id 11 --summary "…" --writes-summary "Staging: create one test project, then delete it" \
  *     --plan-file plan.md --state-changes-file writes.md
- *   node scripts/sdlc-event.ts finish --id 12 --outcome passed --summary "Publish flow works end to end" --details-file details.md --results-file results.md
+ *   node scripts/sdlc-event.ts finish --id 12 --outcome passed --summary "Checkout flow works end to end" --details-file details.md --results-file results.md
  *
  * An agent that agent-dash did not start has no plan id. It names the ticket and the environment
  * instead, and the script makes the plan, linked to the agent's pi session (`PI_SESSION_ID`):
  *
- *   node scripts/sdlc-event.ts plan --ticket ABC-123 --env postman_beta --summary "…" --plan-file plan.md --state-changes none
+ *   node scripts/sdlc-event.ts plan --ticket ABC-123 --env staging --summary "…" --plan-file plan.md --state-changes none
  *
  * A plan with `--state-changes none` changes no Beta or Prod state, so it is accepted at once, and
  * the script prints how to run it. Any other plan waits for Piper's Confirm in agent-dash.
  *
- * --ticket and --env can repeat. An environment is an id (postman_beta) or a label ("Postman Beta").
+ * --ticket and --env can repeat. An environment is localhost, or an id (staging) or label ("Staging") from the `environments` setting.
  * Prints the new event as JSON.
  */
 import { readFileSync } from "node:fs";

@@ -14,7 +14,7 @@ import type { Route } from "./routes.ts";
  *   Board (3) · Fix the login redirect · agent-dash
  *   PRs 5 · 2✓ 1💬 1✗ · agent-dash          5 open, 2 approved, 1 with feedback, 1 with red CI
  *   PR ✓ 💬2 · Fix the login redirect · agent-dash
- *   ✋ Deploy FDR · agent-dash               a chat that waits on you (⚙️ when it works, 👀 when it waits on review)
+ *   ✋ Deploy API · agent-dash               a chat that waits on you (⚙️ when it works, 👀 when it waits on review)
  */
 
 type TitleData = Pick<Dashboard, "prs" | "documents" | "counts" | "myTickets" | "otherTickets" | "unlinkedRuns"> & Partial<Pick<Dashboard, "conversationSummaries">>;

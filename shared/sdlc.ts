@@ -10,20 +10,49 @@ import type { PullRequest, SdlcEnvironment, SdlcEvent, Ticket } from "./types.ts
  * before it as skipped.
  */
 
-export const ENVIRONMENTS: { id: SdlcEnvironment; label: string }[] = [
-  { id: "localhost", label: "localhost" },
-  { id: "fern_dev", label: "Fern Dev" },
-  { id: "fern_prod", label: "Fern Prod" },
-  { id: "postman_beta", label: "Postman Beta" },
-  { id: "postman_prod", label: "Postman Prod" },
-];
+export type EnvStage = "local" | "beta" | "prod";
 
-export const ENV_LABEL = Object.fromEntries(ENVIRONMENTS.map((e) => [e.id, e.label])) as Record<SdlcEnvironment, string>;
+export interface Environment {
+  id: SdlcEnvironment;
+  label: string;
+  stage: EnvStage;
+}
 
-/** "postman_beta", "Postman Beta" and "postman-beta" are all the same tag. */
+/** "staging" is "Staging", "eu_prod" is "Eu Prod". */
+const labelOf = (id: string): string => id.split(/[_-]+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+
+/** One `environments` entry, `stage:id`. */
+export const ENVIRONMENT_SPEC = /^(beta|prod):([a-z][a-z0-9_]*)$/;
+
+/**
+ * localhost, then the shared environments of the settings in their order. A stage with none
+ * gets one named after it, so every smoketest lane has an environment.
+ */
+export function environments(): Environment[] {
+  const out: Environment[] = [{ id: "localhost", label: "localhost", stage: "local" }];
+  for (const spec of team.environments) {
+    const m = ENVIRONMENT_SPEC.exec(spec);
+    if (m && !out.some((e) => e.id === m[2])) out.push({ id: m[2], label: labelOf(m[2]), stage: m[1] as EnvStage });
+  }
+  for (const stage of ["beta", "prod"] as const) {
+    if (!out.some((e) => e.stage === stage) && !out.some((e) => e.id === stage)) out.push({ id: stage, label: labelOf(stage), stage });
+  }
+  return out;
+}
+
+/** The label of an environment. An old event can name one that the settings no longer have. */
+export const envLabel = (id: SdlcEnvironment): string => environments().find((e) => e.id === id)?.label ?? id;
+
+/** The environments of one stage, in the settings' order. */
+export const stageEnvironments = (stage: EnvStage): SdlcEnvironment[] => environments().filter((e) => e.stage === stage).map((e) => e.id);
+
+/** True where the Move things along agent may confirm and run a plan: localhost, and the allowed shared ones. */
+export const autoRunAllowed = (id: SdlcEnvironment): boolean => id === "localhost" || team.autoRunEnvironments.includes(id);
+
+/** "staging", "Staging" and "STAGING" are all the same tag. */
 export function parseEnvironment(s: string): SdlcEnvironment | null {
   const norm = s.trim().toLowerCase().replace(/[\s-]+/g, "_");
-  return ENVIRONMENTS.find((e) => e.id === norm || e.label.toLowerCase().replace(/\s+/g, "_") === norm)?.id ?? null;
+  return environments().find((e) => e.id === norm || e.label.toLowerCase().replace(/\s+/g, "_") === norm)?.id ?? null;
 }
 
 export type StageId =
@@ -67,13 +96,6 @@ export interface SdlcProgress {
   hint: string | null;
 }
 
-/** Fern Dev is the pre-prod environment of Fern's own stack, so it counts for Beta. */
-const STAGE_ENVS: Record<"local" | "beta" | "prod", SdlcEnvironment[]> = {
-  local: ["localhost"],
-  beta: ["postman_beta", "fern_dev"],
-  prod: ["postman_prod", "fern_prod"],
-};
-
 /** A PR in one of these repos deploys a chart version; its base branch picks the stage, so the repo does too. */
 export const deployRepo = (stage: "beta" | "prod"): string => (stage === "beta" ? team.deployRepoBeta : team.deployRepoProd);
 
@@ -92,11 +114,11 @@ const hints = (ticket: string): Record<StageId, string> => ({
   local_smoketest_plan: `Plan a smoketest on localhost before you ask for a PR review. ${AUTO_ACCEPT}`,
   local_smoketest: "Run the confirmed plan of the local smoketest.",
   review_requested: reviewChannelFor([ticket]) ? `Ask for a review in ${channelLabel(reviewChannelFor([ticket])!)}: the PRs view has a drafted message for each open PR.` : "Ask for a review of each open PR.",
-  in_beta: "Deploy to Postman Beta (merge the PR, then the us-beta deploy PR), and confirm the deploy in Argo.",
-  beta_smoketest_plan: `Plan a smoketest on Postman Beta before you open the prod chart version update PR. ${AUTO_ACCEPT}`,
+  in_beta: "Deploy to Beta (merge the PR, then the Beta deploy PR), and confirm the deploy in Argo.",
+  beta_smoketest_plan: `Plan a smoketest on Beta before you open the Prod deploy PR. ${AUTO_ACCEPT}`,
   beta_smoketest: "Run the confirmed plan of the Beta smoketest.",
-  in_prod: "Open the prod chart version update PR, and confirm the deploy in Argo after it merges.",
-  prod_smoketest_plan: `Plan a smoketest on Postman Prod. ${AUTO_ACCEPT}`,
+  in_prod: "Open the Prod deploy PR, and confirm the deploy in Argo after it merges.",
+  prod_smoketest_plan: `Plan a smoketest on Prod. ${AUTO_ACCEPT}`,
   prod_smoketest: "Run the confirmed plan of the Prod smoketest.",
   done: "Move the ticket to Done in Jira.",
 });
@@ -144,7 +166,7 @@ const utc = (iso: string) => `${iso.slice(0, 16).replace("T", " ")} UTC`;
 function planStage(id: StageId, events: SdlcEvent[], envs: SdlcEnvironment[]): Omit<Stage, "label"> {
   const found = tagged(events, "smoketest_plan", envs);
   const last = found[0];
-  if (!last) return { id, state: "todo", detail: `No smoketest plan tagged ${envs.map((e) => ENV_LABEL[e]).join(" or ")} yet`, events: [] };
+  if (!last) return { id, state: "todo", detail: `No smoketest plan tagged ${envs.map((e) => envLabel(e)).join(" or ")} yet`, events: [] };
   if (isPlanRunning(last)) return { id, state: "running", detail: `An agent writes the plan since ${utc(last.startedAt)}`, events: found };
   if (isPlanWaiting(last)) return { id, state: "waiting", detail: "The plan changes Beta or Prod state, so it waits for your confirmation", events: found };
   const when = (last.confirmedAt ?? last.startedAt).slice(0, 10);
@@ -154,7 +176,7 @@ function planStage(id: StageId, events: SdlcEvent[], envs: SdlcEnvironment[]): O
 function smoketestStage(id: StageId, events: SdlcEvent[], envs: SdlcEnvironment[]): Omit<Stage, "label"> {
   const found = tagged(events, "smoketest_execution", envs);
   const last = found[0];
-  if (!last) return { id, state: "todo", detail: `No smoketest tagged ${envs.map((e) => ENV_LABEL[e]).join(" or ")} yet`, events: [] };
+  if (!last) return { id, state: "todo", detail: `No smoketest tagged ${envs.map((e) => envLabel(e)).join(" or ")} yet`, events: [] };
   if (last.skippedAt) return { id, state: "skipped", detail: `Smoketest skipped ${last.skippedAt.slice(0, 10)}`, events: found };
   if (isSmoketestRunning(last)) return { id, state: "running", detail: `Smoketest running since ${utc(last.startedAt)}`, events: found };
   const when = (last.finishedAt ?? last.startedAt).slice(0, 10);
@@ -165,7 +187,7 @@ function smoketestStage(id: StageId, events: SdlcEvent[], envs: SdlcEnvironment[
 }
 
 function deployStage(id: StageId, events: SdlcEvent[], prs: PullRequest[], stage: "beta" | "prod"): Omit<Stage, "label"> {
-  const found = tagged(events, "deploy", STAGE_ENVS[stage]);
+  const found = tagged(events, "deploy", stageEnvironments(stage));
   // The newest deploy decides: a healthy check after an unhealthy one shows as done.
   if (found[0]) return { id, state: found[0].outcome === "unhealthy" ? "unhealthy" : "done", detail: (found[0].testDetails ?? "Deploy confirmed").split("\n")[0], events: found };
   const deployPrs = prs.filter((p) => deployStageOf(p) === stage);
@@ -175,7 +197,7 @@ function deployStage(id: StageId, events: SdlcEvent[], prs: PullRequest[], stage
   return { id, state: "todo", detail: open ? `Deploy PR #${open.number} is open` : "No confirmed deploy", events: [] };
 }
 
-/** "postman-eng/repo#12" from a PR URL. */
+/** "acme/repo#12" from a PR URL. */
 function prLabel(url: string): string {
   const m = url.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
   return m ? `${m[1]}#${m[2]}` : url;
@@ -210,15 +232,15 @@ export function sdlcProgress({ ticket, prs, events }: { ticket: Ticket; prs: Pul
       detail: firstPr ? `${firstPr.repo}#${firstPr.number} (${firstPr.state})${live.length > 1 ? ` and ${live.length - 1} more` : ""}` : "No open or merged PR found on GitHub",
       events: [],
     },
-    planStage("local_smoketest_plan", events, STAGE_ENVS.local),
-    smoketestStage("local_smoketest", events, STAGE_ENVS.local),
+    planStage("local_smoketest_plan", events, stageEnvironments("local")),
+    smoketestStage("local_smoketest", events, stageEnvironments("local")),
     reviewStage(ticket.key, events),
     deployStage("in_beta", events, prs, "beta"),
-    planStage("beta_smoketest_plan", events, STAGE_ENVS.beta),
-    smoketestStage("beta_smoketest", events, STAGE_ENVS.beta),
+    planStage("beta_smoketest_plan", events, stageEnvironments("beta")),
+    smoketestStage("beta_smoketest", events, stageEnvironments("beta")),
     deployStage("in_prod", events, prs, "prod"),
-    planStage("prod_smoketest_plan", events, STAGE_ENVS.prod),
-    smoketestStage("prod_smoketest", events, STAGE_ENVS.prod),
+    planStage("prod_smoketest_plan", events, stageEnvironments("prod")),
+    smoketestStage("prod_smoketest", events, stageEnvironments("prod")),
     { id: "done", state: ticket.statusCategory === "done" ? "done" : "todo", detail: `Jira status: ${ticket.status}`, events: [] },
   ];
   const stages: Stage[] = raw.map((s) => ({ ...s, label: STAGE_LABELS[s.id] }));
@@ -238,20 +260,16 @@ export function isPlanStage(id: StageId): boolean {
   return id.endsWith("_plan");
 }
 
-/** The environment that a smoketest stage, plan or execution, tests by default. */
-export const SMOKETEST_ENV: Partial<Record<StageId, SdlcEnvironment>> = {
-  local_smoketest_plan: "localhost",
-  local_smoketest: "localhost",
-  beta_smoketest_plan: "postman_beta",
-  beta_smoketest: "postman_beta",
-  prod_smoketest_plan: "postman_prod",
-  prod_smoketest: "postman_prod",
-};
+/** The environment that a smoketest stage, plan or execution, tests by default. Null: not a smoketest stage. */
+export function smoketestEnv(id: StageId): SdlcEnvironment | null {
+  const stage = (["local", "beta", "prod"] as const).find((x) => id === `${x}_smoketest_plan` || id === `${x}_smoketest`);
+  return stage ? stageEnvironments(stage)[0] : null;
+}
 
 /** The newest plan for the environments of a stage, so the execution stage can offer to run it. */
 export function newestPlan(events: SdlcEvent[], env: SdlcEnvironment): SdlcEvent | null {
-  const group = Object.values(STAGE_ENVS).find((envs) => envs.includes(env)) ?? [env];
-  return tagged(events, "smoketest_plan", group)[0] ?? null;
+  const stage = environments().find((e) => e.id === env)?.stage;
+  return tagged(events, "smoketest_plan", stage ? stageEnvironments(stage) : [env])[0] ?? null;
 }
 
 /** A row of the Smoketests card: one smoketest stage pair of the bar, and its events. */
@@ -280,10 +298,8 @@ const LANES: { id: SmoketestLane["id"]; label: string; plan: StageId; run: Stage
 export function smoketestLanes(p: SdlcProgress, events: SdlcEvent[]): SmoketestLane[] {
   const nextAt = p.next ? p.stages.indexOf(p.next) : p.stages.length;
   return LANES.map((l) => {
-    const all = STAGE_ENVS[l.id];
-    // The picker offers the enabled environments; old events on the others still show.
-    const on = all.filter((x) => team.environments.includes(x));
-    const envs = on.length ? on : all;
+    const all = stageEnvironments(l.id);
+    const envs = all;
     const at = p.stages.findIndex((s) => s.id === l.plan);
     const mine = newestFirst(events.filter((e) => (e.eventType === "smoketest_plan" || e.eventType === "smoketest_execution") && e.environments.some((x) => all.includes(x))));
     const emphasis = p.next?.id === l.plan || p.next?.id === l.run ? "next" : at > nextAt ? "later" : "none";
@@ -322,40 +338,37 @@ function recordCommand(script: string, key: string, type: "deploy", env: SdlcEnv
 
 /** The environments where a smoketest needs the user's confirmation before it changes state, in words. */
 export function sharedEnvs(): string {
-  const order: SdlcEnvironment[] = ["postman_beta", "postman_prod", "fern_dev", "fern_prod"];
-  const labels = order.filter((e) => team.environments.includes(e)).map((e) => ENV_LABEL[e]);
-  if (!labels.length) return "a shared environment";
+  const labels = environments().filter((e) => e.stage !== "local").map((e) => e.label);
   return labels.length > 1 ? `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}` : labels[0];
 }
 
 /** The environments that a smoketest can be planned or recorded on now. */
-export const enabledEnvironments = () => ENVIRONMENTS.filter((e) => team.environments.includes(e.id));
+export const enabledEnvironments = environments;
 
 function envNotes(env: SdlcEnvironment, guide: string): string {
-  const label = ENV_LABEL[env];
-  if (env === "localhost") return `${guide ? `Read ${guide} first, and pick` : "Pick"} the local stack that exercises this change.`;
-  if (env === "fern_dev") return `${label} is shared team infrastructure. The skill smoketest-happy-path-dev scripts the publish-docs flow.`;
-  const what = env === "postman_beta" ? "is shared team infrastructure" : "carries real customer traffic";
-  return `${label} ${what}. Find the deployed version first (read-only, for example in Argo CD), so you know what you test.`;
+  const e = environments().find((x) => x.id === env);
+  if (!e || e.stage === "local") return `${guide ? `Read ${guide} first, and pick` : "Pick"} the local stack that exercises this change.`;
+  const what = e.stage === "beta" ? "is shared team infrastructure" : "carries real customer traffic";
+  return `${e.label} ${what}. Find the deployed version first (read-only, for example in Argo CD), so you know what you test.`;
 }
 
 /**
  * The first message of an agent that plans one smoketest and records the plan. `script` is the
  * absolute path of scripts/sdlc-event.ts, so the agent writes into this dash's database.
  */
-/** `guide` is a file that a local plan reads first; empty for none. */
-export function planMessage(key: string, env: SdlcEnvironment, script: string, planId: number, guide = ""): string {
-  const label = ENV_LABEL[env];
+/** `guide` is a file that a local plan reads first, and `teamGuide` one that every plan reads first; empty for none. */
+export function planMessage(key: string, env: SdlcEnvironment, script: string, planId: number, guide = "", teamGuide = ""): string {
+  const label = envLabel(env);
   return `Plan a smoketest of ${key} on ${label}. Write the plan only: do not run the test yet.
 
-Work out from the context what the change does, and plan a test that shows that it works on ${label} from a user's point of view: the stack, URLs and versions, the steps, what you expect to see, and the evidence you will keep. ${envNotes(env, guide)}
+Work out from the context what the change does, and plan a test that shows that it works on ${label} from a user's point of view: the stack, URLs and versions, the steps, what you expect to see, and the evidence you will keep. ${teamGuide ? `First read ${teamGuide}: it has the team's rules for ${label}. ` : ""}${envNotes(env, guide)}
 
 While you plan, change no state on ${sharedEnvs()}: use read-only requests only. If the test must change state there (create or edit data, change a setting, deploy, sync), write each change in a state changes file: one line per change, with the system and the exact command or request. A change to local state only (a local database, local files) is not one of them.
 
 agent-dash shows this plan as in progress (SDLC event ${planId}) until you record it, with one of these:
 node ${script} plan --id ${planId} --summary "<plan summary>" --plan-file <file> --state-changes none
 node ${script} plan --id ${planId} --summary "<plan summary>" --writes-summary "<writes summary>" --plan-file <file> --state-changes-file <file>
-${User()} reads the two summaries first, at the top of the plan. The plan summary is one or two short sentences: what the test does and what it shows. The writes summary says, per environment, what the test writes there, in a few words, for example "Postman Beta: create one test project, then delete it". The files hold the details.
+${User()} reads the two summaries first, at the top of the plan. The plan summary is one or two short sentences: what the test does and what it shows. The writes summary says, per environment, what the test writes there, in a few words, for example "Beta: create one test project, then delete it". The files hold the details.
 Use the first command only when the test changes no state on ${sharedEnvs()}. agent-dash then accepts the plan at once, and the script tells you how to run it: run it in this turn. After the second command, ${user()} must confirm the plan in agent-dash first: reply with a short summary of the plan and its state changes, and stop. ${User()} can ask for changes in this conversation; record each new version with the same command. ${User()}'s confirmation comes as a message, and it is the approval to make the state changes that the plan lists.`;
 }
 
@@ -365,7 +378,7 @@ Use the first command only when the test changes no state on ${sharedEnvs()}. ag
  * and repeats the plan, because the message can go to a new agent.
  */
 export function executeMessage(key: string, env: SdlcEnvironment, script: string, executionId: number, plan: SdlcEvent): string {
-  const label = ENV_LABEL[env];
+  const label = envLabel(env);
   const byPerson = !!plan.confirmedBy && plan.confirmedBy !== "auto";
   const approval = byPerson
     ? `${User()} confirmed the smoketest plan of ${key} on ${label} (SDLC event ${plan.id}, the version recorded at ${plan.plannedAt}). This confirmation is ${user()}'s approval to make the state changes that the plan lists, and only those:
@@ -387,19 +400,21 @@ Run the plan now.${planText}
 
 agent-dash shows this smoketest as running (SDLC event ${executionId}) until you record the result:
 node ${script} finish --id ${executionId} --outcome passed|failed|blocked --summary "<one line>" --details-file <file> --results-file <file>
-Write the summary after the test is done: one line of at most 120 characters that says what the test showed, for example "Publish flow works end to end" or "Docs page 500s after publish: missing FDR token". The page shows only the outcome and this line until ${user()} clicks it. Use blocked, not failed, when you could not run the test or could not see the result (no access, no test data, the environment is down): failed means the change does not work. The details file says what you tested and how (stack, commands, URLs, versions). The results file says what you saw, with the evidence, or what blocked you. Then reply with the outcome and a short summary.`;
+Write the summary after the test is done: one line of at most 120 characters that says what the test showed, for example "Checkout flow works end to end" or "Order page 500s after checkout: missing API token". The page shows only the outcome and this line until ${user()} clicks it. Use blocked, not failed, when you could not run the test or could not see the result (no access, no test data, the environment is down): failed means the change does not work. The details file says what you tested and how (stack, commands, URLs, versions). The results file says what you saw, with the evidence, or what blocked you. Then reply with the outcome and a short summary.`;
 }
 
 /** The first message of an agent that confirms a deploy in Argo, read-only, and records it. */
-export function confirmDeployMessage(key: string, stage: "beta" | "prod", prUrls: string[], script: string): string {
-  const env: SdlcEnvironment = stage === "beta" ? "postman_beta" : "postman_prod";
-  const label = ENV_LABEL[env];
-  const prs = prUrls.length ? `The deploy PRs for ${key}: ${prUrls.map(clean).join(", ")}.` : `Find the deploy PR for ${key} in ${deployRepo(stage)}.`;
+/** `teamGuide` is a file with the team's deploy flow; empty for none. */
+export function confirmDeployMessage(key: string, stage: "beta" | "prod", prUrls: string[], script: string, teamGuide = ""): string {
+  const env = stageEnvironments(stage)[0];
+  const label = envLabel(env);
+  const repo = deployRepo(stage) || "the deploy repo";
+  const prs = prUrls.length ? `The deploy PRs for ${key}: ${prUrls.map(clean).join(", ")}.` : `Find the deploy PR for ${key} in ${repo}.`;
   return `Confirm that the change for ${key} is deployed to ${label}.
 
-${prs} Use Argo CD, read-only (the argocd CLI, or an argocd skill if you have one): find the Argo app that the deploy PR changes, and check that it is Synced and Healthy and runs the chart version or image from the PR. Do not sync, roll back, or change anything.
+${teamGuide ? `First read ${teamGuide}: it says how the team deploys to ${label}, and where. ` : ""}${prs} Use Argo CD, read-only (the argocd CLI, or an argocd skill if you have one): find the Argo app that the deploy PR changes, and check that it is Synced and Healthy and runs the chart version or image from the PR. Do not sync, roll back, or change anything.
 
-A deploy can have no PR: a build bot can commit the new chart version straight to ${deployRepo(stage)}. Look for that commit too. When the new version is committed but Argo does not run it yet, wait: check again for up to 15 minutes before you report that it is not deployed.
+A deploy can have no PR: a build bot can commit the new chart version straight to ${repo}. Look for that commit too. When the new version is committed but Argo does not run it yet, wait: check again for up to 15 minutes before you report that it is not deployed.
 
 If the deploy is confirmed, record it:
 ${recordCommand(script, key, "deploy", env)} --details "<Argo app>: Synced, Healthy, <version>"

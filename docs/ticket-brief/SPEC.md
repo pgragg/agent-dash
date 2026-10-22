@@ -9,7 +9,7 @@ Text fields take `` `code` `` and `**bold**`. No other markup, no HTML: the rend
 | Field | Type | Limits and meaning |
 |---|---|---|
 | `schema` | `"ticket-brief/1"` | E: required. This is how agent-dash knows the body is a brief |
-| `key` | string | The ticket key, such as `FSDK-2073`. `save` refuses a key that is not the document's ticket |
+| `key` | string | The ticket key, such as `ACME-2073`. `save` refuses a key that is not the document's ticket |
 | `title` | string | What the ticket does. W: over 90 characters |
 | `size` | `S` \| `M` \| `L` | Sets the word budget (900 / 1300 / 1600 visible words, W) and which sections belong (GUIDE.md, Sizing) |
 | `ask` | string | One sentence: `<verb> <thing> so that <why>`. W: more than one sentence |
@@ -51,7 +51,7 @@ Text fields take `` `code` `` and `**bold**`. No other markup, no HTML: the rend
 
 A view:
 
-- `hide`: the boxes that are not there in this view. The renderer works out the rest from the view before: a box that it hid shows **NEW** (green), a box that it showed and this view hides shows once more, faded, as **REMOVED**. `changed` marks a box **CHANGED** (amber). `notes` replaces a box's `sub` in this view only (`"lambda": "proxy mode: FDR_ORIGIN set"`).
+- `hide`: the boxes that are not there in this view. The renderer works out the rest from the view before: a box that it hid shows **NEW** (green), a box that it showed and this view hides shows once more, faded, as **REMOVED**. `changed` marks a box **CHANGED** (amber). `notes` replaces a box's `sub` in this view only (`"lambda": "proxy mode: HUB_ORIGIN set"`).
 - `edges`: `{from, to, label?, tone?}`. `tone`: `normal`, `bad` (red: what is broken), `new` (green: the new path), `dashed`. E: an end that is hidden. W: a label over 26 characters; W: a label that covers a box; W: a line that crosses a box and no curve can miss it; W: a visible box with no edge.
 - `pins`: `{node, text, fact?}[]`, at most 3 (E). Numbered red dots on the box, with the text listed under the map. W: the first view has none.
 - E: more than 8 visible boxes in one view; two visible boxes in one cell.

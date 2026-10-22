@@ -99,7 +99,7 @@ export function validateSdlcPlan(input: { plan?: unknown; stateChanges?: unknown
   const writesSummary = text(input.writesSummary, "writesSummary");
   // Writes named with "none" would skip Piper's Confirm.
   if (!stateChanges && writesSummary) throw new Error("--writes-summary names writes, but --state-changes is none: list the state changes in --state-changes-file, or drop --writes-summary");
-  if (stateChanges && !writesSummary) throw new Error('add --writes-summary: a short summary of the state changes, per environment, for example "Postman Beta: create one test project, then delete it"');
+  if (stateChanges && !writesSummary) throw new Error('add --writes-summary: a short summary of the state changes, per environment, for example "Beta: create one test project, then delete it"');
   if (writesSummary && writesSummary.length > PLAN_SUMMARY_MAX) throw new Error(`--writes-summary is longer than ${PLAN_SUMMARY_MAX} characters: the state changes file holds the details`);
   return { plan, stateChanges, plannedAt: now.toISOString(), summary, writesSummary };
 }

@@ -33,15 +33,15 @@ const run = async (id: number, body: unknown, headers: Record<string, string> = 
   return { code: res.status, body: (await res.json().catch(() => null)) as { error?: string; sessionId?: string } | null };
 };
 
-const newPlan = (sessionId: string | null, ticket: string) => db.addSdlcEvent({ eventType: "smoketest_plan", startedAt: new Date().toISOString(), environments: ["postman_beta"], tickets: [ticket], sessionId });
+const newPlan = (sessionId: string | null, ticket: string) => db.addSdlcEvent({ eventType: "smoketest_plan", startedAt: new Date().toISOString(), environments: ["beta"], tickets: [ticket], sessionId });
 
 test("Confirm approves the plan version on the page, and sends the run to the live planning agent", async () => {
   const p = newPlan("plan-live-1", "FSDK-80");
   assert.equal((await run(p.id, {}, {})).code, 403);
   assert.match((await run(p.id, {})).body!.error!, /not recorded the plan yet/);
 
-  const v1 = db.recordPlan(p.id, { plan: "1. Create a project", stateChanges: "POST /api/projects on Postman Beta", plannedAt: "2026-10-05T10:00:00.000Z" })!;
-  db.recordPlan(p.id, { plan: "1. Create a project\n2. Delete it", stateChanges: "POST and DELETE /api/projects on Postman Beta", plannedAt: "2026-10-05T10:05:00.000Z" });
+  const v1 = db.recordPlan(p.id, { plan: "1. Create a project", stateChanges: "POST /api/projects on Beta", plannedAt: "2026-10-05T10:00:00.000Z" })!;
+  db.recordPlan(p.id, { plan: "1. Create a project\n2. Delete it", stateChanges: "POST and DELETE /api/projects on Beta", plannedAt: "2026-10-05T10:05:00.000Z" });
   const stale = await run(p.id, { plannedAt: v1.plannedAt });
   assert.equal(stale.code, 409);
   assert.match(stale.body!.error!, /plan changed/);
@@ -55,8 +55,8 @@ test("Confirm approves the plan version on the page, and sends the run to the li
   assert.deepEqual([execution.planId, execution.sessionId, execution.finishedAt], [p.id, "plan-live-1", null]);
   const inbox = join(process.env.AGENT_DASH_INBOX_DIR!, "plan-live-1");
   const message = readFileSync(join(inbox, readdirSync(inbox).find((f) => f.endsWith(".txt"))!), "utf8");
-  assert.match(message, /Piper confirmed the smoketest plan of FSDK-80 on Postman Beta/);
-  assert.match(message, /and only those:\nPOST and DELETE \/api\/projects on Postman Beta/);
+  assert.match(message, /Piper confirmed the smoketest plan of FSDK-80 on Beta/);
+  assert.match(message, /and only those:\nPOST and DELETE \/api\/projects on Beta/);
   assert.match(message, new RegExp(`finish --id ${execution.id} `));
   assert.ok(changes > 0);
 
@@ -81,6 +81,6 @@ test("a note goes to the agent that runs the plan, after the run message", async
   assert.equal((await run(p.id, { plannedAt: "2026-10-05T11:00:00.000Z", note: "  Hard limits: do not post to Slack.  " })).code, 201);
   const inbox = join(process.env.AGENT_DASH_INBOX_DIR!, "plan-live-2");
   const message = readFileSync(join(inbox, readdirSync(inbox).find((f) => f.endsWith(".txt"))!), "utf8");
-  assert.match(message, /smoketest plan of FSDK-82 on Postman Beta/);
+  assert.match(message, /smoketest plan of FSDK-82 on Beta/);
   assert.ok(message.endsWith("\n\nHard limits: do not post to Slack."));
 });

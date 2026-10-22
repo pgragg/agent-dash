@@ -82,8 +82,8 @@ test("a plan is running while its agent writes it, waits when it changes Beta or
   // A running plan is not progress.
   assert.equal(p.stages[p.current].id, "pr");
 
-  const waiting = plan({ environments: ["postman_beta"], sessionId: "p-2", confirmedAt: null, confirmedBy: null, stateChanges: "POST /api/projects on Postman Beta" });
-  const w = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev({ eventType: "deploy", environments: ["postman_beta"] }), waiting] });
+  const waiting = plan({ environments: ["beta"], sessionId: "p-2", confirmedAt: null, confirmedBy: null, stateChanges: "POST /api/projects on Beta" });
+  const w = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev({ eventType: "deploy", environments: ["beta"] }), waiting] });
   assert.equal(states(w).beta_smoketest_plan, "waiting");
   assert.equal(w.next?.id, "beta_smoketest_plan");
   assert.match(w.hint!, /waits for your confirmation\. Read it, refine it in its conversation, then confirm it\./);
@@ -99,25 +99,25 @@ test("a plan is running while its agent writes it, waits when it changes Beta or
 });
 
 test("a later stage that is done marks the open stages before it as skipped, and the order goes on", () => {
-  const p = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev({ eventType: "deploy", environments: ["postman_beta"], testDetails: "Checked off by hand in agent-dash" })] });
+  const p = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev({ eventType: "deploy", environments: ["beta"], testDetails: "Checked off by hand in agent-dash" })] });
   assert.equal(states(p).local_smoketest, "skipped");
   assert.equal(states(p).in_beta, "done");
   assert.equal(p.stages[p.current].detail, "Checked off by hand in agent-dash");
   assert.equal(p.next?.id, "beta_smoketest_plan");
-  assert.match(p.hint!, /Plan a smoketest on Postman Beta before you open the prod chart version update PR/);
+  assert.match(p.hint!, /Plan a smoketest on Beta before you open the Prod deploy PR/);
 });
 
 test("an unhealthy deploy shows yellow, counts as reached, and a later healthy deploy makes it done", () => {
-  const sick = ev({ id: 50, eventType: "deploy", environments: ["postman_prod"], outcome: "unhealthy", testDetails: "IAM fix live; KEDA metrics cert expired", startedAt: "2026-10-07T10:00:00.000Z" });
+  const sick = ev({ id: 50, eventType: "deploy", environments: ["prod"], outcome: "unhealthy", testDetails: "IAM fix live; KEDA metrics cert expired", startedAt: "2026-10-07T10:00:00.000Z" });
   const p = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [sick] });
   assert.equal(states(p).in_prod, "unhealthy");
   assert.equal(p.stages[p.current].id, "in_prod");
   assert.equal(p.stages[p.current].detail, "IAM fix live; KEDA metrics cert expired");
   assert.match(progressLines(p).join("\n"), /\[~\] unhealthy In Prod/);
-  const healed = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [sick, ev({ id: 51, eventType: "deploy", environments: ["postman_prod"], startedAt: "2026-10-08T10:00:00.000Z" })] });
+  const healed = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [sick, ev({ id: 51, eventType: "deploy", environments: ["prod"], startedAt: "2026-10-08T10:00:00.000Z" })] });
   assert.equal(states(healed).in_prod, "done");
-  assert.equal(validateSdlcEvent({ eventType: "deploy", tickets: ["FSDK-1"], environments: ["postman_prod"], outcome: "unhealthy" }, PATTERN, new Date(NOW)).outcome, "unhealthy");
-  assert.throws(() => validateSdlcEvent({ eventType: "deploy", tickets: ["FSDK-1"], environments: ["postman_prod"], outcome: "failed" }, PATTERN), /unhealthy, or none/);
+  assert.equal(validateSdlcEvent({ eventType: "deploy", tickets: ["FSDK-1"], environments: ["prod"], outcome: "unhealthy" }, PATTERN, new Date(NOW)).outcome, "unhealthy");
+  assert.throws(() => validateSdlcEvent({ eventType: "deploy", tickets: ["FSDK-1"], environments: ["prod"], outcome: "failed" }, PATTERN), /unhealthy, or none/);
   assert.throws(() => validateSdlcEvent({ eventType: "smoketest_execution", tickets: ["FSDK-1"], environments: ["localhost"], outcome: "unhealthy" }, PATTERN), /passed, failed or blocked/);
 });
 
@@ -136,22 +136,22 @@ test("the newest smoketest decides: a failure shows red, a later pass makes it d
 });
 
 test("a blocked smoketest is not a failure and not progress: it shows grey and stays next", () => {
-  const blocked = ev({ outcome: "blocked", environments: ["postman_beta"], finishedAt: "2026-10-02T10:30:00.000Z" });
-  const p = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev({ eventType: "deploy", environments: ["postman_beta"] }), plan({ environments: ["postman_beta"] }), blocked] });
+  const blocked = ev({ outcome: "blocked", environments: ["beta"], finishedAt: "2026-10-02T10:30:00.000Z" });
+  const p = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev({ eventType: "deploy", environments: ["beta"] }), plan({ environments: ["beta"] }), blocked] });
   assert.equal(states(p).beta_smoketest, "blocked");
   assert.match(p.stages.find((s) => s.id === "beta_smoketest")!.detail, /was blocked \(2026-10-02\)/);
   assert.equal(p.next?.id, "beta_smoketest");
   assert.match(p.hint!, /was blocked\. Remove the blocker/);
-  const ran = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [blocked, ev({ environments: ["postman_beta"], startedAt: "2026-10-02T11:00:00.000Z" })] });
+  const ran = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [blocked, ev({ environments: ["beta"], startedAt: "2026-10-02T11:00:00.000Z" })] });
   assert.equal(states(ran).beta_smoketest, "done");
 });
 
-test("a merged deploy PR with no confirmed deploy waits for Argo; Fern Dev counts for Beta", () => {
-  const deploy = pr({ url: "https://github.com/postman-eng/cloud9-parcels-deployments/pull/7", repo: "postman-eng/cloud9-parcels-deployments", number: 7, state: "merged" });
+test("a merged deploy PR with no confirmed deploy waits for Argo; Staging counts for Beta", () => {
+  const deploy = pr({ url: "https://github.com/acme/deploy-beta/pull/7", repo: "acme/deploy-beta", number: 7, state: "merged" });
   const p = sdlcProgress({ ticket: ticket(), prs: [pr(), deploy], events: [ev(), ev({ eventType: "review_request", environments: [], prUrl: pr().url })] });
   assert.equal(states(p).in_beta, "waiting");
   assert.match(p.hint!, /Deploy PR #7 merged; confirm the deploy in Argo/);
-  const smoked = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev({ environments: ["fern_dev"] })] });
+  const smoked = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev({ environments: ["staging"] })] });
   assert.equal(states(smoked).beta_smoketest, "done");
   assert.equal(states(smoked).in_beta, "skipped");
 });
@@ -169,11 +169,11 @@ test("a skipped smoketest passes its stage on purpose, and a later run decides a
 test("after the local smoketest, the next stage is a review request; a posted one marks it done and names the PR", () => {
   const p = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev()] });
   assert.equal(p.next?.id, "review_requested");
-  assert.match(p.hint!, /#proj-fern-aws-migration-devs/);
-  const asked = ev({ eventType: "review_request", environments: [], outcome: null, prUrl: "https://github.com/postman-eng/cloud9-parcels-production-deployments/pull/13612", startedAt: "2026-10-05T15:10:00.000Z" });
+  assert.match(p.hint!, /#team-reviews/);
+  const asked = ev({ eventType: "review_request", environments: [], outcome: null, prUrl: "https://github.com/acme/deploy-prod/pull/13612", startedAt: "2026-10-05T15:10:00.000Z" });
   const done = sdlcProgress({ ticket: ticket(), prs: [pr()], events: [ev(), asked] });
   assert.equal(states(done).review_requested, "done");
-  assert.match(done.stages[done.current].detail, /cloud9-parcels-production-deployments#13612 on 2026-10-05/);
+  assert.match(done.stages[done.current].detail, /deploy-prod#13612 on 2026-10-05/);
   assert.equal(done.next?.id, "in_beta");
   // A review request is not a smoketest: the local stage still shows as skipped, not done.
   assert.equal(states(sdlcProgress({ ticket: ticket(), prs: [pr()], events: [asked] })).local_smoketest, "skipped");
@@ -201,25 +201,25 @@ test("a smoketest with a start and no end is running: the stage is yellow until 
 });
 
 test("an environment is an id or a label", () => {
-  assert.equal(parseEnvironment("postman_beta"), "postman_beta");
-  assert.equal(parseEnvironment("Postman Beta"), "postman_beta");
-  assert.equal(parseEnvironment("fern-prod"), "fern_prod");
-  assert.equal(parseEnvironment("staging"), null);
+  assert.equal(parseEnvironment("beta"), "beta");
+  assert.equal(parseEnvironment("Beta"), "beta");
+  assert.equal(parseEnvironment("Production"), "production");
+  assert.equal(parseEnvironment("eu-prod"), null);
 });
 
 test("an event links to each ticket and environment, newest first, and a delete removes its links", () => {
   const older = db.addSdlcEvent({ eventType: "smoketest_execution", startedAt: "2026-10-01T10:00:00.000Z", environments: ["localhost"], tickets: ["FSDK-20"] });
-  const newer = db.addSdlcEvent({ eventType: "smoketest_execution", startedAt: "2026-10-02T10:00:00.000Z", outcome: "failed", testDetails: "local FE", testResults: "500", environments: ["localhost", "postman_beta"], tickets: ["FSDK-20", "FSDK-21"] });
+  const newer = db.addSdlcEvent({ eventType: "smoketest_execution", startedAt: "2026-10-02T10:00:00.000Z", outcome: "failed", testDetails: "local FE", testResults: "500", environments: ["localhost", "beta"], tickets: ["FSDK-20", "FSDK-21"] });
   const by = db.sdlcEventsByTicket();
   assert.deepEqual(by["FSDK-20"].map((e) => e.id), [newer.id, older.id]);
   assert.deepEqual(by["FSDK-21"].map((e) => e.id), [newer.id]);
-  assert.deepEqual(newer.environments.sort(), ["localhost", "postman_beta"]);
+  assert.deepEqual(newer.environments.sort(), ["beta", "localhost"]);
   assert.equal(newer.outcome, "failed");
   assert.equal(newer.testResults, "500");
   assert.equal(db.deleteSdlcEvent(newer.id), true);
   assert.equal(db.sdlcEventsByTicket()["FSDK-21"], undefined);
   assert.equal(db.deleteSdlcEvent(newer.id), false);
-  const skip = db.addSdlcEvent({ eventType: "smoketest_execution", startedAt: "2026-10-02T12:00:00.000Z", skippedAt: "2026-10-02T12:00:00.000Z", environments: ["postman_beta"], tickets: ["FSDK-22"] });
+  const skip = db.addSdlcEvent({ eventType: "smoketest_execution", startedAt: "2026-10-02T12:00:00.000Z", skippedAt: "2026-10-02T12:00:00.000Z", environments: ["beta"], tickets: ["FSDK-22"] });
   assert.equal(db.sdlcEventsByTicket()["FSDK-22"][0].skippedAt, skip.skippedAt);
   assert.equal(skip.skippedAt, "2026-10-02T12:00:00.000Z");
   assert.equal(older.skippedAt, null);
@@ -244,7 +244,7 @@ INSERT INTO SDLC_Event (id, event_type, started_at, outcome, session_id, created
 INSERT INTO SDLC_Event_Ticket (sdlc_event_id, ticket, created_at) VALUES (7, 'FSDK-32', '2026-10-01T10:00:00.000Z');`);
   d.close();
   const script = new URL("../scripts/sdlc-event.ts", import.meta.url).pathname;
-  const out = JSON.parse(execFileSync("node", [script, "smoketest", "--ticket", "FSDK-32", "--env", "postman_beta", "--outcome", "blocked"], { env: { ...process.env, AGENT_DASH_DB: old } }).toString());
+  const out = JSON.parse(execFileSync("node", [script, "smoketest", "--ticket", "FSDK-32", "--env", "beta", "--outcome", "blocked"], { env: { ...process.env, AGENT_DASH_DB: old } }).toString());
   assert.equal(out.outcome, "blocked");
   assert.equal(out.id, 8);
   const rows = new DatabaseSync(old).prepare("SELECT e.id, e.outcome FROM SDLC_Event e JOIN SDLC_Event_Ticket t ON t.sdlc_event_id = e.id WHERE t.ticket = 'FSDK-32' ORDER BY e.id").all();
@@ -273,15 +273,15 @@ test("a review request has no environment, can have no ticket, and shows under i
 
 test("a new event is checked: a known type, real keys, known environments, and times in order", () => {
   const now = new Date(NOW);
-  const ok = validateSdlcEvent({ eventType: "smoketest_execution", tickets: ["FSDK-1"], environments: ["Postman Beta"] }, PATTERN, now);
+  const ok = validateSdlcEvent({ eventType: "smoketest_execution", tickets: ["FSDK-1"], environments: ["Beta"] }, PATTERN, now);
   assert.equal(ok.startedAt, now.toISOString());
-  assert.deepEqual(ok.environments, ["postman_beta"]);
+  assert.deepEqual(ok.environments, ["beta"]);
   assert.throws(() => validateSdlcEvent({ eventType: "review", tickets: ["FSDK-1"], environments: ["localhost"] }, PATTERN), /eventType/);
   // A plan comes only from the server, with the agent that writes it; "smoketest" is the script's word.
   assert.throws(() => validateSdlcEvent({ eventType: "smoketest_plan", tickets: ["FSDK-1"], environments: ["localhost"] }, PATTERN), /eventType/);
   assert.throws(() => validateSdlcEvent({ eventType: "smoketest", tickets: ["FSDK-1"], environments: ["localhost"] }, PATTERN), /eventType/);
   assert.throws(() => validateSdlcEvent({ eventType: "smoketest_execution", tickets: ["FSDK-1 OR 1=1"], environments: ["localhost"] }, PATTERN), /not a ticket key/);
-  assert.throws(() => validateSdlcEvent({ eventType: "smoketest_execution", tickets: ["FSDK-1"], environments: ["staging"] }, PATTERN), /unknown environment/);
+  assert.throws(() => validateSdlcEvent({ eventType: "smoketest_execution", tickets: ["FSDK-1"], environments: ["eu_prod"] }, PATTERN), /unknown environment/);
   assert.throws(() => validateSdlcEvent({ eventType: "smoketest_execution", tickets: ["FSDK-1"], environments: [] }, PATTERN), /at least one environment/);
   const skipped = validateSdlcEvent({ eventType: "smoketest_execution", tickets: ["FSDK-1"], environments: ["localhost"], skippedAt: new Date(NOW).toISOString() }, PATTERN, now);
   assert.equal(skipped.skippedAt, now.toISOString());
@@ -298,7 +298,7 @@ test("the script that agents call writes into the same database", () => {
   const results = join(dir, "results.md");
   writeFileSync(results, "All green.\n");
   const env = { ...process.env, AGENT_DASH_DB: dbPath };
-  const out = JSON.parse(execFileSync("node", [script, "smoketest", "--ticket", "FSDK-30", "--env", "Postman Prod", "--outcome", "passed", "--details", "GET /health", "--results-file", results], { env }).toString());
+  const out = JSON.parse(execFileSync("node", [script, "smoketest", "--ticket", "FSDK-30", "--env", "Prod", "--outcome", "passed", "--details", "GET /health", "--results-file", results], { env }).toString());
   assert.equal(out.eventType, "smoketest_execution");
   assert.equal(db.sdlcEventsByTicket()["FSDK-30"][0].testResults, "All green.");
   assert.throws(() => execFileSync("node", [script, "smoketest", "--ticket", "FSDK-30"], { env, stdio: "pipe" }));
@@ -307,10 +307,10 @@ test("the script that agents call writes into the same database", () => {
 test("an agent that agent-dash did not start records a plan with a ticket and an environment", () => {
   const script = new URL("../scripts/sdlc-event.ts", import.meta.url).pathname;
   const env = { ...process.env, AGENT_DASH_DB: dbPath, PI_SESSION_ID: "free-1" };
-  const out = execFileSync("node", [script, "plan", "--ticket", "FSDK-33", "--env", "Postman Beta", "--summary", "Publish on Beta", "--plan", "1. Publish.", "--state-changes", "POST /publish on Postman Beta", "--writes-summary", "Postman Beta: one site"], { env }).toString();
+  const out = execFileSync("node", [script, "plan", "--ticket", "FSDK-33", "--env", "Beta", "--summary", "Publish on Beta", "--plan", "1. Publish.", "--state-changes", "POST /publish on Beta", "--writes-summary", "Beta: one site"], { env }).toString();
   assert.match(out, /waits for Piper's confirmation/);
   const plan = db.sdlcEventsByTicket()["FSDK-33"][0];
-  assert.deepEqual([plan.eventType, plan.environments, plan.sessionId, plan.summary, plan.confirmedAt], ["smoketest_plan", ["postman_beta"], "free-1", "Publish on Beta", null]);
+  assert.deepEqual([plan.eventType, plan.environments, plan.sessionId, plan.summary, plan.confirmedAt], ["smoketest_plan", ["beta"], "free-1", "Publish on Beta", null]);
   // One ticket and one environment, and a real key.
   assert.throws(() => execFileSync("node", [script, "plan", "--ticket", "FSDK-33", "--summary", "x", "--plan", "y", "--state-changes", "none"], { env, stdio: "pipe" }));
   assert.throws(() => execFileSync("node", [script, "plan", "--ticket", "NOPE", "--env", "localhost", "--summary", "x", "--plan", "y", "--state-changes", "none"], { env, stdio: "pipe" }));
@@ -336,7 +336,7 @@ test("the agent finishes its running event once, with the script", () => {
   assert.throws(() => execFileSync("node", [script, "finish", "--id", String(other.id)], { env, stdio: "pipe" }));
   assert.throws(() => execFileSync("node", [script, "finish", "--id", "999999", "--outcome", "passed"], { env, stdio: "pipe" }));
   assert.throws(() => execFileSync("node", [script, "finish", "--outcome", "passed"], { env, stdio: "pipe" }));
-  const deploy = db.addSdlcEvent({ eventType: "deploy", startedAt: "2026-10-02T10:00:00.000Z", environments: ["postman_beta"], tickets: ["FSDK-31"] });
+  const deploy = db.addSdlcEvent({ eventType: "deploy", startedAt: "2026-10-02T10:00:00.000Z", environments: ["beta"], tickets: ["FSDK-31"] });
   assert.throws(() => execFileSync("node", [script, "finish", "--id", String(deploy.id), "--outcome", "passed"], { env, stdio: "pipe" }));
 });
 
@@ -348,23 +348,26 @@ test("verb messages name the environment and the record command; the summary pro
   assert.match(m, /node \/dash\/scripts\/sdlc-event\.ts plan --id 12 --summary "<plan summary>" --plan-file <file> --state-changes none/);
   assert.match(m, /--writes-summary "<writes summary>" --plan-file <file> --state-changes-file <file>/);
   assert.match(m, /--state-changes-file <file>/);
-  assert.match(m, /change no state on Postman Beta, Postman Prod, Fern Dev and Fern Prod/);
-  assert.match(planMessage("FSDK-1", "postman_prod", "/s", 1), /real customer traffic/);
-  const confirmed = plan({ id: 40, confirmedBy: "octocat", stateChanges: "POST /api/projects on Postman Beta", testDetails: "1. Create a project." });
-  const run = executeMessage("FSDK-1", "postman_beta", "/s", 41, confirmed);
-  assert.match(run, /Piper confirmed the smoketest plan of FSDK-1 on Postman Beta \(SDLC event 40, the version recorded at 2026-10-02T09:10:00\.000Z\)/);
-  assert.match(run, /approval to make the state changes that the plan lists, and only those:\nPOST \/api\/projects on Postman Beta/);
+  assert.match(m, /change no state on Beta, Staging, Prod and Production/);
+  assert.match(planMessage("FSDK-1", "prod", "/s", 1), /real customer traffic/);
+  assert.match(planMessage("FSDK-1", "staging", "/s", 1, "", "/notes/team.md"), /First read \/notes\/team\.md: it has the team's rules for Staging\./);
+  assert.doesNotMatch(planMessage("FSDK-1", "staging", "/s", 1), /First read/);
+  assert.match(confirmDeployMessage("FSDK-1", "prod", [], "/s", "/notes/team.md"), /First read \/notes\/team\.md: it says how the team deploys to Prod/);
+  const confirmed = plan({ id: 40, confirmedBy: "octocat", stateChanges: "POST /api/projects on Beta", testDetails: "1. Create a project." });
+  const run = executeMessage("FSDK-1", "beta", "/s", 41, confirmed);
+  assert.match(run, /Piper confirmed the smoketest plan of FSDK-1 on Beta \(SDLC event 40, the version recorded at 2026-10-02T09:10:00\.000Z\)/);
+  assert.match(run, /approval to make the state changes that the plan lists, and only those:\nPOST \/api\/projects on Beta/);
   assert.match(run, /<plan>\n1\. Create a project\.\n<\/plan>/);
   assert.match(run, /node \/s finish --id 41 --outcome passed\|failed\|blocked/);
   const auto = executeMessage("FSDK-1", "localhost", "/s", 42, plan({ id: 39 }));
   assert.match(auto, /accepted the smoketest plan of FSDK-1 on localhost \(SDLC event 39\), because it changes no state/);
   assert.doesNotMatch(auto, /<plan>/);
   // Two agents once ran the same plan on shared Beta at the same time.
-  assert.match(run, /check the context for another agent that works on this smoketest of FSDK-1 on Postman Beta\. If one does, do not run the plan/);
+  assert.match(run, /check the context for another agent that works on this smoketest of FSDK-1 on Beta\. If one does, do not run the plan/);
   assert.match(run, /--summary "<one line>"/);
-  const c = confirmDeployMessage("FSDK-1", "beta", ["https://github.com/postman-eng/cloud9-parcels-deployments/pull/7"], "/s");
+  const c = confirmDeployMessage("FSDK-1", "beta", ["https://github.com/acme/deploy-beta/pull/7"], "/s");
   assert.match(c, /Do not sync, roll back, or change anything/);
-  assert.match(c, /deploy --ticket FSDK-1 --env postman_beta/);
+  assert.match(c, /deploy --ticket FSDK-1 --env beta/);
   assert.match(c, /--outcome unhealthy/);
   // A bot commit with no PR is a deploy too, and a render takes minutes.
   assert.match(c, /A deploy can have no PR/);
@@ -383,7 +386,7 @@ test("a new event starts one next-steps draft per ticket on the board, and repla
   db.claimNewEventTickets(); // the events of the tests above
   db.createRequest("FSDK-40", new Date(Date.now() - 60_000));
   db.addSdlcEvent({ eventType: "smoketest_execution", startedAt: "2026-10-02T10:00:00.000Z", environments: ["localhost"], tickets: ["FSDK-40", "FSDK-41"] });
-  db.addSdlcEvent({ eventType: "deploy", startedAt: "2026-10-02T11:00:00.000Z", environments: ["postman_beta"], tickets: ["FSDK-40"] });
+  db.addSdlcEvent({ eventType: "deploy", startedAt: "2026-10-02T11:00:00.000Z", environments: ["beta"], tickets: ["FSDK-40"] });
   const calls: { key: string; force?: boolean }[] = [];
   const start = async (g: { ticket: { key: string } }, opts?: { force?: boolean }) => (calls.push({ key: g.ticket.key, force: opts?.force }), {} as db.SummaryRecord);
   const groups = [{ ticket: ticket({ key: "FSDK-40" }), runs: [], prs: [] }];
@@ -444,7 +447,7 @@ INSERT INTO SDLC_Event (id, event_type, started_at, outcome, created_at) VALUES 
 INSERT INTO SDLC_Event_Ticket (sdlc_event_id, ticket, created_at, summary_requested_at) VALUES (3, 'FSDK-90', 't', 't'), (4, 'FSDK-90', 't', 't');`);
   d.close();
   const script = new URL("../scripts/sdlc-event.ts", import.meta.url).pathname;
-  execFileSync("node", [script, "deploy", "--ticket", "FSDK-91", "--env", "postman_beta"], { env: { ...process.env, AGENT_DASH_DB: old } });
+  execFileSync("node", [script, "deploy", "--ticket", "FSDK-91", "--env", "beta"], { env: { ...process.env, AGENT_DASH_DB: old } });
   const after = new DatabaseSync(old);
   assert.deepEqual(after.prepare("SELECT id, event_type AS t FROM SDLC_Event WHERE id IN (3, 4) ORDER BY id").all().map((r) => [r.id, r.t]), [[3, "smoketest_execution"], [4, "deploy"]]);
   // The rename is in the copy, not an UPDATE, so the change trigger does not ask for a draft per ticket.
@@ -460,15 +463,32 @@ test("a database whose confirmed_by takes only 'piper' is copied into one that t
 INSERT INTO SDLC_Event (id, event_type, started_at, created_at, confirmed_by) VALUES (7, 'smoketest_plan', 't', 't', 'piper');`);
   d.close();
   const script = new URL("../scripts/sdlc-event.ts", import.meta.url).pathname;
-  execFileSync("node", [script, "deploy", "--ticket", "FSDK-92", "--env", "postman_beta"], { env: { ...process.env, AGENT_DASH_DB: old } });
+  execFileSync("node", [script, "deploy", "--ticket", "FSDK-92", "--env", "beta"], { env: { ...process.env, AGENT_DASH_DB: old } });
   const after = new DatabaseSync(old);
   assert.equal(after.prepare("SELECT confirmed_by AS by FROM SDLC_Event WHERE id = 7").get()!.by, "piper");
   after.prepare("UPDATE SDLC_Event SET confirmed_by = 'pgragg' WHERE id = 7").run();
   assert.equal(after.prepare("SELECT confirmed_by AS by FROM SDLC_Event WHERE id = 7").get()!.by, "pgragg");
 });
 
+test("an environment table that takes only a fixed list is copied into one that takes any id, with its rows", () => {
+  const old = join(dir, "old-environments.db");
+  const d = new DatabaseSync(old);
+  d.exec(`CREATE TABLE SDLC_Event (id INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT NOT NULL CHECK (event_type IN ('smoketest_plan', 'smoketest_execution', 'deploy', 'review_request')), started_at TEXT NOT NULL, finished_at TEXT, outcome TEXT CHECK (outcome IN ('passed', 'failed', 'blocked')), test_details TEXT, test_results TEXT, session_id TEXT, skipped_at TEXT, created_at TEXT NOT NULL, summary TEXT, pr_url TEXT, channel TEXT, message TEXT, message_url TEXT, planned_at TEXT, state_changes TEXT, writes_summary TEXT, confirmed_at TEXT, confirmed_by TEXT CHECK (confirmed_by IN ('piper', 'auto')), plan_id INTEGER REFERENCES SDLC_Event (id));
+CREATE TABLE SDLC_Event_Environment (sdlc_event_id INTEGER NOT NULL REFERENCES SDLC_Event (id), environment TEXT NOT NULL CHECK (environment IN ('localhost', 'beta', 'prod')), PRIMARY KEY (sdlc_event_id, environment));
+INSERT INTO SDLC_Event (id, event_type, started_at, created_at) VALUES (7, 'deploy', 't', 't');
+INSERT INTO SDLC_Event_Environment (sdlc_event_id, environment) VALUES (7, 'beta');`);
+  d.close();
+  const script = new URL("../scripts/sdlc-event.ts", import.meta.url).pathname;
+  execFileSync("node", [script, "deploy", "--ticket", "FSDK-93", "--env", "staging"], { env: { ...process.env, AGENT_DASH_DB: old } });
+  const after = new DatabaseSync(old);
+  const rows = after.prepare("SELECT sdlc_event_id AS id, environment AS env FROM SDLC_Event_Environment ORDER BY sdlc_event_id").all() as { id: number; env: string }[];
+  assert.deepEqual(rows.map((r) => r.env), ["beta", "staging"]);
+  assert.equal(rows[0].id, 7);
+  assert.throws(() => after.prepare("INSERT INTO SDLC_Event_Environment (sdlc_event_id, environment) VALUES (7, '')").run(), /CHECK/);
+});
+
 test("a plan with no Beta or Prod state changes is accepted when it is recorded; any other waits for Piper's exact version", () => {
-  const p = db.addSdlcEvent({ eventType: "smoketest_plan", startedAt: new Date().toISOString(), environments: ["postman_beta"], tickets: ["FSDK-70"], sessionId: "plan-70" });
+  const p = db.addSdlcEvent({ eventType: "smoketest_plan", startedAt: new Date().toISOString(), environments: ["beta"], tickets: ["FSDK-70"], sessionId: "plan-70" });
   assert.equal(p.plannedAt, null);
   const v1 = db.recordPlan(p.id, { plan: "1. Create a project", stateChanges: "POST /projects on Beta", plannedAt: "2026-10-05T10:00:00.000Z" })!;
   assert.deepEqual([v1.testDetails, v1.stateChanges, v1.confirmedAt], ["1. Create a project", "POST /projects on Beta", null]);
@@ -487,7 +507,7 @@ test("a plan with no Beta or Prod state changes is accepted when it is recorded;
   const auto = db.recordPlan(local.id, { plan: "1. pnpm dev", stateChanges: null, plannedAt: "2026-10-05T11:00:00.000Z" })!;
   assert.deepEqual([auto.confirmedBy, auto.confirmedAt], ["auto", "2026-10-05T11:00:00.000Z"]);
   // A deploy is not a plan.
-  const deploy = db.addSdlcEvent({ eventType: "deploy", startedAt: new Date().toISOString(), environments: ["postman_beta"], tickets: ["FSDK-70"] });
+  const deploy = db.addSdlcEvent({ eventType: "deploy", startedAt: new Date().toISOString(), environments: ["beta"], tickets: ["FSDK-70"] });
   assert.equal(db.recordPlan(deploy.id, { plan: "x", stateChanges: null, plannedAt: "t" }), null);
 });
 
@@ -503,15 +523,15 @@ test("the plan text and the state changes are checked; none means no state chang
   const s = { summary: "Load the page" };
   assert.equal(validateSdlcPlan({ plan: "x", stateChanges: "None", ...s }).stateChanges, null);
   assert.equal(validateSdlcPlan({ plan: "x", stateChanges: "", ...s }).stateChanges, null);
-  const beta = validateSdlcPlan({ plan: "x", stateChanges: "POST /a on Beta\n", summary: " Load the page ", writesSummary: "Postman Beta: one project" });
-  assert.deepEqual([beta.stateChanges, beta.summary, beta.writesSummary], ["POST /a on Beta", "Load the page", "Postman Beta: one project"]);
+  const beta = validateSdlcPlan({ plan: "x", stateChanges: "POST /a on Beta\n", summary: " Load the page ", writesSummary: "Beta: one project" });
+  assert.deepEqual([beta.stateChanges, beta.summary, beta.writesSummary], ["POST /a on Beta", "Load the page", "Beta: one project"]);
   assert.throws(() => validateSdlcPlan({ plan: " ", stateChanges: "none", ...s }), /empty/);
   assert.throws(() => validateSdlcPlan({ plan: "x", ...s }), /none/);
   // Piper reads the summaries first, so a plan without them is refused.
   assert.throws(() => validateSdlcPlan({ plan: "x", stateChanges: "none" }), /--summary/);
   assert.throws(() => validateSdlcPlan({ plan: "x", stateChanges: "POST /a on Beta", ...s }), /--writes-summary/);
   // Writes named with "none" would skip the Confirm.
-  assert.throws(() => validateSdlcPlan({ plan: "x", stateChanges: "none", writesSummary: "Postman Beta: one project", ...s }), /--state-changes is none/);
+  assert.throws(() => validateSdlcPlan({ plan: "x", stateChanges: "none", writesSummary: "Beta: one project", ...s }), /--state-changes is none/);
   assert.throws(() => validateSdlcPlan({ plan: "x", stateChanges: "none", summary: "y".repeat(501) }), /longer than 500/);
 });
 
@@ -528,11 +548,11 @@ test("the agent records its plan with the script: no state changes runs at once,
   assert.deepEqual([db.getSdlcEvent(local.id)!.testDetails, db.getSdlcEvent(local.id)!.summary], ["1. Open the docs page.", "Open the docs page"]);
 
   const changes = join(dir, "changes.md");
-  writeFileSync(changes, "POST /api/projects on Postman Beta\n");
-  const beta = db.addSdlcEvent({ eventType: "smoketest_plan", startedAt: new Date().toISOString(), environments: ["postman_beta"], tickets: ["FSDK-73"], sessionId: "plan-74" });
-  const wait = execFileSync("node", [script, "plan", "--id", String(beta.id), "--summary", "Make a project", "--writes-summary", "Postman Beta: one project", "--plan-file", planFile, "--state-changes-file", changes], { env }).toString();
+  writeFileSync(changes, "POST /api/projects on Beta\n");
+  const beta = db.addSdlcEvent({ eventType: "smoketest_plan", startedAt: new Date().toISOString(), environments: ["beta"], tickets: ["FSDK-73"], sessionId: "plan-74" });
+  const wait = execFileSync("node", [script, "plan", "--id", String(beta.id), "--summary", "Make a project", "--writes-summary", "Beta: one project", "--plan-file", planFile, "--state-changes-file", changes], { env }).toString();
   assert.match(wait, /waits for Piper's confirmation/);
-  assert.equal(db.getSdlcEvent(beta.id)!.writesSummary, "Postman Beta: one project");
+  assert.equal(db.getSdlcEvent(beta.id)!.writesSummary, "Beta: one project");
   assert.equal(db.sdlcEventsByTicket()["FSDK-73"].filter((e) => e.eventType === "smoketest_execution").length, 0);
   // No state changes named at all is refused, and so is a plan that is already accepted.
   assert.throws(() => execFileSync("node", [script, "plan", "--id", String(beta.id), "--plan-file", planFile], { env, stdio: "pipe" }));
@@ -551,20 +571,20 @@ test("the Smoketests card has one lane per stage pair, and the bar's next stage 
   const events = [
     plan({ id: 901 }),
     ev({ id: 902, startedAt: "2026-10-02T10:00:00.000Z" }),
-    plan({ id: 903, environments: ["fern_dev"], confirmedBy: "octocat" }),
-    ev({ id: 904, environments: ["fern_dev"], outcome: "failed", startedAt: "2026-10-02T11:00:00.000Z" }),
-    ev({ id: 905, environments: ["fern_dev"], outcome: "blocked", startedAt: "2026-10-02T12:00:00.000Z" }),
-    plan({ id: 906, environments: ["postman_prod"], confirmedAt: null, confirmedBy: null, stateChanges: "merge #1" }),
-    ev({ id: 907, eventType: "deploy", environments: ["fern_dev"], outcome: null }),
+    plan({ id: 903, environments: ["staging"], confirmedBy: "octocat" }),
+    ev({ id: 904, environments: ["staging"], outcome: "failed", startedAt: "2026-10-02T11:00:00.000Z" }),
+    ev({ id: 905, environments: ["staging"], outcome: "blocked", startedAt: "2026-10-02T12:00:00.000Z" }),
+    plan({ id: 906, environments: ["prod"], confirmedAt: null, confirmedBy: null, stateChanges: "merge #1" }),
+    ev({ id: 907, eventType: "deploy", environments: ["staging"], outcome: null }),
   ];
   const p = sdlcProgress({ ticket: ticket(), prs: [pr()], events });
   const [local, beta, prod] = smoketestLanes(p, events);
   assert.deepEqual([local.emphasis, beta.emphasis, prod.emphasis], ["none", "next", "later"]);
   assert.deepEqual([beta.plan.state, beta.run.state, prod.plan.state], ["done", "blocked", "waiting"]);
   // The newest event's environment, not the stage default, and deploys are not smoketests.
-  assert.equal(beta.env, "fern_dev");
+  assert.equal(beta.env, "staging");
   assert.deepEqual(beta.events.map((e) => e.id), [905, 904, 903]);
   assert.deepEqual(beta.runs.map((e) => e.id), [904, 905]);
-  assert.equal(prod.env, "postman_prod");
-  assert.equal(smoketestLanes(sdlcProgress({ ticket: ticket(), prs: [], events: [] }), []).find((l) => l.id === "beta")?.env, "postman_beta");
+  assert.equal(prod.env, "prod");
+  assert.equal(smoketestLanes(sdlcProgress({ ticket: ticket(), prs: [], events: [] }), []).find((l) => l.id === "beta")?.env, "beta");
 });

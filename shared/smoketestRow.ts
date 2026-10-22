@@ -1,12 +1,10 @@
-import { isPlanRunning, isPlanWaiting, isSmoketestRunning } from "./sdlc.ts";
-import type { SdlcEnvironment, SdlcEvent } from "./types.ts";
+import { envLabel, isPlanRunning, isPlanWaiting, isSmoketestRunning } from "./sdlc.ts";
+import type { SdlcEvent } from "./types.ts";
 
 /**
  * A waiting agent that agent-dash started for a smoketest plan or run shows as that smoketest
  * in the why list: the smoketest is what Piper acts on. Kept free of React so the tests can import it.
  */
-
-const ENV_SHORT: Record<SdlcEnvironment, string> = { localhost: "Localhost", fern_dev: "Fern Dev", fern_prod: "Fern Prod", postman_beta: "Beta", postman_prod: "Prod" };
 
 export interface SmoketestRow {
   /** The plan or execution that the agent works on: the newest one with its session. */
@@ -32,7 +30,8 @@ export function smoketestRow(sessionId: string | undefined, events: SdlcEvent[],
   const mine = events.filter((e) => e.sessionId === sessionId && (e.eventType === "smoketest_plan" || e.eventType === "smoketest_execution")).sort((a, b) => b.id - a.id);
   const event = mine[0];
   if (!event) return null;
-  const env = ENV_SHORT[event.environments[0]] ?? "Smoketest";
+  const first = event.environments[0];
+  const env = first === "localhost" ? "Localhost" : first ? envLabel(first) : "Smoketest";
   const plan = event.eventType === "smoketest_plan" ? event : (events.find((e) => e.id === event.planId) ?? null);
   const waits = agent.asked ? "the agent asked you a question" : "the agent waits for you";
   const reply = (what: string): SmoketestRow => ({ event, plan, title: `${env} ${what}: ${waits}`, status: agent.asked ? "question" : "waiting", tone: "waiting", detail: null, action: "reply", needsYou: true });

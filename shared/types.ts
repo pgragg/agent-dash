@@ -409,8 +409,11 @@ export interface TicketGroup {
   threads: Record<string, ThreadStatusChange>;
 }
 
-/** An environment under test. A tag names what the event tested, not every system it touched. */
-export type SdlcEnvironment = "localhost" | "fern_dev" | "fern_prod" | "postman_beta" | "postman_prod";
+/**
+ * An environment under test: "localhost", or the id of a shared environment from the `environments`
+ * setting. A tag names what the event tested, not every system it touched.
+ */
+export type SdlcEnvironment = string;
 
 /**
  * A smoketest has two phases: an agent writes a plan ("smoketest_plan"), then runs it ("smoketest_execution").

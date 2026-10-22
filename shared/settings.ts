@@ -54,6 +54,7 @@ export interface Settings extends Team {
   slackWorkspaceUrl: string;
   slackReloginCommand: string;
   smoketestGuide: string;
+  teamGuide: string;
   /** The local Obsidian vault that the Wiki view reads. Empty turns the view off. */
   wikiDir: string;
   /**
@@ -97,7 +98,7 @@ export const DEFAULT_SETTINGS: Settings = {
   model: "",
   opencodeDb: "~/.local/share/opencode/opencode.db",
   recentDays: 14,
-  jiraServer: "https://postmanlabs.atlassian.net",
+  jiraServer: "",
   jiraLogin: "",
   jiraTokenFile: "",
   jiraExcludeProjects: [],
@@ -106,10 +107,11 @@ export const DEFAULT_SETTINGS: Settings = {
   localTicketsDir: "",
   piAuth: "",
   slackStateFile: "",
-  slackOrgId: "E071JP7HM0C",
-  slackWorkspaceUrl: "https://postman.enterprise.slack.com",
+  slackOrgId: "",
+  slackWorkspaceUrl: "",
   slackReloginCommand: "",
   smoketestGuide: "",
+  teamGuide: "",
   wikiDir: "",
   ticketProviders: [],
 };
@@ -180,13 +182,13 @@ export const SETTING_FIELDS: SettingField[] = [
   {
     key: "jiraServer", group: "Jira", label: "Jira server", kind: "url", env: "JIRA_SERVER",
     help: "The Jira site that holds your tickets. Empty turns Jira off.",
-    example: "https://postmanlabs.atlassian.net",
+    example: "https://acme.atlassian.net",
     find: "The start of a Jira ticket link, up to `.net`. With jira-cli, the `server:` line of `~/.config/.jira/.config.yml`.",
   },
   {
     key: "jiraLogin", group: "Jira", label: "Jira login", kind: "text", env: "JIRA_LOGIN",
     help: "The email of your Atlassian account.",
-    example: "sam@postman.com",
+    example: "sam@acme.com",
     find: "Your work email: `git config --global user.email`, or the `login:` line of `~/.config/.jira/.config.yml`.",
   },
   {
@@ -198,19 +200,19 @@ export const SETTING_FIELDS: SettingField[] = [
   {
     key: "jiraExcludeProjects", group: "Jira", label: "Projects to leave out", kind: "list", pattern: PROJECT, env: "AGENT_DASH_EXCLUDE_PROJECTS",
     help: "Jira projects whose tickets do not show, for example a deprecated mirror.",
-    example: "FSM",
-    find: "Usually empty. Add a project whose open tickets are copies of tickets in another project, such as FSM (mirrored into FSDK).",
+    example: "OLD",
+    find: "Usually empty. Add a project whose open tickets are copies of tickets in another project, such as OLD (mirrored into ABC).",
   },
   {
     key: "ticketProjects", group: "Tickets", label: "Ticket projects", kind: "list", pattern: PROJECT, env: "AGENT_DASH_PROJECTS",
     help: "Key prefixes that link a run or PR to a ticket, for example ABC for ABC-123.",
-    example: "FSDK, EFSUP",
+    example: "ABC, OPS",
     find: "The prefixes of the open Jira tickets assigned to you: `jira issue list -a\"$(jira me)\" --plain --no-headers --columns key`, or a GET of `<Jira server>/rest/api/3/search/jql?jql=assignee=currentUser()+AND+statusCategory!=Done&fields=key` with the login and token. Also the keys in your branch names: `gh search prs --author @me --limit 50 --json title`.",
   },
   {
     key: "ignoreTickets", group: "Tickets", label: "Keys to ignore", kind: "list", pattern: /^[A-Z][A-Z0-9]*-\d+$/, env: "AGENT_DASH_IGNORE_TICKETS",
     help: "Real keys that code uses as sample data. They never link.",
-    example: "FSDK-1",
+    example: "ABC-1",
     find: "Usually empty. Add a key that shows up in many unrelated runs because code or docs use it as an example.",
   },
   {
@@ -234,7 +236,7 @@ export const SETTING_FIELDS: SettingField[] = [
   {
     key: "reviewRoutes", group: "Reviews", label: "Review channels per ticket prefix", kind: "list", pattern: REVIEW_ROUTE,
     help: "PREFIX:channel-name=CHANNELID, and optionally :group-handle=SUBTEAMID to tag a Slack user group. A PR whose ticket has the prefix asks for review there; the other PRs use the review channel.",
-    example: "FERNDOC:doc-gen=C05E0S0A9SN:docs-eng=S07LA27DLQK",
+    example: "DOCS:docs-review=C0123456789:docs-team=S0123456789",
     find: "Usually empty. Ask the user which ticket prefixes another team reviews, and where. The channel id is at the bottom of the channel's About tab. The group id is the S… in `<!subteam^S…>` of a message that tags the group: search the channel for the handle with the Slack MCP.",
   },
   {
@@ -245,15 +247,15 @@ export const SETTING_FIELDS: SettingField[] = [
   },
   {
     key: "deployRepoBeta", group: "Deploys", label: "Beta deploy repo", kind: "text", pattern: REPO,
-    help: "A merged PR in this owner/repo deploys to Beta.",
-    example: "postman-eng/cloud9-parcels-deployments",
-    find: "Keep the default for Postman services. Elsewhere, ask the user's team where Beta deploy PRs go.",
+    help: "A merged PR in this owner/repo deploys to Beta. Empty: no PR counts as a Beta deploy.",
+    example: "acme/deploy-beta",
+    find: "Usually empty. Ask the user's team where Beta deploy PRs go, if they deploy with a GitOps repo.",
   },
   {
     key: "deployRepoProd", group: "Deploys", label: "Prod deploy repo", kind: "text", pattern: REPO,
-    help: "A merged PR in this owner/repo deploys to Prod.",
-    example: "postman-eng/cloud9-parcels-production-deployments",
-    find: "Keep the default for Postman services. Elsewhere, ask the user's team where Prod deploy PRs go.",
+    help: "A merged PR in this owner/repo deploys to Prod. Empty: no PR counts as a Prod deploy.",
+    example: "acme/deploy-prod",
+    find: "Usually empty. Ask the user's team where Prod deploy PRs go, if they deploy with a GitOps repo.",
   },
   {
     key: "piAuth", group: "Logins", label: "pi-auth binary", kind: "path", env: "AGENT_DASH_PI_AUTH",
@@ -270,14 +272,14 @@ export const SETTING_FIELDS: SettingField[] = [
   {
     key: "slackOrgId", group: "Slack", label: "Slack org or team id", kind: "text", pattern: /^[ET][A-Z0-9]+$/,
     help: "An Enterprise Grid org id (E…) searches every workspace. Empty uses the first logged-in team.",
-    example: "E071JP7HM0C",
-    find: "Keep the default at Postman. Elsewhere, the E… or T… part of the address when Slack is open in a browser: `https://app.slack.com/client/<id>/…`.",
+    example: "E0123ABCD",
+    find: "The E… or T… part of the address when Slack is open in a browser: `https://app.slack.com/client/<id>/…`.",
   },
   {
     key: "slackWorkspaceUrl", group: "Slack", label: "Slack workspace URL", kind: "url",
     help: "Makes a permalink when Slack does not return one.",
-    example: "https://postman.enterprise.slack.com",
-    find: "Keep the default at Postman. Elsewhere, the address of Slack in a browser, up to `.com`.",
+    example: "https://acme.slack.com",
+    find: "The address of Slack in a browser, up to `.com`.",
   },
   {
     key: "slackReloginCommand", group: "Slack", label: "Slack sign-in command", kind: "text",
@@ -286,16 +288,28 @@ export const SETTING_FIELDS: SettingField[] = [
     find: "Usually empty. The command that signs the pi-mcp-adapter `slack` server in again, if the user has one.",
   },
   {
-    key: "environments", group: "Smoketests", label: "Environments", kind: "list", pattern: /^(localhost|postman_beta|postman_prod|fern_dev|fern_prod)$/,
-    help: "Where a smoketest can run: localhost, postman_beta, postman_prod, fern_dev, fern_prod.",
-    example: "localhost, postman_beta, postman_prod",
-    find: "Keep the default for Postman services. Add fern_dev and fern_prod for work on Fern's own stack.",
+    key: "environments", group: "Smoketests", label: "Environments", kind: "list", pattern: /^(localhost|(beta|prod):[a-z][a-z0-9_]*)$/,
+    help: "The shared environments where a smoketest can run, as stage:id. The stage is beta or prod; the page shows the id as its label (staging is Staging). localhost is always there. Empty: one beta and one prod.",
+    example: "beta:staging, prod:production",
+    find: "Usually empty. Ask the user which shared environments their team tests on before and after a release, and give each a short id.",
+  },
+  {
+    key: "autoRunEnvironments", group: "Smoketests", label: "Environments that Move things along may run on", kind: "list", pattern: /^[a-z][a-z0-9_]*$/,
+    help: "Ids of shared environments where the Move things along agent may confirm and run a smoketest plan without you. It may always run on localhost.",
+    example: "staging",
+    find: "Keep the default (beta), or the id of the user's own Beta environment. Ask the user before you add a prod environment.",
   },
   {
     key: "smoketestGuide", group: "Smoketests", label: "Local smoketest guide", kind: "path",
     help: "A file that a local smoketest plan reads first.",
     example: "~/notes/local-smoketesting.md",
     find: "Usually empty. A markdown file that tells how to run your services locally, if the user keeps one.",
+  },
+  {
+    key: "teamGuide", group: "Smoketests", label: "Team guide", kind: "path",
+    help: "A private markdown file with your team's environments, deploy flow, and test and tracker rules. Agents that plan a smoketest, confirm a deploy or draft next steps read it first. Keep company details here, not in agent-dash.",
+    example: "~/notes/team-guide.md",
+    find: "Usually empty. Ask the user if they keep notes on how their team deploys and tests, for example in an Obsidian vault.",
   },
   {
     key: "wikiDir", group: "Wiki", label: "Wiki folder", kind: "path", env: "AGENT_DASH_WIKI_DIR",

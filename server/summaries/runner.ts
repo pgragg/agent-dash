@@ -3,7 +3,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { mergePrs, progressLines, sdlcProgress } from "../../shared/sdlc.ts";
+import { environments, mergePrs, progressLines, sdlcProgress } from "../../shared/sdlc.ts";
 import type { Note, PullRequest, Run, SdlcEvent, ThreadStatusChange, Ticket } from "../../shared/types.ts";
 import { summaryCommand } from "../agent.ts";
 import { config } from "../config.ts";
@@ -122,11 +122,12 @@ RULES
 - Read-only. Do not write to the ticket tracker, GitHub, Slack, or any repo: no comments, transitions, reviews, messages, reactions, commits, or pushes.
 - Spend at most 10 minutes. If a source fails, skip it and note it under "Gaps".
 - ${User()}'s private notes (in the context file) are the most trusted source: when a newer note disagrees with an older source, follow the note. They are private, so never copy them anywhere outside the summary.
-- Follow the SDLC order in the context file's "SDLC progress": PR, local test plan, local smoketest, review requested, in Beta, Beta test plan, Beta smoketest, in Prod, Prod test plan, Prod smoketest, Done. A local smoketest comes before a PR review request, and a Beta smoketest comes before the prod chart version update deploy PR. Each smoketest starts with a plan: an agent that ${user()} starts from agent-dash writes it, and a plan that changes Beta or Prod state waits for ${user()} to confirm it in agent-dash. When the next stage is the review request, one step must say that ${user()} posts the drafted review request from agent-dash's PRs view. When the next stage is a test plan, one step must say to plan a smoketest from agent-dash and name the environment (localhost, Postman Beta, or Postman Prod). When the next stage is a test plan that waits, one step must say that ${user()} reads the plan and confirms it in agent-dash. When the next stage is a blocked smoketest, one step must say what blocks it and how to remove the blocker. ${User()} can skip a stage: never plan a step for a stage that shows as skipped.
+- Follow the SDLC order in the context file's "SDLC progress": PR, local test plan, local smoketest, review requested, in Beta, Beta test plan, Beta smoketest, in Prod, Prod test plan, Prod smoketest, Done. A local smoketest comes before a PR review request, and a Beta smoketest comes before the Prod deploy PR. Each smoketest starts with a plan: an agent that ${user()} starts from agent-dash writes it, and a plan that changes Beta or Prod state waits for ${user()} to confirm it in agent-dash. When the next stage is the review request, one step must say that ${user()} posts the drafted review request from agent-dash's PRs view. When the next stage is a test plan, one step must say to plan a smoketest from agent-dash and name the environment (${environments().map((e) => e.label).join(", ")}). When the next stage is a test plan that waits, one step must say that ${user()} reads the plan and confirms it in agent-dash. When the next stage is a blocked smoketest, one step must say what blocks it and how to remove the blocker. ${User()} can skip a stage: never plan a step for a stage that shows as skipped.
 
 STEPS
 1. Read ${contextFile}. agent-dash already put ${user()}'s private notes, the ticket fields, linked PRs, and digests of the agent sessions about ${key} in it.
-${ticketStep}
+${ticketStep}${config.teamGuide ? `
+   Also read ${config.teamGuide}: the team's environments, deploy flow, and test and tracker rules. Follow it when a step is about a deploy, a smoketest or a ticket move.` : ""}
 3. For each open PR, and each PR merged in the last 7 days, read CI and review comments:
    gh pr view <url> --comments
 4. Slack, read-only. Search with this script only; do not drive the Slack UI:

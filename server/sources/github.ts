@@ -170,7 +170,7 @@ export function fetchMyPrs(sinceDays: number, ticketPattern: RegExp): Promise<Pu
  * recent PRs, so an old merged PR or a deploy PR by someone else would be missing from it.
  */
 export async function fetchTicketPrs(key: string, ticketPattern: RegExp): Promise<PullRequest[]> {
-  // Search matches words, so FSDK-12 would also find FSDK-123; keep only exact keys.
+  // Search matches words, so ABC-12 would also find ABC-123; keep only exact keys.
   // No feedback fields: the SDLC bar does not read them, and they are most of the search's cost.
   return (await searchPrs(`is:pr in:title "${key}"`, ticketPattern, false)).filter((p) => p.tickets.includes(key));
 }

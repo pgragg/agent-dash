@@ -15,7 +15,7 @@ export interface ReviewChannel {
 /** The team's review channel from the settings, or null when review requests are off. */
 export const reviewChannel = (): ReviewChannel | null => (team.reviewChannelId ? { id: team.reviewChannelId, name: team.reviewChannelName || team.reviewChannelId } : null);
 
-/** One `reviewRoutes` entry: `FERNDOC:doc-gen=C05E0S0A9SN:docs-eng=S07LA27DLQK`. The group part is optional. */
+/** One `reviewRoutes` entry: `DOCS:docs-review=C0123456789:docs-team=S0123456789`. The group part is optional. */
 export const REVIEW_ROUTE = /^([A-Z][A-Z0-9]*):([a-z0-9_-]+)=([CG][A-Z0-9]{6,})(?::([a-z0-9._-]+)=(S[A-Z0-9]{6,}))?$/;
 
 /**
@@ -37,7 +37,7 @@ export function slackText(channel: ReviewChannel, text: string): string {
   return `<!subteam^${channel.group.id}> ${text}`;
 }
 
-/** "#doc-gen" or "#doc-gen, tags @docs-eng", as the page shows the target. */
+/** "#docs-review" or "#docs-review, tags @docs-team", as the page shows the target. */
 export const channelLabel = (c: ReviewChannel): string => `#${c.name}${c.group ? `, tags @${c.group.handle}` : ""}`;
 
 /** A repo in noReviewRepos has no reviewer, so a Slack review request has no reader. */
@@ -79,8 +79,8 @@ Rules: one line, at most 12 words, plain text, no link, no ticket key, no quotes
 Examples of good phrases:
 - bind slack token env vars
 - add the agent Auth0 client and encryption key so automations run
-- return required field from FDR to fix fai-chat bug
-- skip migrations on FDR, Venus, and Fern Dashboard in prod
+- return the required field from the API to fix the chat bug
+- skip migrations on the API, the worker, and the dashboard in prod
 
 The PR:
 Repo: ${pr.repo}
