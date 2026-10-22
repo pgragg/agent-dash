@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { headlessCommand, installPiExtension } from "../server/agent.ts";
+import { headlessCommand, installPiExtension, installSkills } from "../server/agent.ts";
 import { readSettingsFile, saveSettingsPatch } from "../server/config.ts";
 import { handle, SAVE_SCRIPT, setupMessage } from "../server/routes/setup.ts";
 import { SessionIndex } from "../server/sources/sessions.ts";
@@ -111,4 +111,17 @@ test("starting the setup agent needs the header and a known agent", async () => 
   const res = await fetch(base, { method: "POST", headers: { "X-Agent-Dash": "1" }, body: JSON.stringify({ agent: "codex" }) });
   assert.equal(res.status, 400);
   assert.match((await res.json()).error, /pi, claude or opencode/);
+});
+
+test("each shipped skill links once, and a skill that is not agent-dash's stays", () => {
+  const target = join(dir, "skills");
+  mkdirSync(join(target, "domain-doc"), { recursive: true });
+  writeFileSync(join(target, "domain-doc", "SKILL.md"), "mine");
+  const first = installSkills(target);
+  assert.match(first, /Installed: .*skills\/agent-dash -> .*skills\/agent-dash/);
+  assert.match(first, /Skipped: .*domain-doc exists/);
+  assert.equal(readFileSync(join(target, "domain-doc", "SKILL.md"), "utf8"), "mine");
+  assert.ok(existsSync(join(target, "agent-dash", "SKILL.md")));
+  assert.match(installSkills(target), /Already installed: .*agent-dash/);
+  assert.match(installSkills(null), /skipped/);
 });

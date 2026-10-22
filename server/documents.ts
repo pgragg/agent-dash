@@ -13,6 +13,9 @@ export const DOCUMENT_TYPES: DocumentType[] = ["document", "ticket-summary"];
 /** Images are rows of their own, so a body this long is a mistake, not a document. */
 export const MAX_BODY = 200_000;
 
+/** How to write a domain doc: the marks, the registry, the layout and the lint. */
+export const DOMAIN_GUIDE = new URL("../skills/domain-doc/SKILL.md", import.meta.url).pathname;
+
 /** Agents lint, save and export ticket briefs with this script. */
 export const BRIEF_SCRIPT = new URL("../scripts/brief.ts", import.meta.url).pathname;
 /** How to write a brief: the workflow, the research lanes, the visual rules and the review. */
@@ -63,7 +66,7 @@ Do not post to Jira or Slack. ${User()} copies the TL;DR (node ${script} tldr --
 const RULES = `The document is markdown. Draw diagrams in \`\`\`mermaid fences. To embed a PNG, SVG, JPEG, GIF or WebP image, write ![alt](<path to the file>): the save stores a copy of the file in agent-dash and writes ![alt](image:<n>) in its place. Keep each ![alt](image:<n>) that is already there, unless the request is to remove it.`;
 
 /** The first message of an agent that changes one document in place. A brief gets the brief tools: it is JSON, not markdown. */
-export function editMessage(doc: { id: number; title: string; ticket: string | null; brief?: boolean }, prompt: string, script = DOCUMENT_SCRIPT, briefScript = BRIEF_SCRIPT, pageUrl?: string): string {
+export function editMessage(doc: { id: number; title: string; ticket: string | null; brief?: boolean; domain?: boolean }, prompt: string, script = DOCUMENT_SCRIPT, briefScript = BRIEF_SCRIPT, pageUrl?: string): string {
   const head = `Edit agent-dash document ${doc.id}, "${doc.title}"${doc.ticket ? ` on ${doc.ticket}` : ""}, as ${User()} asks:
 
 <request>
@@ -82,7 +85,7 @@ agent-dash shows the document as being edited until you save it. Then reply: fir
   return `${head}
 Write the current document to a file, and read it:
 node ${script} show --id ${doc.id} > ${file}
-Change it as asked. Then save the whole new version in place of the old one, with the same id:
+${doc.domain ? `This is a domain doc: its \`\`\`domain fence is the registry of its marks. Read ${DOMAIN_GUIDE} first, mark each new noun, and lint until it is clean: node ${script} lint --file ${file}\n` : ""}Change it as asked. Then save the whole new version in place of the old one, with the same id:
 node ${script} save --id ${doc.id} --file ${file} [--title "<new title>"]
 agent-dash shows the document as being edited until you save it. ${RULES}
 Then reply with one or two sentences on what you changed, and stop.`;
