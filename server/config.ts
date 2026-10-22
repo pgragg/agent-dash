@@ -171,6 +171,8 @@ export function buildConfig(s: Settings) {
       reloginCommand: s.slackReloginCommand,
     },
     smoketestGuide: expandPath(s.smoketestGuide),
+    /** A private file of team knowledge that deploy, smoketest and next-steps agents read first. */
+    teamGuide: expandPath(s.teamGuide),
     /** The local Obsidian vault of the Wiki view; empty turns it off. */
     wikiDir: expandPath(s.wikiDir),
     /** Runs and PRs older than this do not create "other ticket" groups or unlinked rows. */

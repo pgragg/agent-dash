@@ -356,12 +356,12 @@ function envNotes(env: SdlcEnvironment, guide: string): string {
  * The first message of an agent that plans one smoketest and records the plan. `script` is the
  * absolute path of scripts/sdlc-event.ts, so the agent writes into this dash's database.
  */
-/** `guide` is a file that a local plan reads first; empty for none. */
-export function planMessage(key: string, env: SdlcEnvironment, script: string, planId: number, guide = ""): string {
+/** `guide` is a file that a local plan reads first, and `teamGuide` one that every plan reads first; empty for none. */
+export function planMessage(key: string, env: SdlcEnvironment, script: string, planId: number, guide = "", teamGuide = ""): string {
   const label = envLabel(env);
   return `Plan a smoketest of ${key} on ${label}. Write the plan only: do not run the test yet.
 
-Work out from the context what the change does, and plan a test that shows that it works on ${label} from a user's point of view: the stack, URLs and versions, the steps, what you expect to see, and the evidence you will keep. ${envNotes(env, guide)}
+Work out from the context what the change does, and plan a test that shows that it works on ${label} from a user's point of view: the stack, URLs and versions, the steps, what you expect to see, and the evidence you will keep. ${teamGuide ? `First read ${teamGuide}: it has the team's rules for ${label}. ` : ""}${envNotes(env, guide)}
 
 While you plan, change no state on ${sharedEnvs()}: use read-only requests only. If the test must change state there (create or edit data, change a setting, deploy, sync), write each change in a state changes file: one line per change, with the system and the exact command or request. A change to local state only (a local database, local files) is not one of them.
 
@@ -404,14 +404,15 @@ Write the summary after the test is done: one line of at most 120 characters tha
 }
 
 /** The first message of an agent that confirms a deploy in Argo, read-only, and records it. */
-export function confirmDeployMessage(key: string, stage: "beta" | "prod", prUrls: string[], script: string): string {
+/** `teamGuide` is a file with the team's deploy flow; empty for none. */
+export function confirmDeployMessage(key: string, stage: "beta" | "prod", prUrls: string[], script: string, teamGuide = ""): string {
   const env = stageEnvironments(stage)[0];
   const label = envLabel(env);
   const repo = deployRepo(stage) || "the deploy repo";
   const prs = prUrls.length ? `The deploy PRs for ${key}: ${prUrls.map(clean).join(", ")}.` : `Find the deploy PR for ${key} in ${repo}.`;
   return `Confirm that the change for ${key} is deployed to ${label}.
 
-${prs} Use Argo CD, read-only (the argocd CLI, or an argocd skill if you have one): find the Argo app that the deploy PR changes, and check that it is Synced and Healthy and runs the chart version or image from the PR. Do not sync, roll back, or change anything.
+${teamGuide ? `First read ${teamGuide}: it says how the team deploys to ${label}, and where. ` : ""}${prs} Use Argo CD, read-only (the argocd CLI, or an argocd skill if you have one): find the Argo app that the deploy PR changes, and check that it is Synced and Healthy and runs the chart version or image from the PR. Do not sync, roll back, or change anything.
 
 A deploy can have no PR: a build bot can commit the new chart version straight to ${repo}. Look for that commit too. When the new version is committed but Argo does not run it yet, wait: check again for up to 15 minutes before you report that it is not deployed.
 

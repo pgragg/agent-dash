@@ -350,6 +350,9 @@ test("verb messages name the environment and the record command; the summary pro
   assert.match(m, /--state-changes-file <file>/);
   assert.match(m, /change no state on Beta, Staging, Prod and Production/);
   assert.match(planMessage("FSDK-1", "prod", "/s", 1), /real customer traffic/);
+  assert.match(planMessage("FSDK-1", "staging", "/s", 1, "", "/notes/team.md"), /First read \/notes\/team\.md: it has the team's rules for Staging\./);
+  assert.doesNotMatch(planMessage("FSDK-1", "staging", "/s", 1), /First read/);
+  assert.match(confirmDeployMessage("FSDK-1", "prod", [], "/s", "/notes/team.md"), /First read \/notes\/team\.md: it says how the team deploys to Prod/);
   const confirmed = plan({ id: 40, confirmedBy: "octocat", stateChanges: "POST /api/projects on Beta", testDetails: "1. Create a project." });
   const run = executeMessage("FSDK-1", "beta", "/s", 41, confirmed);
   assert.match(run, /Piper confirmed the smoketest plan of FSDK-1 on Beta \(SDLC event 40, the version recorded at 2026-10-02T09:10:00\.000Z\)/);

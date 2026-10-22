@@ -9,7 +9,7 @@ A domain doc teaches a newcomer a part of the system by inspection. The reader s
 
 agent-dash renders this. Other markdown viewers show the marks as plain code, so the source stays readable.
 
-Example: the registry below comes from a domain doc on docs-site RBAC. If your dashboard already has a domain doc, read it before your first doc:
+Example: the registry below comes from a domain doc on docs-site RBAC. If your dashboard already has a domain doc, read it before your first doc (the `teamGuide` file in the agent-dash settings can name one):
 `node ~/02_programming/agent-dash/scripts/document.ts show --id N`
 
 ## The marks

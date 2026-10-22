@@ -54,6 +54,7 @@ export interface Settings extends Team {
   slackWorkspaceUrl: string;
   slackReloginCommand: string;
   smoketestGuide: string;
+  teamGuide: string;
   /** The local Obsidian vault that the Wiki view reads. Empty turns the view off. */
   wikiDir: string;
   /**
@@ -110,6 +111,7 @@ export const DEFAULT_SETTINGS: Settings = {
   slackWorkspaceUrl: "",
   slackReloginCommand: "",
   smoketestGuide: "",
+  teamGuide: "",
   wikiDir: "",
   ticketProviders: [],
 };
@@ -302,6 +304,12 @@ export const SETTING_FIELDS: SettingField[] = [
     help: "A file that a local smoketest plan reads first.",
     example: "~/notes/local-smoketesting.md",
     find: "Usually empty. A markdown file that tells how to run your services locally, if the user keeps one.",
+  },
+  {
+    key: "teamGuide", group: "Smoketests", label: "Team guide", kind: "path",
+    help: "A private markdown file with your team's environments, deploy flow, and test and tracker rules. Agents that plan a smoketest, confirm a deploy or draft next steps read it first. Keep company details here, not in agent-dash.",
+    example: "~/notes/team-guide.md",
+    find: "Usually empty. Ask the user if they keep notes on how their team deploys and tests, for example in an Obsidian vault.",
   },
   {
     key: "wikiDir", group: "Wiki", label: "Wiki folder", kind: "path", env: "AGENT_DASH_WIKI_DIR",

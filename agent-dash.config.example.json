@@ -24,5 +24,6 @@
   "slackReloginCommand": "",
   "environments": ["beta:staging", "prod:production"],
   "autoRunEnvironments": ["staging"],
-  "smoketestGuide": ""
+  "smoketestGuide": "",
+  "teamGuide": ""
 }

@@ -666,6 +666,7 @@ No setting has a company default: set your Jira server, login and token file, ti
 | Shared environments that a smoketest can run on, as `stage:id` (for example `beta:staging, prod:production`). localhost is always there | `environments` | | none: one `beta` and one `prod` |
 | Shared environments where **Move things along** may confirm and run a plan without you | `autoRunEnvironments` | | `beta` |
 | Local smoketest guide, read first by a local plan | `smoketestGuide` | | none |
+| Team guide: a private file with your team's environments, deploy flow, and test and tracker rules. Smoketest plans, deploy checks and next-steps drafts read it first, so company details stay out of agent-dash | `teamGuide` | | none |
 | Wiki folder: a local Obsidian vault for the Wiki view | `wikiDir` | `AGENT_DASH_WIKI_DIR` | none (the view is off) |
 
 ### Ticket providers
