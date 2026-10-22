@@ -2,6 +2,7 @@
   "name": "agent-dash",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "Local dashboard that shows which agent runs need your attention, grouped by your Jira tickets",
   "type": "module",
   "engines": {
