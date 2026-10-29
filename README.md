@@ -651,6 +651,7 @@ No setting has a company default: set your Jira server, login and token file, ti
 | The `--model` of the pi and Claude Code runs and summaries that the dash starts. `AGENT_DASH_SUMMARY_MODEL` wins for summaries | `model` | `AGENT_DASH_MODEL` | none: the agent's default |
 | OpenCode database | `opencodeDb` | `AGENT_DASH_OPENCODE_DB` | `~/.local/share/opencode/opencode.db` |
 | Recent days | `recentDays` | `AGENT_DASH_RECENT_DAYS` | `14` |
+| Repos where GitHub search does not find your PRs (some internal repos); the dash lists their recent PRs instead | `prRepos` | | none |
 | Jira server | `jiraServer` | `JIRA_SERVER` | none: Jira is off. Jira is also off until the login is set. |
 | Jira login | `jiraLogin` | `JIRA_LOGIN` | none |
 | Jira token file (a `JIRA_API_TOKEN=…` line) | `jiraTokenFile` | `AGENT_DASH_JIRA_ENV`; `JIRA_API_TOKEN` wins over the file | none |

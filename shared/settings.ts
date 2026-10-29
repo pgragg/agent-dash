@@ -41,6 +41,8 @@ export interface Settings extends Team {
   model: string;
   opencodeDb: string;
   recentDays: number;
+  /** owner/repo of repos that GitHub search does not index; the dash lists their PRs instead. */
+  prRepos: string[];
   jiraServer: string;
   jiraLogin: string;
   jiraTokenFile: string;
@@ -98,6 +100,7 @@ export const DEFAULT_SETTINGS: Settings = {
   model: "",
   opencodeDb: "~/.local/share/opencode/opencode.db",
   recentDays: 14,
+  prRepos: [],
   jiraServer: "",
   jiraLogin: "",
   jiraTokenFile: "",
@@ -178,6 +181,12 @@ export const SETTING_FIELDS: SettingField[] = [
     help: "Runs and PRs older than this do not make groups of their own.",
     example: "14",
     find: "Keep 14. A smaller number gives a shorter board.",
+  },
+  {
+    key: "prRepos", group: "Server", label: "Repos that search skips", kind: "list", pattern: REPO,
+    help: "owner/repo of repos where GitHub search does not find your PRs. The dash lists each one's recent PRs instead, which is slower.",
+    example: "acme/internal-app",
+    find: "Usually empty. A repo belongs here when `gh pr list -R <repo> --author @me` prints [] but you have PRs there.",
   },
   {
     key: "jiraServer", group: "Jira", label: "Jira server", kind: "url", env: "JIRA_SERVER",

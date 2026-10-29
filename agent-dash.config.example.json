@@ -5,6 +5,7 @@
   "sessionsDir": "~/.pi/agent/sessions",
   "claudeProjectsDir": "~/.claude/projects",
   "recentDays": 14,
+  "prRepos": [],
   "jiraServer": "https://acme.atlassian.net",
   "jiraLogin": "sam@acme.com",
   "jiraTokenFile": "~/.config/agent-dash/jira.env",
