@@ -177,6 +177,7 @@ export function buildConfig(s: Settings) {
     wikiDir: expandPath(s.wikiDir),
     /** Runs and PRs older than this do not create "other ticket" groups or unlinked rows. */
     recentDays: s.recentDays,
+    prRepos: s.prRepos,
     /** Remote tracker and GitHub answers are cached this long, so a page refresh does not hit the APIs. */
     remoteTtlMs: Number(env.AGENT_DASH_REMOTE_TTL_MS ?? 120_000),
   };

@@ -155,7 +155,7 @@ function providerHealth(s: ProviderState): SourceHealth {
   if (!s.mine) return { ...s.readHealth, label };
   return { ...(!s.mine.health.ok || s.othersHealth.ok ? s.mine.health : s.othersHealth), label };
 }
-const prs = new Cached<PullWithFeedback[]>([], () => fetchMyPrs(config.recentDays, config.ticketPattern), join(config.cacheDir, "prs.json"));
+const prs = new Cached<PullWithFeedback[]>([], () => fetchMyPrs(config.recentDays, config.ticketPattern, config.prRepos), join(config.cacheDir, "prs.json"));
 /** Force a refresh of GitHub data after login. */
 export const refreshGitHub = () => prs.get(true);
 /** Can the slack MCP grant post? Its own child process, so a slow Slack never holds up a build. */

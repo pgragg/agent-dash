@@ -103,44 +103,87 @@ export function feedbackOf(n: any): Omit<FeedbackSource, "addressed"> {
   };
 }
 
+/** One GraphQL call. gh exits 1 on partial errors (e.g. SAML) but still returns valid data; use it if present. */
+async function graphql(query: string, vars: string[]): Promise<any> {
+  const { stdout, stderr, code } = await run("gh", ["api", "graphql", "-f", `query=${query}`, ...vars], { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 });
+  let json: any = null;
+  try {
+    json = stdout ? JSON.parse(stdout) : null;
+  } catch {
+    // An HTML error page; stderr holds gh's "HTTP 502" line.
+  }
+  if (!json?.data) throw new Error(`gh api graphql failed: ${stderr.trim().split("\n").at(-1) || `exit ${code}`}`);
+  return json.data;
+}
+
+function toPull(n: any, ticketPattern: RegExp, withFeedback: boolean): PullWithFeedback {
+  return {
+    url: n.url,
+    repo: n.repository.nameWithOwner,
+    number: n.number,
+    title: n.title,
+    state: n.state === "MERGED" ? "merged" : n.state === "CLOSED" ? "closed" : "open",
+    isDraft: n.isDraft,
+    headRef: n.headRefName,
+    reviewDecision: n.reviewDecision ?? null,
+    checks: checkState(n.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state),
+    failedChecks: failedCheckNames(n.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts?.nodes ?? []),
+    mergeable: n.mergeable ?? "UNKNOWN",
+    mergeStateStatus: n.mergeStateStatus ?? "UNKNOWN",
+    updatedAt: n.updatedAt,
+    tickets: extractTickets(`${n.title} ${n.headRefName}`, ticketPattern),
+    ...(withFeedback && n.state === "OPEN" ? { feedback: feedbackOf(n) } : {}),
+  };
+}
+
 async function searchPrs(q: string, ticketPattern: RegExp, withFeedback: boolean): Promise<PullWithFeedback[]> {
   const query = searchQuery(withFeedback ? `${PR_FIELDS}\n        ${FEEDBACK_FIELDS}` : PR_FIELDS);
   const nodes: any[] = [];
   let after: string | null = null;
   do {
-    const cursor: string[] = after ? ["-f", `after=${after}`] : [];
-    const { stdout, stderr, code } = await run("gh", ["api", "graphql", "-f", `query=${query}`, "-f", `q=${q}`, ...cursor], { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 });
-    // gh exits 1 on partial errors (e.g. SAML) but still returns valid data; use it if present.
-    let json: any = null;
-    try {
-      json = stdout ? JSON.parse(stdout) : null;
-    } catch {
-      // An HTML error page; stderr holds gh's "HTTP 502" line.
-    }
-    const search = json?.data?.search;
-    if (!search?.nodes) throw new Error(`gh api graphql failed: ${stderr.trim().split("\n").at(-1) || `exit ${code}`}`);
+    const search: any = (await graphql(query, ["-f", `q=${q}`, ...(after ? ["-f", `after=${after}`] : [])])).search;
+    if (!search?.nodes) throw new Error("gh api graphql failed: no search in the answer");
     nodes.push(...search.nodes);
     after = search.pageInfo?.hasNextPage ? search.pageInfo.endCursor : null;
   } while (after && nodes.length < MAX_RESULTS);
-  return nodes
-    .filter((n) => n?.url)
-    .map((n) => ({
-      url: n.url,
-      repo: n.repository.nameWithOwner,
-      number: n.number,
-      title: n.title,
-      state: n.state === "MERGED" ? "merged" : n.state === "CLOSED" ? "closed" : "open",
-      isDraft: n.isDraft,
-      headRef: n.headRefName,
-      reviewDecision: n.reviewDecision ?? null,
-      checks: checkState(n.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state),
-      failedChecks: failedCheckNames(n.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts?.nodes ?? []),
-      mergeable: n.mergeable ?? "UNKNOWN",
-      mergeStateStatus: n.mergeStateStatus ?? "UNKNOWN",
-      updatedAt: n.updatedAt,
-      tickets: extractTickets(`${n.title} ${n.headRefName}`, ticketPattern),
-      ...(withFeedback && n.state === "OPEN" ? { feedback: feedbackOf(n) } : {}),
-    }));
+  return nodes.filter((n) => n?.url).map((n) => toPull(n, ticketPattern, withFeedback));
+}
+
+const REPO_PAGE = `query($owner: String!, $name: String!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(first: 100, after: $after, orderBy: { field: UPDATED_AT, direction: DESC }) {
+      pageInfo { hasNextPage endCursor }
+      nodes { id updatedAt author { login } }
+    }
+  }
+}`;
+
+/** A busy repo has about 600 PRs in 14 days; stop at 2000 so one repo cannot run for minutes. */
+const MAX_REPO_PAGES = 20;
+
+/**
+ * My PRs in a repo that GitHub search does not index (search returns nothing for some INTERNAL
+ * repos, even with access). List the repo by update time with few fields, then read mine in full.
+ */
+async function repoPrs(repo: string, me: string, since: string, ticketPattern: RegExp): Promise<PullWithFeedback[]> {
+  const [owner, name] = repo.split("/");
+  const ids: string[] = [];
+  let after: string | null = null;
+  for (let page = 0; page < MAX_REPO_PAGES; page++) {
+    const prs: any = (await graphql(REPO_PAGE, ["-f", `owner=${owner}`, "-f", `name=${name}`, ...(after ? ["-f", `after=${after}`] : [])])).repository?.pullRequests;
+    if (!prs) throw new Error(`gh api graphql failed: no repository ${repo}`);
+    ids.push(...prs.nodes.filter((n: any) => n.updatedAt >= since && n.author?.login === me).map((n: any) => n.id));
+    const last = prs.nodes.at(-1);
+    if (!prs.pageInfo.hasNextPage || !last || last.updatedAt < since) break;
+    after = prs.pageInfo.endCursor;
+  }
+  const out: PullWithFeedback[] = [];
+  for (let i = 0; i < ids.length; i += PAGE_SIZE) {
+    const query = `query($ids: [ID!]!) { nodes(ids: $ids) { ... on PullRequest {\n        ${PR_FIELDS}\n        ${FEEDBACK_FIELDS} } } }`;
+    const vars = ids.slice(i, i + PAGE_SIZE).flatMap((id) => ["-f", `ids[]=${id}`]);
+    out.push(...(await graphql(query, vars)).nodes.filter((n: any) => n?.url).map((n: any) => toPull(n, ticketPattern, true)));
+  }
+  return out;
 }
 
 let login: Promise<string> | null = null;
@@ -159,10 +202,18 @@ export function ghLogin(): Promise<string> {
   return login;
 }
 
-/** My PRs updated in the window. Uses the `gh` login, so no token is stored here. */
-export function fetchMyPrs(sinceDays: number, ticketPattern: RegExp): Promise<PullWithFeedback[]> {
-  const since = new Date(Date.now() - sinceDays * 86_400_000).toISOString().slice(0, 10);
-  return searchPrs(`is:pr author:@me updated:>=${since}`, ticketPattern, true);
+/**
+ * My PRs updated in the window: a search, plus a listing of each repo in `prRepos`, which search
+ * does not index. Uses the `gh` login, so no token is stored here.
+ */
+export async function fetchMyPrs(sinceDays: number, ticketPattern: RegExp, prRepos: string[] = []): Promise<PullWithFeedback[]> {
+  const since = new Date(Date.now() - sinceDays * 86_400_000).toISOString();
+  const [found, ...listed] = await Promise.all([
+    searchPrs(`is:pr author:@me updated:>=${since.slice(0, 10)}`, ticketPattern, true),
+    ...prRepos.map(async (r) => repoPrs(r, await ghLogin(), since, ticketPattern)),
+  ]);
+  const seen = new Set(found.map((p) => p.url));
+  return [...found, ...listed.flat().filter((p) => !seen.has(p.url))];
 }
 
 /**
