@@ -115,8 +115,8 @@ The navbar at the top switches between the views: **Board** (`#/`, the queue and
 - **Fix login**: when Jira, GitHub or Slack is down, the top bar shows **Fix Jira login**, **Fix GitHub login** or **Fix Slack login** (`POST /api/login?source=jira|github|slack`, with the `X-Agent-Dash` guard). What runs comes from a fixed list, never from the request, and the top bar refreshes after a good login.
   - **GitHub** runs `gh auth status`, and `gh auth login --web` when you are logged out. Then it saves `gh auth token` in `~/.agent-dash/github-token` (`AGENT_DASH_GH_TOKEN_FILE`) for the tools that do not use `gh`.
   - **Jira** runs `<pi-auth binary> ensure jira` (the binary is a [setting](#configuration); with none, or when pi-auth has no `jira` target, the button says so, and how to make a new API token). pi-auth can open your Chrome; it changes nothing remote.
-  - **Slack** has no login that the dash can refresh. It checks both Slack logins again, and gives the steps for only the one that failed: for search, how to save a new Slack login state from your Chrome; for **Post to Slack**, the **Slack sign-in command** [setting](#configuration).
-- **Slack health**: the top bar shows **Slack** next to the other sources, and **Slack down** when one of its two logins fails. Posting: each refresh runs `scripts/slack-post.ts --check`, which connects with the pi-mcp-adapter `slack` grant and checks that it can post (`chat:write`), and posts nothing. Search: the server reads the Slack login state file and checks its session cookie. It never opens Slack with that login to test it, because a headless browser with copied cookies can get the session revoked. So a login that Slack ended early shows when a next-steps draft says so: when the newest finished draft has a **Gaps** line about an expired Slack login, Slack is down until the login state file is saved again or **Fix Slack login** works. With neither login set up, the top bar says **Slack off**. The rules are in `server/sources/slack.ts`.
+  - **Slack** has no login that the dash can refresh, because the OAuth consent needs your click. It checks the Slack sign-in again, and when it fails, it gives the **Slack sign-in command** [setting](#configuration).
+- **Slack health**: the top bar shows **Slack** next to the other sources, and **Slack down** when the Slack sign-in fails. Slack search and **Post to Slack** both use one sign-in: the pi-mcp-adapter `slack` OAuth grant. Each refresh runs `scripts/slack-post.ts --check`, which connects with that grant and checks that it can post (`chat:write`), and posts nothing. With no `slack` server in pi-mcp-adapter, the top bar says **Slack off**. The rules are in `server/sources/slack.ts`.
 - `#/t:ABC-123` or `#/r:<sessionId>` in the URL selects an entry. See [Addresses](#addresses) for the other objects.
 
 ### The ticket view
@@ -628,7 +628,7 @@ If a run exits without saving, the server takes its last reply (pi -p prints it)
 
 **Slack quotes.** When a summary links to a Slack message, the card shows a closed **Slack** list under the summary with the message text, its channel, its author and the time, so you can read it without going to Slack. The summary run sets `AGENT_DASH_SLACK_HITS`, so `slack-search.ts` also saves each match to `slack.jsonl` in the run's work folder. `GET /api/summaries/slack?id=<id>` returns the saved matches that the summary links to. It takes the folder from the database row, never from the request. A summary from before this change has no saved matches and shows no list.
 
-`scripts/slack-search.ts "<query>"` searches Slack read-only. It opens Slack once with the saved login in the Slack login state [setting](#configuration) (an `agent-browser state save` file; with none, it says that Slack search is not set up) and calls Slack's `search.messages` from inside the page, because clicking through the search box from a headless browser is unreliable.
+`scripts/slack-search.ts "<query>"` searches Slack read-only. It calls the `slack_search_public_and_private` tool of Slack's hosted MCP with the pi-mcp-adapter `slack` grant, the same sign-in as **Post to Slack** (with none, it says that Slack search is not set up). Words such as `in:#channel` or `after:2026-10-01` are Slack search filters. It does not use copied Slack cookies, because Slack revokes a session whose cookies a headless browser copied.
 
 Optional: `AGENT_DASH_SUMMARY_MODEL` and `AGENT_DASH_SUMMARY_THINKING` choose the model and thinking level of summary runs.
 
@@ -664,10 +664,8 @@ No setting has a company default: set your Jira server, login and token file, ti
 | Repos with no review request | `noReviewRepos` | | none |
 | Beta and Prod deploy repos | `deployRepoBeta`, `deployRepoProd` | | none: no PR counts as a deploy |
 | pi-auth binary for **Fix Jira login** | `piAuth` | `AGENT_DASH_PI_AUTH` | none |
-| Slack login state for Slack search | `slackStateFile` | | none: no Slack search |
-| Slack org or team id | `slackOrgId` | | none: the first logged-in team |
 | Slack workspace URL, for permalinks | `slackWorkspaceUrl` | | none |
-| Slack sign-in command, shown when posting needs a new sign-in | `slackReloginCommand` | | none |
+| Slack sign-in command, shown when Slack search or posting needs a new sign-in | `slackReloginCommand` | | none |
 | Shared environments that a smoketest can run on, as `stage:id` (for example `beta:staging, prod:production`). localhost is always there | `environments` | | none: one `beta` and one `prod` |
 | Shared environments where **Move things along** may confirm and run a plan without you | `autoRunEnvironments` | | `beta` |
 | Local smoketest guide, read first by a local plan | `smoketestGuide` | | none |

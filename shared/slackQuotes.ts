@@ -42,3 +42,28 @@ export function parseSlackHits(jsonl: string): SlackQuote[] {
   }
   return out;
 }
+
+/**
+ * The matches in the answer of the Slack MCP tool `slack_search_public_and_private`: markdown,
+ * one `### Result n of m` block each, in JSON as `results`. A block with no permalink is skipped.
+ */
+export function parseSlackSearch(answer: string): SlackQuote[] {
+  let md = answer;
+  try {
+    md = String(JSON.parse(answer).results ?? "");
+  } catch {
+    // An answer that is not JSON is the markdown itself.
+  }
+  const out: SlackQuote[] = [];
+  for (const block of md.split(/^### Result \d+ of \d+$/m).slice(1)) {
+    const field = (name: string) => block.match(new RegExp(`^${name}: ?(.*)$`, "m"))?.[1].trim() ?? "";
+    const permalink = field("Permalink").match(/\((https:\/\/[^)\s]+)\)/)?.[1];
+    if (!permalink) continue;
+    const channel = field("Channel").replace(/\s*\(ID: [^)]*\)$/, "").replace(/^#/, "");
+    const user = field("From").replace(/\s*\(ID: [^)]*\).*$/, "").replace(/\s*<[^>]*>$/, "");
+    // The text runs to the context lists or the block's closing rule.
+    const text = (block.split(/^Text: ?$/m)[1] ?? "").split(/^(?:Context before:|Context after:|---)\s*$/m)[0].trim();
+    out.push({ permalink, channel, user, ts: field("Message_ts"), text });
+  }
+  return out;
+}

@@ -165,8 +165,6 @@ export function buildConfig(s: Settings) {
     ticketPattern: ticketPatternOf(ticketProjectsOf(s, providers), s.ignoreTickets),
     piAuth: expandPath(s.piAuth),
     slack: {
-      stateFile: expandPath(s.slackStateFile),
-      orgId: s.slackOrgId,
       workspaceUrl: s.slackWorkspaceUrl,
       reloginCommand: s.slackReloginCommand,
     },

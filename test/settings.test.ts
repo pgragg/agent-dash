@@ -21,8 +21,7 @@ test("a fresh clone has no company defaults: no Jira, Slack, deploy repos, login
   assert.deepEqual(c.ticketProviders, []);
   assert.equal(c.settings.reviewChannelId, "");
   assert.deepEqual(c.settings.environments, []);
-  assert.deepEqual([c.settings.deployRepoBeta, c.settings.deployRepoProd, c.slack.orgId, c.slack.workspaceUrl], ["", "", "", ""]);
-  assert.equal(c.slack.stateFile, "");
+  assert.deepEqual([c.settings.deployRepoBeta, c.settings.deployRepoProd, c.slack.workspaceUrl], ["", "", ""]);
   assert.equal("FSDK-12 ABC-1".match(c.ticketPattern), null);
 });
 
@@ -38,8 +37,8 @@ test("the file sets the values, ~ expands, and an env var wins over the file", (
 });
 
 test("a bad value is refused with a reason, and a bad value in the file keeps its default", () => {
-  const { errors } = validateSettings({ port: "0", ticketProjects: "ABC, lower", jiraServer: "x.atlassian.net", slackOrgId: "nope", piAuth: "a\nb" });
-  assert.deepEqual(Object.keys(errors).sort(), ["jiraServer", "piAuth", "port", "slackOrgId", "ticketProjects"]);
+  const { errors } = validateSettings({ port: "0", ticketProjects: "ABC, lower", jiraServer: "x.atlassian.net", reviewChannelId: "nope", piAuth: "a\nb" });
+  assert.deepEqual(Object.keys(errors).sort(), ["jiraServer", "piAuth", "port", "reviewChannelId", "ticketProjects"]);
   const file = join(dir, "bad.json");
   writeFileSync(file, JSON.stringify({ port: -1, jiraLogin: "me@x.com" }));
   const { settings } = readSettingsFile(file);
