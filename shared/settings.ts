@@ -51,8 +51,6 @@ export interface Settings extends Team {
   ignoreTickets: string[];
   localTicketsDir: string;
   piAuth: string;
-  slackStateFile: string;
-  slackOrgId: string;
   slackWorkspaceUrl: string;
   slackReloginCommand: string;
   smoketestGuide: string;
@@ -109,8 +107,6 @@ export const DEFAULT_SETTINGS: Settings = {
   ignoreTickets: [],
   localTicketsDir: "",
   piAuth: "",
-  slackStateFile: "",
-  slackOrgId: "",
   slackWorkspaceUrl: "",
   slackReloginCommand: "",
   smoketestGuide: "",
@@ -273,18 +269,6 @@ export const SETTING_FIELDS: SettingField[] = [
     find: "Usually empty. `command -v pi-auth || ls ~/pi/auth/pi-auth` finds it when it is installed.",
   },
   {
-    key: "slackStateFile", group: "Slack", label: "Slack login state", kind: "path",
-    help: "An agent-browser state file with a Slack login. Summary runs search Slack with it. Empty turns Slack search off.",
-    example: "~/.config/agent-dash/slack-state.json",
-    find: "A file that `agent-browser state save` wrote after a Slack login: `mdfind -onlyin ~ -name state | grep -i slack | grep '\\.json$'`. Empty when agent-browser is not set up.",
-  },
-  {
-    key: "slackOrgId", group: "Slack", label: "Slack org or team id", kind: "text", pattern: /^[ET][A-Z0-9]+$/,
-    help: "An Enterprise Grid org id (E…) searches every workspace. Empty uses the first logged-in team.",
-    example: "E0123ABCD",
-    find: "The E… or T… part of the address when Slack is open in a browser: `https://app.slack.com/client/<id>/…`.",
-  },
-  {
     key: "slackWorkspaceUrl", group: "Slack", label: "Slack workspace URL", kind: "url",
     help: "Makes a permalink when Slack does not return one.",
     example: "https://acme.slack.com",
@@ -292,7 +276,7 @@ export const SETTING_FIELDS: SettingField[] = [
   },
   {
     key: "slackReloginCommand", group: "Slack", label: "Slack sign-in command", kind: "text",
-    help: "Shown when the Slack sign-in for posting expires.",
+    help: "Shown when the Slack sign-in for search and posting expires.",
     example: "node ~/pi/slack/bin/mcp-slack-login.mjs --force",
     find: "Usually empty. The command that signs the pi-mcp-adapter `slack` server in again, if the user has one.",
   },

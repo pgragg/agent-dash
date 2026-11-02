@@ -6,7 +6,7 @@ const FIXABLE: Record<string, string> = { jira: "Jira", github: "GitHub", slack:
 const HOW: Record<string, string> = {
   jira: "Run pi-auth ensure jira. It can open Chrome.",
   github: "Run gh auth login. It can open Chrome.",
-  slack: "Check both Slack logins again, and show the steps for the one that failed.",
+  slack: "Check the Slack sign-in again, and show the sign-in command when it fails.",
 };
 
 /** A "Fix login" button for each down source. The server tries the login, then the page refreshes. */

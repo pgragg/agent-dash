@@ -30,7 +30,6 @@ const write = (file: string, text: string) => {
 // ---- settings ----------------------------------------------------------------------------
 const configFile = join(ROOT, "agent-dash.config.json");
 write(join(ROOT, "jira.env"), "JIRA_API_TOKEN=demo\n");
-write(join(ROOT, "slack-state.json"), JSON.stringify({ cookies: [{ name: "d", domain: ".slack.com", expires: Math.floor(now / 1000) + 30 * 86_400 }] }));
 // The page asks for the status extension until pi's extension folder has it. No real pi reads this folder.
 write(join(HOME, ".pi/agent/extensions/agent-dash-status.ts"), "");
 for (const [path, text] of Object.entries(WIKI)) write(join(ROOT, "wiki", path), text);
@@ -49,8 +48,6 @@ write(
       reviewChannelName: "team-reviews",
       deployRepoBeta: "acme/deploy-staging",
       deployRepoProd: "acme/deploy-prod",
-      slackStateFile: join(ROOT, "slack-state.json"),
-      slackOrgId: "E0ACME0001",
       slackWorkspaceUrl: "https://acme.slack.com",
       environments: ["beta:staging", "prod:production"],
       autoRunEnvironments: ["staging"],

@@ -19,8 +19,6 @@
   "deployRepoBeta": "acme/deploy-beta",
   "deployRepoProd": "acme/deploy-prod",
   "piAuth": "",
-  "slackStateFile": "",
-  "slackOrgId": "E0123ABCD",
   "slackWorkspaceUrl": "https://acme.slack.com",
   "slackReloginCommand": "",
   "environments": ["beta:staging", "prod:production"],

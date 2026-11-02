@@ -42,7 +42,7 @@ import { approvalCount } from "../shared/ownerApproval.ts";
 import type { TicketProvider } from "./tickets/provider.ts";
 import { ticketProviders } from "./tickets/registry.ts";
 import { SessionIndex, transcriptTurns } from "./sources/sessions.ts";
-import { type Half, postLogin, searchLogin, slackHealth, slackLoginGap } from "./sources/slack.ts";
+import { type Half, postLogin, slackHealth } from "./sources/slack.ts";
 import { isAlive, readReportedStatuses } from "./sources/status.ts";
 import { requestStepLabels, topSteps } from "./stepButtons.ts";
 import * as summaryDb from "./summaries/db.ts";
@@ -158,33 +158,17 @@ function providerHealth(s: ProviderState): SourceHealth {
 const prs = new Cached<PullWithFeedback[]>([], () => fetchMyPrs(config.recentDays, config.ticketPattern, config.prRepos), join(config.cacheDir, "prs.json"));
 /** Force a refresh of GitHub data after login. */
 export const refreshGitHub = () => prs.get(true);
-/** Can the slack MCP grant post? Its own child process, so a slow Slack never holds up a build. */
+/** Can the slack MCP grant search and post? Its own child process, so a slow Slack never holds up a build. */
 const slackPost = new Cached<Half>({ off: "not checked yet" }, postLogin);
-/** When a Fix Slack login last worked: a draft's login gap from before it no longer counts. */
-let slackFixedAt: string | null = null;
 loginRoute.setOnLogin(async (source) => {
   if (source === "github") {
     await refreshGitHub();
     return prs.health.ok ? null : (prs.health.error ?? "unknown error");
   }
-  if (source === "slack") {
-    slackFixedAt = new Date().toISOString();
-    void slackPost.get(true);
-  }
+  if (source === "slack") void slackPost.get(true);
   return null;
 });
-loginRoute.setSlackCheck(async () => {
-  const post = await slackPost.get(true);
-  return slackHealth(searchLogin(config.slack.stateFile), post, slackGap(Object.fromEntries(summaryDb.summariesByTicket())), slackFixedAt);
-});
-
-/** The newest finished next-steps draft, when its Gaps line says that the Slack login failed. */
-function slackGap(summaries: Dashboard["summaries"]): { at: string; ticket: string } | null {
-  const newest = Object.values(summaries)
-    .flatMap((s) => (s.lastDone?.generatedAt ? [s.lastDone] : []))
-    .sort((a, b) => b.generatedAt!.localeCompare(a.generatedAt!))[0];
-  return newest?.summary && slackLoginGap(newest.summary) ? { at: newest.generatedAt!, ticket: newest.ticket } : null;
-}
+loginRoute.setSlackCheck(async () => slackHealth(await slackPost.get(true)));
 
 /** Every key with the provider's prefix that a session or PR names, at any time. */
 function allKeys(sessions: { tickets: string[]; suggestedTickets: string[] }[], pulls: { tickets: string[] }[], p: TicketProvider): string[] {
@@ -286,7 +270,7 @@ async function dashboard(force: boolean) {
     prs: pulls,
     now,
     recentDays: config.recentDays,
-    sources: { ...Object.fromEntries(providerStates.map((s) => [s.provider.source.id, providerHealth(s)])), github: { ...prs.health, label: "GitHub" }, slack: slackHealth(searchLogin(config.slack.stateFile, now), slackPostLogin, slackGap(summaries), slackFixedAt), sessions: sessionsHealth },
+    sources: { ...Object.fromEntries(providerStates.map((s) => [s.provider.source.id, providerHealth(s)])), github: { ...prs.health, label: "GitHub" }, slack: slackHealth(slackPostLogin), sessions: sessionsHealth },
     // OpenCode needs no install: its service reports every session.
     extensionInstalled: config.agent === "opencode" || (config.agent === "claude" ? claudeHooksInstalled() : existsSync(piExtensionFile())),
     summaries,

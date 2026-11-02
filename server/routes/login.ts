@@ -47,16 +47,16 @@ const running = new Set<string>();
 let onLogin: ((source: string) => Promise<string | null>) | null = null;
 export function setOnLogin(cb: (source: string) => Promise<string | null>) { onLogin = cb; }
 
-/** Checks both Slack logins again. Set by index.ts, which holds the draft gaps that it needs. */
+/** Checks the Slack sign-in again. Set by index.ts, which caches the check. */
 let slackCheck: (() => Promise<SourceHealth>) | null = null;
 export function setSlackCheck(cb: () => Promise<SourceHealth>) { slackCheck = cb; }
 
-/** Neither Slack login can be refreshed from here, so check again and give the steps for the half that failed. */
+/** The Slack OAuth consent needs the user's click, so check again and give the step when it fails. */
 async function handleSlack(): Promise<{ code: number; error?: string; output?: string }> {
   if (!slackCheck) return { code: 503, error: "The Slack check is not ready yet." };
   const health = await slackCheck();
-  if (health.ok) return { code: 200, output: "Both Slack logins work." };
-  return { code: 401, error: `${health.error}. ${slackFixSteps(health, config.slack)}` };
+  if (health.ok) return { code: 200, output: "The Slack sign-in works." };
+  return { code: 401, error: `${(health.error ?? "Slack is down").replace(/\.$/, "")}. ${slackFixSteps(config.slack)}` };
 }
 
 /**
