@@ -88,26 +88,87 @@ Put one ```` ```domain ```` fence near the top, under a `## Legend` heading. It 
 3. **List the services and their stores.** Include the build jobs and the CLI. For each store, find the one writer.
 4. **Find the rules.** An invariant that the code enforces, and that a change could break, is a rule. Give each one an ID (R1, R2…) and a name of five words or fewer.
 5. **Find the copies and the keys.** For each copy: what is its source, what syncs it, and how late can it be? For each context pair: which key joins them, and where is it missing?
-6. **Write the page in this order:**
+6. **List the user's steps.** Find each thing that a person does that makes the system work: a click, a form submit, a page that stays open and polls, an install or a merge on a third-party site. Number them in time order (Step 1, Step 2…). Each flow starts from one of these steps, or says that it has no user step (a background job, a cron, a webhook). A reader must be able to see which click causes which work.
+7. **Write the page in this order:**
    1. Title, then one line: the ticket, the repo, and the commit.
    2. `## Legend`: one sentence ("hover over a mark for its card"), then the ```` ```domain ```` fence.
-   3. `## TL;DR`: five or six numbered findings, with marks.
-   4. `## 0. Context map`: a `flowchart TB`, with one `subgraph` for each context, `ext` nodes outside the subgraphs, and an arrow for each way that one context affects another. Label each arrow with what crosses it. Draw a dotted arrow for a link that does not exist yet. Then a **"Where each context runs"** table: one row for each service, one column for each context.
-   5. One section for each context, with `` `ctx:id` `` at the end of its heading. Put the data model (an ER diagram plus a Term / Store / Writer / Readers table) and the rules of that context in it.
-   6. Flows: one `sequenceDiagram` for each important path. Use registry names in the arrows. Put `ctx:` in the heading of a flow that stays in one context. For a flow that crosses contexts, say in one line where the hand-off is.
-   7. How the contexts meet: what the upstream context gives the downstream one, and how each variant fills it.
-   8. Facts that shape the next step, each with "→ what it means".
-   9. Not checked: what you did not verify.
-7. **Mark every mention** of a registered noun in prose and tables, not only the first. Do not put marks in fences: Mermaid shows them as text.
-8. **Lint until it is clean:**
+   3. `## How to read the diagrams`: the key diagram and the shape table from [Diagrams](#diagrams), with one example from this page in each row. Then `### What the user does`: a table with Step, Action, Where (which page or site), and Shown in (which flows).
+   4. `## TL;DR`: five or six numbered findings, with marks.
+   5. `## 0. Context map`: a `flowchart TB`, with one `subgraph` for each context. Inside each context, draw its user steps, its main methods, its stores and its processes with the shapes from [Diagrams](#diagrams). Put a store that more than one context writes, and the `ext` nodes, outside the subgraphs. Label each arrow with a verb or with what crosses it. Draw a red dotted arrow for a link that does not exist yet. Then a **"Where each context runs"** table: one row for each service, one column for each context.
+   6. One section for each context, with `` `ctx:id` `` at the end of its heading. Put the data model (an ER diagram plus a Term / Store / Writer / Readers table) and the rules of that context in it.
+   7. Flows: one `sequenceDiagram` for each important path, made as [Diagrams](#diagrams) says. Under each flow heading, write one line: which user steps start it, or "No user step" and what starts it. Put `ctx:` in the heading of a flow that stays in one context. For a flow that crosses contexts, say in one line where the hand-off is. When text or a table names a step, use the flow and the number ("F3b step 8"), and check the number against `autonumber` after each change to the flow.
+   8. How the contexts meet: what the upstream context gives the downstream one, and how each variant fills it.
+   9. Facts that shape the next step, each with "→ what it means".
+   10. Not checked: what you did not verify.
+8. **Mark every mention** of a registered noun in prose and tables, not only the first. Do not put marks in fences: Mermaid shows them as text.
+9. **Lint until it is clean:**
    `node "$AD/scripts/document.ts" lint --file <file>`
    It reports a mark that is not in the registry, a kind that differs from the registry, a registered name in plain code with no mark, a term that is never marked, a context that no heading names, and a bad service or store. Fix every error and every warning.
-9. **Save:** `node "$AD/scripts/document.ts" create --ticket KEY --title "…" --file <file>`, or `save --id N --file <file>` to replace a document.
-10. **Look at it**, if you have `agent-browser`: open `http://127.0.0.1:7777/#/doc:N`, check that no diagram says "does not render", and hover over one mark of each kind.
+10. **Save:** `node "$AD/scripts/document.ts" create --ticket KEY --title "…" --file <file>`, or `save --id N --file <file>` to replace a document.
+11. **Look at it**, if you have `agent-browser`: open `http://127.0.0.1:7777/#/doc:N`, check that no diagram says "does not render", and hover over one mark of each kind. Then take a screenshot of each diagram at 1500 px wide and read it. A diagram passes only if you can read every label without zoom, and the steps go in time order. If you cannot read it, cut lanes or nodes, shorten labels, or split the diagram. Do not only make it wider.
 
 Write every line in ASD-STE100: short sentences, one idea in each, active voice, one term for one thing. The registry is where "one term for one thing" is enforced.
 
-## Mermaid styles
+## Diagrams
+
+A reader must see, without the text, what kind of thing each box is, and which user step makes it happen. So every diagram on a page uses the same shape for the same kind of thing, and the page explains the shapes once, in `## How to read the diagrams`.
+
+### Shapes in a flowchart
+
+| Kind | Mermaid | Class | Label |
+|---|---|---|---|
+| A user step | `A1["👤 Step 1 · Click Publish"]` | `act` | 👤, `Step N`, then a verb. Write "Step 1", not ①: circled digits are too small to read |
+| A service | `subgraph D["⬡ Dashboard — where it runs"]` | — | Only in a diagram that shows deploy boundaries. In the context map the subgraphs are contexts, so put the service in the node label: `(Dashboard)` |
+| A method or route handler | `F[["ensureCloudBuild()"]]` | `fn` | `name()`, or `POST /api/path` for a route |
+| A process or build job | `J{{"Fern CLI process"}}` | `job` | What runs, and where |
+| A store | `D[("Redis key<br/>OnboardingPublishJob")]` | `rec` | The store type first, then the key or table |
+| A data object that moves | `O[/"FERN_TOKEN<br/>Actions secret"/]` | `obj` | The name, then where it is |
+| An external system | `X["User's GitHub repo"]` | `ext` | |
+
+Arrows: a solid arrow (`-->`) calls or writes, a dotted arrow (`-.->`) reads, a thick arrow (`==>`) starts a process, and a red dotted arrow is a link that does not exist yet:
+`linkStyle N stroke:#c0392b,stroke-width:2px,stroke-dasharray:4 4`
+
+To keep the user steps of a context in time order (top to bottom), add invisible links after all the other links: `A1 ~~~ A2`.
+
+The key diagram for `## How to read the diagrams` (copy it, then add the class lines below):
+
+```
+flowchart LR
+  A["👤 Step N · What the user does"]:::act
+  subgraph S["⬡ Service — where it runs"]
+    F[["method()"]]:::fn
+    J{{"Process or build job"}}:::job
+  end
+  D[("Store type<br/>key or table")]:::rec
+  O[/"Data object"/]:::obj
+  X["External system"]:::ext
+  A --> F
+  F -- "writes" --> D
+  F -. "reads" .-> D
+  F == "starts" ==> J
+  J -- "sends" --> O
+  O --> X
+  F -. "missing link" .-> X
+  linkStyle 6 stroke:#c0392b,stroke-width:2px,stroke-dasharray:4 4
+```
+
+### Sequence diagrams
+
+- **Lanes are runtime parts, not methods.** A lane is a person, a service part (route handlers, a background task, a child process), a store, or an external system. A method goes in a message label.
+- **The user is `actor U as User (browser)`.** Put the browser in the same lane: a separate browser lane only passes messages on, and it costs width.
+- **Each user step is an orange band** that holds one message, with the step in the label: `rect rgb(253,227,200)` … `U->>RT: Step 1 · Click Publish: HTTP POST /api/…` … `end`.
+- **A `box` groups the lanes of one service:** `box rgb(243,240,252) ⬡ Dashboard pod` … `end`.
+- **A store is a cylinder lane:** `participant R@{ "type": "database" } as Redis`.
+- **Message labels have one form for each kind:** `HTTP POST /path` for a network call, `name()` for a method call, `GET`, `SET` or `PUT <key>` for a store operation. A response is a dashed arrow (`-->>`) with the status.
+- **Use `autonumber`,** and refer to steps by number in the text.
+- **Five lanes or fewer, and short labels.** The page is about 730 px wide. Mermaid makes the diagram wider for more lanes and for long labels, then shrinks it to fit, so a six-lane diagram with long labels cannot be read. When a flow has more lanes or more than about 12 steps, split it where the work changes hands: F1a "Submit and wait" and F1b "The build in the background", or F3a "The checks" and F3b "The writes and the link". Start the second part with one line that says where it continues from.
+- **A note that spans many lanes** goes over the first and the last lane (`Note over U,R:`). A long note over two close lanes is cut off.
+
+### ER diagrams
+
+Put the store in each entity name: `JOB["OnboardingPublishJob · Redis key"] { … }`. Give each entity at least one field, so that the alias parses.
+
+### Colors
 
 Use the same colors as the marks. In an ER diagram, give the classes with `class` lines at the end. `:::class` on an aliased entity (`ID["name"]:::rec`) in a relationship does not parse.
 
@@ -117,6 +178,9 @@ classDef recCopy fill:#3b82c41a,stroke:#3b82c4,stroke-width:2px,stroke-dasharray
 classDef obj fill:#14a39033,stroke:#14a390,stroke-width:2px
 classDef objCopy fill:#14a3901a,stroke:#14a390,stroke-width:2px,stroke-dasharray:6 4
 classDef ext fill:#8881,stroke:#888,stroke-dasharray:2 3
+classDef fn fill:#d4a01726,stroke:#b8860b,stroke-width:2px
+classDef job fill:#ece8f8,stroke:#6d4bd8,stroke-width:2px
+classDef act fill:#fde3c8,stroke:#d9822b,stroke-width:2px,color:#5a3200
 class docs_ledger_segments,docs_ledger_artifacts rec
 ```
 
@@ -132,3 +196,8 @@ Use `flowchart TB` for the context map. `LR` with three or more subgraphs render
 - The `read` tool keeps an image by its path. Give each screenshot a new file name, or you see an old one.
 - `about` text is not linted. A mark inside `about` renders, but nothing checks it.
 - The whole fence must be valid JSON. One trailing comma turns the legend into an error box.
+- A `box` label with parentheses (`box rgb(…) Dashboard pod (EKS)`) shows the color code as text. Keep parentheses out of `box` labels.
+- `linkStyle N` counts every link in the order that you write them, including `~~~` links and each link that `A --> B & C` makes. Write the `~~~` links last, so that they do not change the numbers.
+- An ER entity with an alias and no `{ … }` block, used in a relationship (`A["name"] ||--|| B`), does not parse.
+- The document page scrolls inside a container, so `window.scrollBy` and `agent-browser scroll` can do nothing. To take a screenshot of a diagram, run `agent-browser eval` with `heading.scrollIntoView()` on the heading above it.
+- A screenshot file can be read a moment before `agent-browser` has written it. Wait one or two seconds after `screenshot`, then read it.
