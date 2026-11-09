@@ -401,7 +401,10 @@ a.pr-group-title:hover { text-decoration: underline; text-underline-offset: 3px;
 .md a:hover { text-decoration-color: var(--ink); }
 .md-table { overflow-x: auto; margin: 0 0 10px; }
 .md table { border-collapse: collapse; font-size: 13px; }
-.md th, .md td { text-align: left; padding: 5px 12px 5px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+/* `anywhere` (from .md) lets a cell's min-content shrink to one letter, so a short label column
+   gets squeezed by long text in the next column. `break-word` still breaks a long token, but only
+   at the width the table layout gives the cell. */
+.md th, .md td { text-align: left; padding: 5px 12px 5px 0; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: break-word; }
 .md th { color: var(--ink); font-weight: 600; }
 /* Domain marks: each kind has a hue and a glyph, so the kind also reads without color. */
 .term { --term: var(--ink); color: var(--term); background: color-mix(in srgb, var(--term) 11%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--term) 28%, transparent); overflow-wrap: break-word; cursor: help; }
